@@ -213,7 +213,7 @@ export default function CreateTemplatesApp() {
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [flowActionId, setFlowActionId] = useState("");
 
-  useIframeAutoHeight(shellRef);
+  const isEmbedded = useIframeAutoHeight(shellRef);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -629,8 +629,16 @@ export default function CreateTemplatesApp() {
     setError("");
   }
 
+  const shellClassName = [
+    "ember-shell",
+    isDarkTheme ? "theme-dark" : "theme-light",
+    isEmbedded ? "ember-shell--embedded" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <main ref={shellRef} className={`ember-shell ${isDarkTheme ? "theme-dark" : "theme-light"}`}>
+    <main ref={shellRef} className={shellClassName}>
       <aside className="ember-sidebar" aria-label="Navegação da extensão">
         <div className="ember-logo extension-logo" aria-label="BLiP">
           <span className="blip-logo-mark">BLiP</span>

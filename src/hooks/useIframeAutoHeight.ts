@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useMemo } from "react";
+import { type RefObject, useEffect, useState } from "react";
 import { BLIP_ACTIONS } from "../lib/blipActions";
 import { notifyPortalMessage, startIframeMessageProxy } from "../lib/blipProxy";
 
@@ -16,9 +16,10 @@ function getRequestedIframeHeight(element: HTMLElement) {
 }
 
 export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
-  const isInsideIframe = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return window.parent !== window;
+  const [isInsideIframe, setIsInsideIframe] = useState(false);
+
+  useEffect(() => {
+    setIsInsideIframe(window.parent !== window);
   }, []);
 
   useEffect(() => {
@@ -29,8 +30,6 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const shellElement = shellRef.current;
     if (!isInsideIframe || !shellElement) return undefined;
-
-    shellElement.classList.add("ember-shell--embedded");
 
     let animationFrameId: number | null = null;
     let retryTimeoutId: number | null = null;
@@ -65,7 +64,8 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
       if (retryTimeoutId) window.clearTimeout(retryTimeoutId);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleHeightChange);
-      shellElement.classList.remove("ember-shell--embedded");
     };
   }, [isInsideIframe, shellRef]);
+
+  return isInsideIframe;
 }
