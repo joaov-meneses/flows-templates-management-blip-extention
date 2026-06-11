@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDownAZ,
@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useIframeAutoHeight } from "../hooks/useIframeAutoHeight";
 import "../styles/blip-app.css";
 
 type ActiveView = "templates" | "flows";
@@ -175,6 +176,7 @@ async function copyText(text: string) {
 }
 
 export default function CreateTemplatesApp() {
+  const shellRef = useRef<HTMLElement | null>(null);
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>("templates");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
@@ -210,6 +212,8 @@ export default function CreateTemplatesApp() {
   const [isReplicatingFlows, setIsReplicatingFlows] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [flowActionId, setFlowActionId] = useState("");
+
+  useIframeAutoHeight(shellRef);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -626,7 +630,7 @@ export default function CreateTemplatesApp() {
   }
 
   return (
-    <main className={`ember-shell ${isDarkTheme ? "theme-dark" : "theme-light"}`}>
+    <main ref={shellRef} className={`ember-shell ${isDarkTheme ? "theme-dark" : "theme-light"}`}>
       <aside className="ember-sidebar" aria-label="Navegação da extensão">
         <div className="ember-logo extension-logo" aria-label="BLiP">
           <span className="blip-logo-mark">BLiP</span>
