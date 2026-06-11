@@ -30,6 +30,8 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
     const shellElement = shellRef.current;
     if (!isInsideIframe || !shellElement) return undefined;
 
+    shellElement.classList.add("ember-shell--embedded");
+
     let animationFrameId: number | null = null;
     let retryTimeoutId: number | null = null;
     let lastRequestedHeight = 0;
@@ -63,6 +65,7 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
       if (retryTimeoutId) window.clearTimeout(retryTimeoutId);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleHeightChange);
+      shellElement.classList.remove("ember-shell--embedded");
     };
   }, [isInsideIframe, shellRef]);
 }

@@ -58,6 +58,10 @@
   align-items: stretch;
 }
 
+.ember-shell.ember-shell--embedded {
+  min-height: 900px;
+}
+
 .ember-shell.theme-dark {
   color-scheme: dark;
   --blip-brand: #30b6ff;
@@ -261,6 +265,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.ember-shell.ember-shell--embedded .ember-sidebar {
+  min-height: 100%;
 }
 
 .ember-sidebar .ember-logo {
