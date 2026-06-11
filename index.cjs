@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const cors = require("cors");
 const express = require("express");
 const {
@@ -20,6 +21,7 @@ const {
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
+let ssrServerPromise;
 
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
@@ -112,9 +114,87 @@ app.post("/api/flows/replicate", async (req, res, next) => {
   }
 });
 
+function getRequestOrigin(req) {
+  const forwardedProtocol = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProtocol || req.protocol || "http";
+  return `${protocol}://${req.get("host")}`;
+}
+
+function createWebRequest(req) {
+  const headers = new Headers();
+
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value == null) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+      continue;
+    }
+
+    headers.set(key, value);
+  }
+
+  const requestInit = {
+    method: req.method,
+    headers,
+  };
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    requestInit.body = req;
+    requestInit.duplex = "half";
+  }
+
+  return new Request(`${getRequestOrigin(req)}${req.originalUrl}`, requestInit);
+}
+
+async function sendWebResponse(webResponse, res) {
+  res.status(webResponse.status);
+
+  webResponse.headers.forEach((value, key) => {
+    if (!["content-encoding", "transfer-encoding"].includes(key.toLowerCase())) {
+      res.setHeader(key, value);
+    }
+  });
+
+  const body = Buffer.from(await webResponse.arrayBuffer());
+  res.send(body);
+}
+
+async function getSsrServer() {
+  if (!ssrServerPromise) {
+    const serverEntryPath = path.join(__dirname, "dist", "server", "server.js");
+    ssrServerPromise = import(pathToFileURL(serverEntryPath).href).then(
+      (module) => module.default ?? module,
+    );
+  }
+
+  return ssrServerPromise;
+}
+
 const clientDistPath = path.join(__dirname, "dist", "client");
-const distPath = fs.existsSync(clientDistPath) ? clientDistPath : path.join(__dirname, "dist");
-if (fs.existsSync(distPath)) {
+const serverEntryPath = path.join(__dirname, "dist", "server", "server.js");
+const legacyIndexPath = path.join(__dirname, "dist", "index.html");
+
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath, { index: false }));
+
+  if (fs.existsSync(serverEntryPath)) {
+    app.use(/^\/(?!api\/).*/, async (req, res, next) => {
+      try {
+        const ssrServer = await getSsrServer();
+        const webResponse = await ssrServer.fetch(createWebRequest(req), {}, {});
+        await sendWebResponse(webResponse, res);
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
+} else if (fs.existsSync(legacyIndexPath)) {
+  const distPath = path.dirname(legacyIndexPath);
   app.use(express.static(distPath));
 
   app.get(/^\/(?!api\/).*/, (req, res, next) => {
