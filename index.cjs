@@ -6,8 +6,8 @@ const {
   InputError,
   searchTemplates,
   compareTemplates,
-  replicateTemplates
-} = require("./server/templateService");
+  replicateTemplates,
+} = require("./server/templateService.cjs");
 const {
   InputError: FlowInputError,
   searchFlows,
@@ -15,10 +15,10 @@ const {
   getFlowJson,
   createFlow,
   publishFlow,
-  replicateFlows
-} = require("./server/flowService");
+  replicateFlows,
+} = require("./server/flowService.cjs");
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
 
 app.use(cors());
@@ -27,7 +27,7 @@ app.use(express.json({ limit: "5mb" }));
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
-    service: "create-templates-api"
+    service: "create-templates-api",
   });
 });
 
@@ -112,7 +112,8 @@ app.post("/api/flows/replicate", async (req, res, next) => {
   }
 });
 
-const distPath = path.join(__dirname, "dist");
+const clientDistPath = path.join(__dirname, "dist", "client");
+const distPath = fs.existsSync(clientDistPath) ? clientDistPath : path.join(__dirname, "dist");
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 
@@ -127,14 +128,15 @@ if (fs.existsSync(distPath)) {
 }
 
 app.use((error, _req, res, _next) => {
-  const statusCode = error instanceof InputError || error instanceof FlowInputError
-    ? error.statusCode
-    : error.statusCode || 500;
+  const statusCode =
+    error instanceof InputError || error instanceof FlowInputError
+      ? error.statusCode
+      : error.statusCode || 500;
 
   res.status(statusCode).json({
     error: {
-      message: error.message || "Erro inesperado."
-    }
+      message: error.message || "Erro inesperado.",
+    },
   });
 });
 

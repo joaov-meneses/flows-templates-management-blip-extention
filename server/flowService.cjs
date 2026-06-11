@@ -23,15 +23,13 @@ class InputError extends Error {
 
 function normalizeStringList(value, fieldName) {
   if (Array.isArray(value)) {
-    return value
-      .map(item => String(item).trim())
-      .filter(Boolean);
+    return value.map((item) => String(item).trim()).filter(Boolean);
   }
 
   if (typeof value === "string") {
     return value
       .split(/[\n,;]+/)
-      .map(item => item.trim())
+      .map((item) => item.trim())
       .filter(Boolean);
   }
 
@@ -70,9 +68,9 @@ async function sendBlipCommand(routerKey, command, options = {}) {
     headers: {
       Authorization: routerKey,
       "Content-Type": "application/json",
-      ...(options.headers || {})
+      ...(options.headers || {}),
     },
-    body: JSON.stringify(command)
+    body: JSON.stringify(command),
   });
 
   const responseText = await response.text();
@@ -89,7 +87,9 @@ async function sendBlipCommand(routerKey, command, options = {}) {
   }
 
   if (responseBody?.status && responseBody.status !== "success") {
-    throw new Error(`Comando retornou status "${responseBody.status}": ${JSON.stringify(responseBody, null, 2)}`);
+    throw new Error(
+      `Comando retornou status "${responseBody.status}": ${JSON.stringify(responseBody, null, 2)}`,
+    );
   }
 
   return responseBody;
@@ -100,9 +100,7 @@ async function runInBatches(items, batchSize, handler) {
 
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map((item, index) => handler(item, i + index))
-    );
+    const batchResults = await Promise.all(batch.map((item, index) => handler(item, i + index)));
 
     results.push(...batchResults);
   }
@@ -115,7 +113,7 @@ function buildCommand(method, uri, resource) {
     id: randomUUID(),
     to: "postmaster@wa.gw.msging.net",
     method,
-    uri
+    uri,
   };
 
   if (resource !== undefined) {
@@ -130,20 +128,20 @@ async function uploadFlowPublicKey(targetRouterKey, targetIndex) {
   const response = await sendBlipCommand(
     targetRouterKey,
     buildCommand("set", "/whatsapp-flows/public-key/upload", {
-      business_public_key: BUSINESS_PUBLIC_KEY
+      business_public_key: BUSINESS_PUBLIC_KEY,
     }),
     {
       commandUrl: HTTP_MSGING_COMMANDS_URL,
       headers: {
-        "Content-Transfer-Encoding": "application/json"
-      }
-    }
+        "Content-Transfer-Encoding": "application/json",
+      },
+    },
   );
 
   return {
     status: "success",
     targetIndex,
-    response
+    response,
   };
 }
 
@@ -158,7 +156,7 @@ function summarizeFlow(flow) {
     name: flow.name || "",
     status: flow.status,
     categories: Array.isArray(flow.categories) ? flow.categories : [],
-    validation_errors: Array.isArray(flow.validation_errors) ? flow.validation_errors : []
+    validation_errors: Array.isArray(flow.validation_errors) ? flow.validation_errors : [],
   };
 }
 
@@ -175,7 +173,7 @@ function normalizeProvidedFlows(flows) {
 
     uniqueFlows.set(String(flow.id), {
       id: String(flow.id),
-      name: flow.name || ""
+      name: flow.name || "",
     });
   }
 
@@ -188,14 +186,14 @@ async function searchFlows(params) {
 
   const responseBody = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("get", "/whatsapp-flows")
+    buildCommand("get", "/whatsapp-flows"),
   );
 
   const flows = extractFlowsFromResponse(responseBody).map(summarizeFlow);
 
   return {
     total: flows.length,
-    flows
+    flows,
   };
 }
 
@@ -208,7 +206,7 @@ async function getFlowDetails(sourceRouterKey, flowId) {
 
   const responseBody = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("get", `/whatsapp-flows/${encodeURIComponent(String(flowId))}`)
+    buildCommand("get", `/whatsapp-flows/${encodeURIComponent(String(flowId))}`),
   );
 
   return responseBody?.resource || null;
@@ -226,7 +224,7 @@ async function getFlowPreview(params) {
   return {
     flow,
     previewUrl,
-    expiresAt: flow?.preview?.expires_at
+    expiresAt: flow?.preview?.expires_at,
   };
 }
 
@@ -239,7 +237,7 @@ async function getFlowAssets(sourceRouterKey, flowId) {
 
   const responseBody = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("get", `/whatsapp-flows/assets/${encodeURIComponent(String(flowId))}`)
+    buildCommand("get", `/whatsapp-flows/assets/${encodeURIComponent(String(flowId))}`),
   );
 
   const assets = responseBody?.resource?.data;
@@ -247,9 +245,10 @@ async function getFlowAssets(sourceRouterKey, flowId) {
 }
 
 function getFlowJsonDownloadUrl(assets) {
-  const asset = assets.find(item => item?.asset_type === "FLOW_JSON")
-    || assets.find(item => item?.name === "flow.json")
-    || assets.find(item => item?.download_url);
+  const asset =
+    assets.find((item) => item?.asset_type === "FLOW_JSON") ||
+    assets.find((item) => item?.name === "flow.json") ||
+    assets.find((item) => item?.download_url);
 
   return asset?.download_url || "";
 }
@@ -283,7 +282,7 @@ async function getFlowJson(params) {
   return {
     flowId: String(flowId),
     downloadUrl,
-    json
+    json,
   };
 }
 
@@ -291,7 +290,7 @@ function buildCreateFlowResource(flowDetails, fallbackFlow) {
   const endpointUri = flowDetails?.endpoint_uri;
   const resource = {
     name: flowDetails?.name || fallbackFlow.name || `Flow ${fallbackFlow.id}`,
-    categories: ["OTHER"]
+    categories: ["OTHER"],
   };
 
   if (endpointUri) {
@@ -331,7 +330,7 @@ function buildNewFlowResource({ name, isFlowApi, endpointUri }) {
 
   const resource = {
     name: normalizedName,
-    categories: ["OTHER"]
+    categories: ["OTHER"],
   };
 
   if (isFlowApi) {
@@ -342,13 +341,7 @@ function buildNewFlowResource({ name, isFlowApi, endpointUri }) {
 }
 
 async function createFlow(params) {
-  const {
-    sourceRouterKey,
-    name,
-    isFlowApi = false,
-    endpointUri = "",
-    flowJson
-  } = params || {};
+  const { sourceRouterKey, name, isFlowApi = false, endpointUri = "", flowJson } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
 
@@ -356,12 +349,12 @@ async function createFlow(params) {
   const createResource = buildNewFlowResource({
     name,
     isFlowApi: Boolean(isFlowApi),
-    endpointUri
+    endpointUri,
   });
 
   const createResponse = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("set", "/whatsapp-flows", createResource)
+    buildCommand("set", "/whatsapp-flows", createResource),
   );
 
   const flowId = createResponse?.resource?.id;
@@ -371,7 +364,11 @@ async function createFlow(params) {
 
   const setJsonResponse = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("set", `/whatsapp-flows/flow-json/${encodeURIComponent(String(flowId))}`, normalizedFlowJson)
+    buildCommand(
+      "set",
+      `/whatsapp-flows/flow-json/${encodeURIComponent(String(flowId))}`,
+      normalizedFlowJson,
+    ),
   );
 
   return {
@@ -380,10 +377,10 @@ async function createFlow(params) {
       name: createResource.name,
       status: "DRAFT",
       categories: createResource.categories,
-      endpoint_uri: createResource.endpoint_uri
+      endpoint_uri: createResource.endpoint_uri,
     },
     createResponse,
-    setJsonResponse
+    setJsonResponse,
   };
 }
 
@@ -397,12 +394,12 @@ async function publishFlow(params) {
 
   const publishResponse = await sendBlipCommand(
     sourceRouterKey,
-    buildCommand("get", `/whatsapp-flows/publish/${encodeURIComponent(String(flowId))}`)
+    buildCommand("get", `/whatsapp-flows/publish/${encodeURIComponent(String(flowId))}`),
   );
 
   return {
     flowId: String(flowId),
-    publishResponse
+    publishResponse,
   };
 }
 
@@ -411,26 +408,32 @@ async function createFlowOnTarget({
   targetIndex,
   sourceFlow,
   flowDetails,
-  flowJson
+  flowJson,
 }) {
   const createResponse = await sendBlipCommand(
     targetRouterKey,
-    buildCommand("set", "/whatsapp-flows", buildCreateFlowResource(flowDetails, sourceFlow))
+    buildCommand("set", "/whatsapp-flows", buildCreateFlowResource(flowDetails, sourceFlow)),
   );
 
   const newFlowId = createResponse?.resource?.id;
   if (!newFlowId) {
-    throw new Error(`A criação do flow "${sourceFlow.name || sourceFlow.id}" não retornou resource.id.`);
+    throw new Error(
+      `A criação do flow "${sourceFlow.name || sourceFlow.id}" não retornou resource.id.`,
+    );
   }
 
   const setJsonResponse = await sendBlipCommand(
     targetRouterKey,
-    buildCommand("set", `/whatsapp-flows/flow-json/${encodeURIComponent(String(newFlowId))}`, flowJson)
+    buildCommand(
+      "set",
+      `/whatsapp-flows/flow-json/${encodeURIComponent(String(newFlowId))}`,
+      flowJson,
+    ),
   );
 
   const publishResponse = await sendBlipCommand(
     targetRouterKey,
-    buildCommand("get", `/whatsapp-flows/publish/${encodeURIComponent(String(newFlowId))}`)
+    buildCommand("get", `/whatsapp-flows/publish/${encodeURIComponent(String(newFlowId))}`),
   );
 
   return {
@@ -441,37 +444,35 @@ async function createFlowOnTarget({
     targetIndex,
     createResponse,
     setJsonResponse,
-    publishResponse
+    publishResponse,
   };
 }
 
 async function loadFlowPayload(sourceRouterKey, flow) {
   const [flowDetails, flowJsonResult] = await Promise.all([
     getFlowDetails(sourceRouterKey, flow.id),
-    getFlowJson({ sourceRouterKey, flowId: flow.id })
+    getFlowJson({ sourceRouterKey, flowId: flow.id }),
   ]);
 
   return {
     sourceFlow: {
       ...flow,
-      name: flowDetails?.name || flow.name
+      name: flowDetails?.name || flow.name,
     },
     flowDetails,
-    flowJson: flowJsonResult.json
+    flowJson: flowJsonResult.json,
   };
 }
 
 async function replicateFlows(params) {
-  const {
-    sourceRouterKey,
-    flows,
-    continueOnError = true
-  } = params || {};
+  const { sourceRouterKey, flows, continueOnError = true } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
 
   const batchSize = normalizeBatchSize(params?.batchSize);
-  const targetRouterKeys = Array.from(new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")));
+  const targetRouterKeys = Array.from(
+    new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
+  );
   validateTargetRouterKeys(targetRouterKeys);
 
   const selectedFlows = normalizeProvidedFlows(flows);
@@ -479,7 +480,7 @@ async function replicateFlows(params) {
     foundFlows: selectedFlows,
     publicKeyUploads: [],
     copied: [],
-    errors: []
+    errors: [],
   };
 
   const targetsWithPublicKey = [];
@@ -489,14 +490,14 @@ async function replicateFlows(params) {
       results.publicKeyUploads.push(uploadResult);
       targetsWithPublicKey.push({
         targetRouterKey,
-        targetIndex
+        targetIndex,
       });
       return uploadResult;
     } catch (error) {
       const errorInfo = {
         step: "upload_public_key",
         targetIndex,
-        message: error.message
+        message: error.message,
       };
       results.errors.push(errorInfo);
 
@@ -520,7 +521,7 @@ async function replicateFlows(params) {
           step: "load_flow",
           flowId: flow.id,
           flowName: flow.name,
-          message: error.message
+          message: error.message,
         };
         results.errors.push(errorInfo);
 
@@ -539,7 +540,7 @@ async function replicateFlows(params) {
       createJobs.push({
         ...payload,
         targetRouterKey: target.targetRouterKey,
-        targetIndex: target.targetIndex
+        targetIndex: target.targetIndex,
       });
     }
   }
@@ -555,7 +556,7 @@ async function replicateFlows(params) {
         flowId: job.sourceFlow.id,
         flowName: job.sourceFlow.name,
         targetIndex: job.targetIndex,
-        message: error.message
+        message: error.message,
       };
       results.errors.push(errorInfo);
 
@@ -570,7 +571,7 @@ async function replicateFlows(params) {
   return {
     options: {
       continueOnError: Boolean(continueOnError),
-      batchSize
+      batchSize,
     },
     totals: {
       foundFlows: selectedFlows.length,
@@ -579,9 +580,9 @@ async function replicateFlows(params) {
       targetRouters: targetRouterKeys.length,
       createJobs: createJobs.length,
       copied: results.copied.length,
-      errors: results.errors.length
+      errors: results.errors.length,
     },
-    ...results
+    ...results,
   };
 }
 
@@ -592,5 +593,5 @@ module.exports = {
   getFlowJson,
   createFlow,
   publishFlow,
-  replicateFlows
+  replicateFlows,
 };

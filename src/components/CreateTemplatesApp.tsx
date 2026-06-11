@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowDownAZ,
@@ -10,13 +10,16 @@ import {
   FileJson,
   LoaderCircle,
   MessageSquareText,
+  Moon,
   Plus,
   Search,
   Send,
   Square,
+  Sun,
   Trash2,
-  X
+  X,
 } from "lucide-react";
+import "../styles/blip-app.css";
 
 type ActiveView = "templates" | "flows";
 type RouterModal = "source" | "targets" | null;
@@ -31,10 +34,7 @@ type Template = {
 };
 
 type SearchResponse = {
-  search: {
-    templateName: string;
-    onlyApproved: boolean;
-  };
+  search: { templateName: string; onlyApproved: boolean };
   total: number;
   templates: Template[];
 };
@@ -54,10 +54,7 @@ type TemplateReplicateResponse = {
 };
 
 type TemplateCompareResponse = {
-  filters: {
-    category: string;
-    status: string;
-  };
+  filters: { category: string; status: string };
   totals: {
     routers: number;
     sourceRouterIncluded: boolean;
@@ -93,23 +90,9 @@ type FlowSummary = {
   validation_errors?: unknown[];
 };
 
-type FlowSearchResponse = {
-  total: number;
-  flows: FlowSummary[];
-};
-
-type FlowPreviewResponse = {
-  flow: unknown;
-  previewUrl: string;
-  expiresAt?: string;
-};
-
-type FlowJsonResponse = {
-  flowId: string;
-  downloadUrl: string;
-  json: unknown;
-};
-
+type FlowSearchResponse = { total: number; flows: FlowSummary[] };
+type FlowPreviewResponse = { flow: unknown; previewUrl: string; expiresAt?: string };
+type FlowJsonResponse = { flowId: string; downloadUrl: string; json: unknown };
 type FlowReplicateResponse = {
   totals: {
     foundFlows: number;
@@ -124,120 +107,81 @@ type FlowReplicateResponse = {
   copied: unknown[];
   errors: unknown[];
 };
-
 type FlowCreateResponse = {
-  flow: FlowSummary & {
-    endpoint_uri?: string;
-  };
+  flow: FlowSummary & { endpoint_uri?: string };
   createResponse: unknown;
   setJsonResponse: unknown;
 };
-
-type FlowPublishResponse = {
-  flowId: string;
-  publishResponse: unknown;
-};
-
-type OperationResult = {
-  summary: string;
-  payload: unknown;
-  previewFlow?: FlowSummary;
-};
+type FlowPublishResponse = { flowId: string; publishResponse: unknown };
+type OperationResult = { summary: string; payload: unknown; previewFlow?: FlowSummary };
 
 const DEFAULT_TEMPLATE_OPTIONS = {
   dryRun: false,
   continueOnError: true,
   onlyApproved: false,
-  batchSize: 15
+  batchSize: 15,
 };
-
-const DEFAULT_FLOW_OPTIONS = {
-  continueOnError: true,
-  batchSize: 15
-};
-
+const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
+const THEME_STORAGE_KEY = "create-templates-theme";
 const emptyTemplateSearch: SearchResponse = {
-  search: {
-    templateName: "",
-    onlyApproved: false
-  },
+  search: { templateName: "", onlyApproved: false },
   total: 0,
-  templates: []
+  templates: [],
 };
-
-const emptyFlowSearch: FlowSearchResponse = {
-  total: 0,
-  flows: []
-};
+const emptyFlowSearch: FlowSearchResponse = { total: 0, flows: [] };
 
 function splitLines(value: string) {
   return value
     .split(/[\n,;]+/)
-    .map(item => item.trim())
+    .map((item) => item.trim())
     .filter(Boolean);
 }
-
-function templateKey(template: Template) {
-  return `${template.name}|${template.language}`;
+function templateKey(t: Template) {
+  return `${t.name}|${t.language}`;
 }
-
-function flowKey(flow: FlowSummary) {
-  return String(flow.id);
+function flowKey(f: FlowSummary) {
+  return String(f.id);
 }
-
 function maskRouterKey(value: string) {
   const trimmed = value.trim();
-  if (!trimmed) {
-    return "Nenhum router configurado";
-  }
-
+  if (!trimmed) return "Nenhum router configurado";
   const normalized = trimmed.startsWith("Key ") ? trimmed.slice(4) : trimmed;
-  const start = normalized.slice(0, 8);
-  const end = normalized.slice(-8);
-  return `Key ${start}••••${end}`;
+  return `Key ${normalized.slice(0, 8)}••••${normalized.slice(-8)}`;
 }
-
 async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
   const response = await fetch(path, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
-
   const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `Erro HTTP ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(data?.error?.message || `Erro HTTP ${response.status}`);
   return data as TResponse;
 }
-
 async function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
   }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
   document.execCommand("copy");
-  document.body.removeChild(textarea);
+  document.body.removeChild(ta);
 }
 
-function App() {
+export default function CreateTemplatesApp() {
+  const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>("templates");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [targetRouterKeys, setTargetRouterKeys] = useState("");
   const [templateName, setTemplateName] = useState("");
-  const [templateSearchResult, setTemplateSearchResult] = useState<SearchResponse>(emptyTemplateSearch);
+  const [templateSearchResult, setTemplateSearchResult] =
+    useState<SearchResponse>(emptyTemplateSearch);
   const [selectedTemplateKeys, setSelectedTemplateKeys] = useState<Set<string>>(new Set());
   const [flowSearchResult, setFlowSearchResult] = useState<FlowSearchResponse>(emptyFlowSearch);
   const [flowFilter, setFlowFilter] = useState("");
@@ -246,7 +190,8 @@ function App() {
   const [isTemplateCompareModalOpen, setIsTemplateCompareModalOpen] = useState(false);
   const [templateCompareCategory, setTemplateCompareCategory] = useState("");
   const [templateCompareStatus, setTemplateCompareStatus] = useState("");
-  const [templateCompareResult, setTemplateCompareResult] = useState<TemplateCompareResponse | null>(null);
+  const [templateCompareResult, setTemplateCompareResult] =
+    useState<TemplateCompareResponse | null>(null);
   const [templateCompareNameSort, setTemplateCompareNameSort] = useState<SortDirection>("asc");
   const [isCreateFlowModalOpen, setIsCreateFlowModalOpen] = useState(false);
   const [draftSourceRouterKey, setDraftSourceRouterKey] = useState("");
@@ -266,87 +211,89 @@ function App() {
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [flowActionId, setFlowActionId] = useState("");
 
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "light") {
+      setIsDarkTheme(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, isDarkTheme ? "dark" : "light");
+  }, [isDarkTheme]);
+
   const targetCount = splitLines(targetRouterKeys).length;
 
   const selectedTemplates = useMemo(
-    () => templateSearchResult.templates.filter(template => selectedTemplateKeys.has(templateKey(template))),
-    [templateSearchResult.templates, selectedTemplateKeys]
+    () => templateSearchResult.templates.filter((t) => selectedTemplateKeys.has(templateKey(t))),
+    [templateSearchResult.templates, selectedTemplateKeys],
   );
-
-  const allVisibleTemplatesSelected = templateSearchResult.templates.length > 0
-    && selectedTemplates.length === templateSearchResult.templates.length;
+  const allVisibleTemplatesSelected =
+    templateSearchResult.templates.length > 0 &&
+    selectedTemplates.length === templateSearchResult.templates.length;
 
   const displayedCompareTemplates = useMemo(() => {
     const templates = templateCompareResult?.commonTemplates ?? [];
-
-    return [...templates].sort((first, second) => {
-      const nameCompare = first.name.localeCompare(second.name, "pt-BR", { sensitivity: "base" });
-      const languageCompare = first.language.localeCompare(second.language, "pt-BR", { sensitivity: "base" });
-      const result = nameCompare || languageCompare;
-      return templateCompareNameSort === "asc" ? result : -result;
+    return [...templates].sort((a, b) => {
+      const n = a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+      const l = a.language.localeCompare(b.language, "pt-BR", { sensitivity: "base" });
+      const r = n || l;
+      return templateCompareNameSort === "asc" ? r : -r;
     });
   }, [templateCompareNameSort, templateCompareResult]);
 
   const filteredFlows = useMemo(() => {
-    const query = flowFilter.trim().toLowerCase();
-    if (!query) {
-      return flowSearchResult.flows;
-    }
-
-    return flowSearchResult.flows.filter(flow => (
-      flow.name.toLowerCase().includes(query)
-      || flow.id.toLowerCase().includes(query)
-    ));
+    const q = flowFilter.trim().toLowerCase();
+    if (!q) return flowSearchResult.flows;
+    return flowSearchResult.flows.filter(
+      (f) => f.name.toLowerCase().includes(q) || f.id.toLowerCase().includes(q),
+    );
   }, [flowFilter, flowSearchResult.flows]);
 
   const selectedFlows = useMemo(
-    () => flowSearchResult.flows.filter(flow => selectedFlowIds.has(flowKey(flow))),
-    [flowSearchResult.flows, selectedFlowIds]
+    () => flowSearchResult.flows.filter((f) => selectedFlowIds.has(flowKey(f))),
+    [flowSearchResult.flows, selectedFlowIds],
   );
+  const allVisibleFlowsSelected =
+    filteredFlows.length > 0 && filteredFlows.every((f) => selectedFlowIds.has(flowKey(f)));
 
-  const allVisibleFlowsSelected = filteredFlows.length > 0
-    && filteredFlows.every(flow => selectedFlowIds.has(flowKey(flow)));
-
-  const headerCopy = activeView === "templates"
-    ? {
-      kicker: "WhatsApp Templates",
-      title: "Templates",
-      description: "Replicação de templates entre routers BLiP"
-    }
-    : {
-      kicker: "WhatsApp Flows",
-      title: "Flows",
-      description: "Consulta, visualização e cópia de flows entre routers BLiP"
-    };
+  const headerCopy =
+    activeView === "templates"
+      ? {
+          kicker: "WhatsApp Templates",
+          title: "Templates",
+          description: "Replicação de templates entre routers BLiP",
+        }
+      : {
+          kicker: "WhatsApp Flows",
+          title: "Flows",
+          description: "Consulta, visualização e cópia de flows entre routers BLiP",
+        };
 
   async function handleSearchTemplates(event: FormEvent) {
     event.preventDefault();
     setError("");
     setOperationResult(null);
-
     if (!sourceRouterKey.trim()) {
       setError("Informe a key do router de origem.");
       openSourceModal();
       return;
     }
-
     setIsSearchingTemplates(true);
-
     try {
       const data = await postJson<SearchResponse>("/api/templates/search", {
         sourceRouterKey: sourceRouterKey.trim(),
         templateName: templateName.trim(),
-        onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved
+        onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved,
       });
-
       setTemplateSearchResult(data);
-      setSelectedTemplateKeys(data.templates.length === 1
-        ? new Set([templateKey(data.templates[0])])
-        : new Set());
-    } catch (caughtError) {
+      setSelectedTemplateKeys(
+        data.templates.length === 1 ? new Set([templateKey(data.templates[0])]) : new Set(),
+      );
+    } catch (e) {
       setTemplateSearchResult(emptyTemplateSearch);
       setSelectedTemplateKeys(new Set());
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao buscar templates.");
+      setError(e instanceof Error ? e.message : "Erro ao buscar templates.");
     } finally {
       setIsSearchingTemplates(false);
     }
@@ -355,34 +302,29 @@ function App() {
   async function handleReplicateTemplates() {
     setError("");
     setOperationResult(null);
-
     if (selectedTemplates.length === 0) {
       setError("Selecione pelo menos um template.");
       return;
     }
-
     const targets = splitLines(targetRouterKeys);
     if (targets.length === 0) {
       setError("Informe pelo menos uma key de destino.");
       openTargetsModal();
       return;
     }
-
     setIsReplicatingTemplates(true);
-
     try {
       const data = await postJson<TemplateReplicateResponse>("/api/templates/replicate", {
         targetRouterKeys: targets,
         templates: selectedTemplates,
-        ...DEFAULT_TEMPLATE_OPTIONS
+        ...DEFAULT_TEMPLATE_OPTIONS,
       });
-
       setOperationResult({
         summary: `${data.totals.created} criações, ${data.totals.uploadedAttachments} imagens, ${data.totals.errors} erros`,
-        payload: data
+        payload: data,
       });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao replicar templates.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao replicar templates.");
     } finally {
       setIsReplicatingTemplates(false);
     }
@@ -391,38 +333,33 @@ function App() {
   async function handleCompareTemplates(event?: FormEvent) {
     event?.preventDefault();
     setError("");
-
     if (!sourceRouterKey.trim()) {
       setError("Informe a key do router de origem para comparar.");
       openSourceModal();
       return;
     }
-
     const routers = splitLines(targetRouterKeys);
     if (routers.length === 0) {
       setError("Informe pelo menos um router de destino para comparar com a origem.");
       openTargetsModal();
       return;
     }
-
     setIsComparingTemplates(true);
-
     try {
       const data = await postJson<TemplateCompareResponse>("/api/templates/compare", {
         sourceRouterKey: sourceRouterKey.trim(),
         targetRouterKeys: routers,
         category: templateCompareCategory,
-        status: templateCompareStatus
+        status: templateCompareStatus,
       });
-
       setTemplateCompareResult(data);
       setOperationResult({
         summary: `${data.totals.commonTemplates} templates em comum em ${data.totals.routers} routers.`,
-        payload: data
+        payload: data,
       });
-    } catch (caughtError) {
+    } catch (e) {
       setTemplateCompareResult(null);
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao comparar templates.");
+      setError(e instanceof Error ? e.message : "Erro ao comparar templates.");
     } finally {
       setIsComparingTemplates(false);
     }
@@ -430,14 +367,13 @@ function App() {
 
   async function handleCopyJson(payload: unknown, successMessage: string) {
     setError("");
-
     try {
       await copyText(JSON.stringify(payload, null, 2));
       setCopyNotice(successMessage);
       window.setTimeout(() => setCopyNotice(""), 2400);
-    } catch (caughtError) {
+    } catch (e) {
       setCopyNotice("");
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao copiar JSON.");
+      setError(e instanceof Error ? e.message : "Erro ao copiar JSON.");
     }
   }
 
@@ -445,21 +381,18 @@ function App() {
     event?.preventDefault();
     setError("");
     setOperationResult(null);
-
     if (!sourceRouterKey.trim()) {
       setError("Informe a key do router de origem.");
       openSourceModal();
       return;
     }
-
     setIsLoadingFlows(true);
-
     try {
       await loadFlowsFromSource();
-    } catch (caughtError) {
+    } catch (e) {
       setFlowSearchResult(emptyFlowSearch);
       setSelectedFlowIds(new Set());
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao carregar flows.");
+      setError(e instanceof Error ? e.message : "Erro ao carregar flows.");
     } finally {
       setIsLoadingFlows(false);
     }
@@ -467,34 +400,25 @@ function App() {
 
   async function loadFlowsFromSource() {
     const data = await postJson<FlowSearchResponse>("/api/flows/search", {
-      sourceRouterKey: sourceRouterKey.trim()
+      sourceRouterKey: sourceRouterKey.trim(),
     });
-
     setFlowSearchResult(data);
-    setSelectedFlowIds(data.flows.length === 1
-      ? new Set([flowKey(data.flows[0])])
-      : new Set());
-
+    setSelectedFlowIds(data.flows.length === 1 ? new Set([flowKey(data.flows[0])]) : new Set());
     return data;
   }
 
   async function handlePreviewFlow(flow: FlowSummary) {
     setError("");
     setFlowActionId(`preview:${flow.id}`);
-
     try {
       const data = await postJson<FlowPreviewResponse>("/api/flows/preview", {
         sourceRouterKey: sourceRouterKey.trim(),
-        flowId: flow.id
+        flowId: flow.id,
       });
-
       window.open(data.previewUrl, "_blank", "noopener,noreferrer");
-      setOperationResult({
-        summary: `Preview aberto para "${flow.name}".`,
-        payload: data
-      });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao abrir preview do flow.");
+      setOperationResult({ summary: `Preview aberto para "${flow.name}".`, payload: data });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao abrir preview do flow.");
     } finally {
       setFlowActionId("");
     }
@@ -503,20 +427,15 @@ function App() {
   async function handleCopyFlowJson(flow: FlowSummary) {
     setError("");
     setFlowActionId(`json:${flow.id}`);
-
     try {
       const data = await postJson<FlowJsonResponse>("/api/flows/json", {
         sourceRouterKey: sourceRouterKey.trim(),
-        flowId: flow.id
+        flowId: flow.id,
       });
-
       await copyText(JSON.stringify(data.json, null, 2));
-      setOperationResult({
-        summary: `JSON copiado para "${flow.name}".`,
-        payload: data
-      });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao copiar JSON do flow.");
+      setOperationResult({ summary: `JSON copiado para "${flow.name}".`, payload: data });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao copiar JSON do flow.");
     } finally {
       setFlowActionId("");
     }
@@ -525,24 +444,19 @@ function App() {
   async function handlePublishFlow(flow: FlowSummary) {
     setError("");
     setFlowActionId(`publish:${flow.id}`);
-
     try {
       const data = await postJson<FlowPublishResponse>("/api/flows/publish", {
         sourceRouterKey: sourceRouterKey.trim(),
-        flowId: flow.id
+        flowId: flow.id,
       });
-
       await loadFlowsFromSource();
       setOperationResult({
         summary: `Flow "${flow.name}" publicado com sucesso.`,
         payload: data,
-        previewFlow: {
-          ...flow,
-          status: "PUBLISHED"
-        }
+        previewFlow: { ...flow, status: "PUBLISHED" },
       });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao publicar flow.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao publicar flow.");
     } finally {
       setFlowActionId("");
     }
@@ -550,23 +464,19 @@ function App() {
 
   async function handleCreateFlow() {
     setError("");
-
     if (!sourceRouterKey.trim()) {
       setError("Informe a key do router de origem.");
       return;
     }
-
     const normalizedName = newFlowName.trim();
     if (!normalizedName) {
       setError("Informe o nome do flow.");
       return;
     }
-
     if (newFlowIsApi && !newFlowEndpointUri.trim()) {
       setError("Informe o endpoint_uri para Flow API.");
       return;
     }
-
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(newFlowJson);
@@ -574,18 +484,15 @@ function App() {
       setError("Informe um JSON completo válido.");
       return;
     }
-
     setIsCreatingFlow(true);
-
     try {
       const data = await postJson<FlowCreateResponse>("/api/flows/create", {
         sourceRouterKey: sourceRouterKey.trim(),
         name: normalizedName,
         isFlowApi: newFlowIsApi,
         endpointUri: newFlowEndpointUri.trim(),
-        flowJson: parsedJson
+        flowJson: parsedJson,
       });
-
       setIsCreateFlowModalOpen(false);
       setNewFlowName("");
       setNewFlowIsApi(false);
@@ -596,10 +503,10 @@ function App() {
       setOperationResult({
         summary: `Flow criado com sucesso. ID: ${data.flow.id}`,
         payload: data,
-        previewFlow: data.flow
+        previewFlow: data.flow,
       });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao criar flow.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao criar flow.");
     } finally {
       setIsCreatingFlow(false);
     }
@@ -608,102 +515,84 @@ function App() {
   async function handleReplicateFlows() {
     setError("");
     setOperationResult(null);
-
     if (!sourceRouterKey.trim()) {
       setError("Informe a key do router de origem.");
       openSourceModal();
       return;
     }
-
     if (selectedFlows.length === 0) {
       setError("Selecione pelo menos um flow.");
       return;
     }
-
     const targets = splitLines(targetRouterKeys);
     if (targets.length === 0) {
       setError("Informe pelo menos uma key de destino.");
       openTargetsModal();
       return;
     }
-
     setIsReplicatingFlows(true);
-
     try {
       const data = await postJson<FlowReplicateResponse>("/api/flows/replicate", {
         sourceRouterKey: sourceRouterKey.trim(),
         targetRouterKeys: targets,
         flows: selectedFlows,
-        ...DEFAULT_FLOW_OPTIONS
+        ...DEFAULT_FLOW_OPTIONS,
       });
-
       setOperationResult({
         summary: `${data.totals.publicKeyUploads} public keys, ${data.totals.copied} flows copiados, ${data.totals.errors} erros`,
-        payload: data
+        payload: data,
       });
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Erro ao replicar flows.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao replicar flows.");
     } finally {
       setIsReplicatingFlows(false);
     }
   }
 
   function toggleTemplate(key: string) {
-    setSelectedTemplateKeys(current => {
-      const next = new Set(current);
+    setSelectedTemplateKeys((curr) => {
+      const next = new Set(curr);
       if (next.has(key)) {
         next.delete(key);
       } else {
         next.add(key);
       }
-
       return next;
     });
   }
-
   function toggleAllTemplates() {
     if (allVisibleTemplatesSelected) {
       setSelectedTemplateKeys(new Set());
       return;
     }
-
     setSelectedTemplateKeys(new Set(templateSearchResult.templates.map(templateKey)));
   }
-
   function toggleFlow(id: string) {
-    setSelectedFlowIds(current => {
-      const next = new Set(current);
+    setSelectedFlowIds((curr) => {
+      const next = new Set(curr);
       if (next.has(id)) {
         next.delete(id);
       } else {
         next.add(id);
       }
-
       return next;
     });
   }
-
   function toggleVisibleFlows() {
     if (allVisibleFlowsSelected) {
-      setSelectedFlowIds(current => {
-        const next = new Set(current);
-        for (const flow of filteredFlows) {
-          next.delete(flowKey(flow));
-        }
+      setSelectedFlowIds((curr) => {
+        const next = new Set(curr);
+        for (const f of filteredFlows) next.delete(flowKey(f));
         return next;
       });
       return;
     }
-
-    setSelectedFlowIds(current => {
-      const next = new Set(current);
-      for (const flow of filteredFlows) {
-        next.add(flowKey(flow));
-      }
+    setSelectedFlowIds((curr) => {
+      const next = new Set(curr);
+      for (const f of filteredFlows) next.add(flowKey(f));
       return next;
     });
   }
-
   function clearResults() {
     setTemplateSearchResult(emptyTemplateSearch);
     setSelectedTemplateKeys(new Set());
@@ -714,27 +603,22 @@ function App() {
     setError("");
     setCopyNotice("");
   }
-
   function openSourceModal() {
     setDraftSourceRouterKey(sourceRouterKey);
     setRouterModal("source");
   }
-
   function openTargetsModal() {
     setDraftTargetRouterKeys(targetRouterKeys);
     setRouterModal("targets");
   }
-
   function closeRouterModal() {
     setRouterModal(null);
   }
-
   function saveSourceRouter() {
     setSourceRouterKey(draftSourceRouterKey.trim());
     setRouterModal(null);
     setError("");
   }
-
   function saveTargetRouters() {
     setTargetRouterKeys(splitLines(draftTargetRouterKeys).join("\n"));
     setRouterModal(null);
@@ -742,7 +626,7 @@ function App() {
   }
 
   return (
-    <main className="ember-shell">
+    <main className={`ember-shell ${isDarkTheme ? "theme-dark" : "theme-light"}`}>
       <aside className="ember-sidebar" aria-label="Navegação da extensão">
         <div className="ember-logo extension-logo" aria-label="BLiP">
           <span className="blip-logo-mark">BLiP</span>
@@ -789,6 +673,19 @@ function App() {
             <button className="blip-button secondary" type="button" onClick={clearResults}>
               <Trash2 size={18} aria-hidden="true" />
               Limpar
+            </button>
+            <button
+              className="theme-toggle-button"
+              type="button"
+              aria-label={isDarkTheme ? "Ativar modo claro" : "Ativar modo escuro"}
+              title={isDarkTheme ? "Ativar modo claro" : "Ativar modo escuro"}
+              onClick={() => setIsDarkTheme((current) => !current)}
+            >
+              {isDarkTheme ? (
+                <Sun size={18} aria-hidden="true" />
+              ) : (
+                <Moon size={18} aria-hidden="true" />
+              )}
             </button>
           </div>
         </header>
@@ -846,7 +743,8 @@ function App() {
               <div>
                 <h2>Templates</h2>
                 <p>
-                  {templateSearchResult.total} encontrados, {selectedTemplates.length} selecionados, {targetCount} destinos
+                  {templateSearchResult.total} encontrados, {selectedTemplates.length} selecionados,{" "}
+                  {targetCount} destinos
                 </p>
               </div>
               <button
@@ -870,11 +768,15 @@ function App() {
                 <input
                   id="templateName"
                   value={templateName}
-                  onChange={event => setTemplateName(event.target.value)}
+                  onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="Vazio busca sem filtro"
                 />
               </label>
-              <button className="blip-submit-button secondary" type="submit" disabled={isSearchingTemplates}>
+              <button
+                className="blip-submit-button secondary"
+                type="submit"
+                disabled={isSearchingTemplates}
+              >
                 {isSearchingTemplates ? (
                   <LoaderCircle className="spin" size={18} aria-hidden="true" />
                 ) : (
@@ -897,7 +799,9 @@ function App() {
               </button>
               <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
                 <Plus size={18} aria-hidden="true" />
-                {targetCount ? `Editar routers de destino (${targetCount})` : "Adicionar routers de destino"}
+                {targetCount
+                  ? `Editar routers de destino (${targetCount})`
+                  : "Adicionar routers de destino"}
               </button>
               <button
                 className="blip-submit-button primary"
@@ -933,10 +837,9 @@ function App() {
                       </td>
                     </tr>
                   ) : (
-                    templateSearchResult.templates.map(template => {
+                    templateSearchResult.templates.map((template) => {
                       const key = templateKey(template);
                       const checked = selectedTemplateKeys.has(key);
-
                       return (
                         <tr key={key} className={checked ? "selected" : ""}>
                           <td className="select-column">
@@ -951,7 +854,9 @@ function App() {
                           <td>{template.language}</td>
                           <td>{template.category}</td>
                           <td>
-                            <span className={`ember-status ${String(template.status || "").toLowerCase()}`}>
+                            <span
+                              className={`ember-status ${String(template.status || "").toLowerCase()}`}
+                            >
                               {template.status || "N/D"}
                             </span>
                           </td>
@@ -969,7 +874,8 @@ function App() {
               <div>
                 <h2>Flows</h2>
                 <p>
-                  {flowSearchResult.total} carregados, {filteredFlows.length} filtrados, {selectedFlows.length} selecionados
+                  {flowSearchResult.total} carregados, {filteredFlows.length} filtrados,{" "}
+                  {selectedFlows.length} selecionados
                 </p>
               </div>
               <button
@@ -993,7 +899,7 @@ function App() {
                 <input
                   id="flowFilter"
                   value={flowFilter}
-                  onChange={event => setFlowFilter(event.target.value)}
+                  onChange={(e) => setFlowFilter(e.target.value)}
                   placeholder="Digite nome ou ID"
                 />
               </label>
@@ -1008,7 +914,11 @@ function App() {
                 <Plus size={18} aria-hidden="true" />
                 Criar flow agora
               </button>
-              <button className="blip-submit-button secondary" type="submit" disabled={isLoadingFlows}>
+              <button
+                className="blip-submit-button secondary"
+                type="submit"
+                disabled={isLoadingFlows}
+              >
                 {isLoadingFlows ? (
                   <LoaderCircle className="spin" size={18} aria-hidden="true" />
                 ) : (
@@ -1018,7 +928,9 @@ function App() {
               </button>
               <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
                 <Plus size={18} aria-hidden="true" />
-                {targetCount ? `Editar routers de destino (${targetCount})` : "Adicionar routers de destino"}
+                {targetCount
+                  ? `Editar routers de destino (${targetCount})`
+                  : "Adicionar routers de destino"}
               </button>
               <button
                 className="blip-submit-button primary"
@@ -1055,10 +967,9 @@ function App() {
                       </td>
                     </tr>
                   ) : (
-                    filteredFlows.map(flow => {
+                    filteredFlows.map((flow) => {
                       const key = flowKey(flow);
                       const checked = selectedFlowIds.has(key);
-
                       return (
                         <tr key={key} className={checked ? "selected" : ""}>
                           <td className="select-column">
@@ -1073,7 +984,9 @@ function App() {
                           <td className="mono-cell">{flow.id}</td>
                           <td>{flow.categories?.join(", ") || "-"}</td>
                           <td>
-                            <span className={`ember-status ${String(flow.status || "").toLowerCase()}`}>
+                            <span
+                              className={`ember-status ${String(flow.status || "").toLowerCase()}`}
+                            >
                               {flow.status || "N/D"}
                             </span>
                           </td>
@@ -1152,7 +1065,9 @@ function App() {
               <FileJson size={18} aria-hidden="true" />
             </div>
           </div>
-          <pre className="code">{operationResult ? JSON.stringify(operationResult.payload, null, 2) : "{}"}</pre>
+          <pre className="code">
+            {operationResult ? JSON.stringify(operationResult.payload, null, 2) : "{}"}
+          </pre>
         </section>
 
         {isTemplateCompareModalOpen && (
@@ -1166,7 +1081,10 @@ function App() {
               <div className="ember-modal-header">
                 <div>
                   <h2 id="compare-modal-title">Comparar templates</h2>
-                  <p>Compara o router de origem com os destinos e retorna templates filtrados presentes em todos eles.</p>
+                  <p>
+                    Compara o router de origem com os destinos e retorna templates filtrados
+                    presentes em todos eles.
+                  </p>
                 </div>
                 <button
                   className="blip-button secondary icon-only"
@@ -1185,7 +1103,6 @@ function App() {
                     <span>{error}</span>
                   </div>
                 )}
-
                 {copyNotice && (
                   <div className="ember-alert success modal-alert" role="status">
                     <Clipboard size={18} aria-hidden="true" />
@@ -1198,7 +1115,7 @@ function App() {
                   <select
                     id="compareCategory"
                     value={templateCompareCategory}
-                    onChange={event => setTemplateCompareCategory(event.target.value)}
+                    onChange={(e) => setTemplateCompareCategory(e.target.value)}
                   >
                     <option value="">Todos</option>
                     <option value="UTILITY">Utility</option>
@@ -1211,7 +1128,7 @@ function App() {
                   <select
                     id="compareStatus"
                     value={templateCompareStatus}
-                    onChange={event => setTemplateCompareStatus(event.target.value)}
+                    onChange={(e) => setTemplateCompareStatus(e.target.value)}
                   >
                     <option value="">Todos</option>
                     <option value="APPROVED">Approved</option>
@@ -1223,11 +1140,19 @@ function App() {
                 </label>
 
                 <div className="compare-actions">
-                  <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
+                  <button
+                    className="blip-button secondary"
+                    type="button"
+                    onClick={openTargetsModal}
+                  >
                     <Plus size={18} aria-hidden="true" />
                     {targetCount ? `Destinos (${targetCount})` : "Adicionar destinos"}
                   </button>
-                  <button className="blip-submit-button primary" type="submit" disabled={isComparingTemplates}>
+                  <button
+                    className="blip-submit-button primary"
+                    type="submit"
+                    disabled={isComparingTemplates}
+                  >
                     {isComparingTemplates ? (
                       <LoaderCircle className="spin" size={18} aria-hidden="true" />
                     ) : (
@@ -1241,16 +1166,22 @@ function App() {
               <div className="compare-summary">
                 {templateCompareResult ? (
                   <>
-                    <span>{templateCompareResult.totals.routers} routers comparados, incluindo a origem</span>
+                    <span>
+                      {templateCompareResult.totals.routers} routers comparados, incluindo a origem
+                    </span>
                     <div className="compare-summary-actions">
-                      <strong>{templateCompareResult.totals.commonTemplates} templates em comum</strong>
+                      <strong>
+                        {templateCompareResult.totals.commonTemplates} templates em comum
+                      </strong>
                       <button
                         className="blip-button secondary"
                         type="button"
-                        onClick={() => handleCopyJson(
-                          displayedCompareTemplates.map(template => template.name),
-                          "Lista de nomes copiada."
-                        )}
+                        onClick={() =>
+                          handleCopyJson(
+                            displayedCompareTemplates.map((t) => t.name),
+                            "Lista de nomes copiada.",
+                          )
+                        }
                         disabled={displayedCompareTemplates.length === 0}
                       >
                         <Clipboard size={18} aria-hidden="true" />
@@ -1271,7 +1202,9 @@ function App() {
                         <button
                           className="sort-header-button"
                           type="button"
-                          onClick={() => setTemplateCompareNameSort(current => (current === "asc" ? "desc" : "asc"))}
+                          onClick={() =>
+                            setTemplateCompareNameSort((c) => (c === "asc" ? "desc" : "asc"))
+                          }
                         >
                           Nome
                           {templateCompareNameSort === "asc" ? (
@@ -1295,13 +1228,15 @@ function App() {
                         </td>
                       </tr>
                     ) : (
-                      displayedCompareTemplates.map(template => (
+                      displayedCompareTemplates.map((template) => (
                         <tr key={`${template.name}|${template.language}`}>
                           <td className="template-name">{template.name}</td>
                           <td>{template.language}</td>
                           <td>{template.category || "-"}</td>
                           <td>
-                            <span className={`ember-status ${String(template.status || "").toLowerCase()}`}>
+                            <span
+                              className={`ember-status ${String(template.status || "").toLowerCase()}`}
+                            >
                               {template.status || "N/D"}
                             </span>
                           </td>
@@ -1352,7 +1287,7 @@ function App() {
                   <input
                     id="newFlowName"
                     value={newFlowName}
-                    onChange={event => setNewFlowName(event.target.value)}
+                    onChange={(e) => setNewFlowName(e.target.value)}
                     placeholder="Nome do novo flow"
                   />
                 </label>
@@ -1361,7 +1296,7 @@ function App() {
                   <input
                     type="checkbox"
                     checked={newFlowIsApi}
-                    onChange={event => setNewFlowIsApi(event.target.checked)}
+                    onChange={(e) => setNewFlowIsApi(e.target.checked)}
                   />
                   É Flow API
                 </label>
@@ -1371,7 +1306,7 @@ function App() {
                   <input
                     id="newFlowEndpointUri"
                     value={newFlowEndpointUri}
-                    onChange={event => setNewFlowEndpointUri(event.target.value)}
+                    onChange={(e) => setNewFlowEndpointUri(e.target.value)}
                     disabled={!newFlowIsApi}
                     placeholder="https://..."
                   />
@@ -1382,7 +1317,7 @@ function App() {
                   <textarea
                     id="newFlowJson"
                     value={newFlowJson}
-                    onChange={event => setNewFlowJson(event.target.value)}
+                    onChange={(e) => setNewFlowJson(e.target.value)}
                     rows={14}
                     placeholder='{"version":"7.3","screens":[]}'
                   />
@@ -1434,7 +1369,11 @@ function App() {
                       : "Informe uma ou mais keys de destino, uma por linha."}
                   </p>
                 </div>
-                <button className="blip-button secondary icon-only" type="button" onClick={closeRouterModal}>
+                <button
+                  className="blip-button secondary icon-only"
+                  type="button"
+                  onClick={closeRouterModal}
+                >
                   <X size={18} aria-hidden="true" />
                   <span>Fechar</span>
                 </button>
@@ -1447,7 +1386,7 @@ function App() {
                     <textarea
                       id="sourceRouterModal"
                       value={draftSourceRouterKey}
-                      onChange={event => setDraftSourceRouterKey(event.target.value)}
+                      onChange={(e) => setDraftSourceRouterKey(e.target.value)}
                       rows={4}
                       placeholder="Key ..."
                     />
@@ -1458,7 +1397,7 @@ function App() {
                     <textarea
                       id="targetRoutersModal"
                       value={draftTargetRouterKeys}
-                      onChange={event => setDraftTargetRouterKeys(event.target.value)}
+                      onChange={(e) => setDraftTargetRouterKeys(e.target.value)}
                       rows={7}
                       placeholder="Uma key por linha"
                     />
@@ -1485,5 +1424,3 @@ function App() {
     </main>
   );
 }
-
-export default App;

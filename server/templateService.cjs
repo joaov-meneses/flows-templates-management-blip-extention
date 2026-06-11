@@ -13,15 +13,13 @@ class InputError extends Error {
 
 function normalizeStringList(value, fieldName) {
   if (Array.isArray(value)) {
-    return value
-      .map(item => String(item).trim())
-      .filter(Boolean);
+    return value.map((item) => String(item).trim()).filter(Boolean);
   }
 
   if (typeof value === "string") {
     return value
       .split(/[\n,;]+/)
-      .map(item => item.trim())
+      .map((item) => item.trim())
       .filter(Boolean);
   }
 
@@ -64,11 +62,13 @@ function assertTemplateIsReplicable(template) {
   }
 
   if (!template.name || !template.category || !template.language || !template.components) {
-    throw new InputError(`Template incompleto para replicação: ${JSON.stringify({
-      name: template.name,
-      category: template.category,
-      language: template.language
-    })}`);
+    throw new InputError(
+      `Template incompleto para replicação: ${JSON.stringify({
+        name: template.name,
+        category: template.category,
+        language: template.language,
+      })}`,
+    );
   }
 }
 
@@ -77,9 +77,9 @@ async function sendBlipCommand(routerKey, command) {
     method: "POST",
     headers: {
       Authorization: routerKey,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(command)
+    body: JSON.stringify(command),
   });
 
   const responseText = await response.text();
@@ -96,7 +96,9 @@ async function sendBlipCommand(routerKey, command) {
   }
 
   if (responseBody?.status && responseBody.status !== "success") {
-    throw new Error(`Comando retornou status "${responseBody.status}": ${JSON.stringify(responseBody, null, 2)}`);
+    throw new Error(
+      `Comando retornou status "${responseBody.status}": ${JSON.stringify(responseBody, null, 2)}`,
+    );
   }
 
   return responseBody;
@@ -107,9 +109,7 @@ async function runInBatches(items, batchSize, handler) {
 
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map((item, index) => handler(item, i + index))
-    );
+    const batchResults = await Promise.all(batch.map((item, index) => handler(item, i + index)));
 
     results.push(...batchResults);
   }
@@ -127,7 +127,7 @@ function buildGetTemplatesCommand(templateName) {
     id: randomUUID(),
     to: "postmaster@wa.gw.msging.net",
     method: "get",
-    uri
+    uri,
   };
 }
 
@@ -150,7 +150,7 @@ function summarizeTemplate(template) {
     name: template.name,
     language: template.language,
     category: template.category,
-    status: template.status
+    status: template.status,
   };
 }
 
@@ -180,7 +180,7 @@ function buildTemplateResource(template) {
     category: template.category,
     components: template.components,
     language: template.language,
-    name: template.name
+    name: template.name,
   };
 }
 
@@ -195,7 +195,7 @@ function buildCreateTemplateCommand(template) {
     type: "application/json",
     to: "postmaster@wa.gw.msging.net",
     uri: "/message-templates",
-    resource: buildTemplateResource(template)
+    resource: buildTemplateResource(template),
   };
 }
 
@@ -207,8 +207,8 @@ function buildUploadTemplateAttachmentCommand(headerHandle) {
     to: "postmaster@wa.gw.msging.net",
     uri: "/message-templates-attachment",
     resource: {
-      uri: headerHandle
-    }
+      uri: headerHandle,
+    },
   };
 }
 
@@ -220,8 +220,9 @@ function getImageHeaderHandleSlots(template) {
   const slots = [];
 
   template.components.forEach((component, componentIndex) => {
-    const isImageHeader = String(component?.type || "").toUpperCase() === "HEADER"
-      && String(component?.format || "").toUpperCase() === "IMAGE";
+    const isImageHeader =
+      String(component?.type || "").toUpperCase() === "HEADER" &&
+      String(component?.format || "").toUpperCase() === "IMAGE";
     const headerHandles = component?.example?.header_handle;
 
     if (!isImageHeader || !Array.isArray(headerHandles)) {
@@ -233,7 +234,7 @@ function getImageHeaderHandleSlots(template) {
         slots.push({
           componentIndex,
           handleIndex,
-          headerHandle: headerHandle.trim()
+          headerHandle: headerHandle.trim(),
         });
       }
     });
@@ -250,7 +251,7 @@ async function prepareTemplateForTargetRouter(template, targetRouterKey) {
   for (const slot of headerHandleSlots) {
     const response = await sendBlipCommand(
       targetRouterKey,
-      buildUploadTemplateAttachmentCommand(slot.headerHandle)
+      buildUploadTemplateAttachmentCommand(slot.headerHandle),
     );
     const fileHandle = response?.resource?.fileHandle;
 
@@ -258,28 +259,25 @@ async function prepareTemplateForTargetRouter(template, targetRouterKey) {
       throw new Error(`Upload de imagem não retornou fileHandle para o template ${template.name}.`);
     }
 
-    preparedTemplate.components[slot.componentIndex].example.header_handle[slot.handleIndex] = fileHandle;
+    preparedTemplate.components[slot.componentIndex].example.header_handle[slot.handleIndex] =
+      fileHandle;
     attachments.push({
       componentIndex: slot.componentIndex,
       handleIndex: slot.handleIndex,
       sourceUri: slot.headerHandle,
       fileHandle,
-      response
+      response,
     });
   }
 
   return {
     template: preparedTemplate,
-    attachments
+    attachments,
   };
 }
 
 async function searchTemplates(params) {
-  const {
-    sourceRouterKey,
-    templateName = "",
-    onlyApproved = false
-  } = params || {};
+  const { sourceRouterKey, templateName = "", onlyApproved = false } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
 
@@ -287,7 +285,7 @@ async function searchTemplates(params) {
   let templates = extractTemplatesFromResponse(responseBody);
 
   if (onlyApproved) {
-    templates = templates.filter(template => template.status === "APPROVED");
+    templates = templates.filter((template) => template.status === "APPROVED");
   }
 
   const templatesByNameAndLanguage = new Map();
@@ -304,10 +302,10 @@ async function searchTemplates(params) {
   return {
     search: {
       templateName: templateName ? String(templateName).trim() : "",
-      onlyApproved: Boolean(onlyApproved)
+      onlyApproved: Boolean(onlyApproved),
     },
     total: uniqueTemplates.length,
-    templates: uniqueTemplates
+    templates: uniqueTemplates,
   };
 }
 
@@ -316,19 +314,21 @@ async function loadTemplatesByNames({
   templateNames,
   onlyApproved,
   continueOnError,
-  batchSize
+  batchSize,
 }) {
   validateSourceRouterKey(sourceRouterKey);
 
   const names = normalizeStringList(templateNames, "templateNames");
   if (names.length === 0) {
-    throw new InputError("templateNames precisa ter pelo menos um nome quando o campo templates não for enviado.");
+    throw new InputError(
+      "templateNames precisa ter pelo menos um nome quando o campo templates não for enviado.",
+    );
   }
 
   const results = {
     searchedTemplateNames: names,
     foundTemplates: [],
-    errors: []
+    errors: [],
   };
 
   const templatesByNameAndLanguage = new Map();
@@ -339,7 +339,7 @@ async function loadTemplatesByNames({
       let templates = extractTemplatesFromResponse(responseBody);
 
       if (onlyApproved) {
-        templates = templates.filter(template => template.status === "APPROVED");
+        templates = templates.filter((template) => template.status === "APPROVED");
       }
 
       for (const template of templates) {
@@ -353,13 +353,13 @@ async function loadTemplatesByNames({
       return {
         status: "success",
         templateName,
-        found: templates.length
+        found: templates.length,
       };
     } catch (error) {
       const errorInfo = {
         step: "get_template",
         templateName,
-        message: error.message
+        message: error.message,
       };
 
       results.errors.push(errorInfo);
@@ -377,7 +377,7 @@ async function loadTemplatesByNames({
 
   return {
     templates,
-    loadResults: results
+    loadResults: results,
   };
 }
 
@@ -396,12 +396,7 @@ function normalizeProvidedTemplates(templates) {
   return Array.from(templatesByNameAndLanguage.values());
 }
 
-async function createTemplateOnTargetRouter({
-  template,
-  targetRouterKey,
-  targetIndex,
-  dryRun
-}) {
+async function createTemplateOnTargetRouter({ template, targetRouterKey, targetIndex, dryRun }) {
   if (dryRun) {
     const attachmentsToUpload = getImageHeaderHandleSlots(template);
 
@@ -410,7 +405,7 @@ async function createTemplateOnTargetRouter({
       templateName: template.name,
       language: template.language,
       targetIndex,
-      attachmentsToUpload: attachmentsToUpload.length
+      attachmentsToUpload: attachmentsToUpload.length,
     };
   }
 
@@ -425,7 +420,7 @@ async function createTemplateOnTargetRouter({
     targetIndex,
     uploadedAttachments: prepared.attachments.length,
     attachments: prepared.attachments,
-    response
+    response,
   };
 }
 
@@ -436,7 +431,7 @@ async function replicateTemplates(params) {
     templates: providedTemplates,
     dryRun = false,
     continueOnError = true,
-    onlyApproved = false
+    onlyApproved = false,
   } = params || {};
 
   const batchSize = normalizeBatchSize(params?.batchSize);
@@ -447,7 +442,7 @@ async function replicateTemplates(params) {
   let loadResults = {
     searchedTemplateNames: [],
     foundTemplates: templatesToCreate.map(summarizeTemplate),
-    errors: []
+    errors: [],
   };
 
   if (templatesToCreate.length === 0) {
@@ -456,7 +451,7 @@ async function replicateTemplates(params) {
       templateNames,
       onlyApproved: Boolean(onlyApproved),
       continueOnError: Boolean(continueOnError),
-      batchSize
+      batchSize,
     });
 
     templatesToCreate = loaded.templates;
@@ -469,7 +464,7 @@ async function replicateTemplates(params) {
       createJobs.push({
         template,
         targetRouterKey: targetRouterKeys[targetIndex],
-        targetIndex
+        targetIndex,
       });
     }
   }
@@ -478,14 +473,14 @@ async function replicateTemplates(params) {
     searchedTemplateNames: loadResults.searchedTemplateNames,
     foundTemplates: templatesToCreate.map(summarizeTemplate),
     created: [],
-    errors: [...loadResults.errors]
+    errors: [...loadResults.errors],
   };
 
   await runInBatches(createJobs, batchSize, async (job) => {
     try {
       const createResult = await createTemplateOnTargetRouter({
         ...job,
-        dryRun: Boolean(dryRun)
+        dryRun: Boolean(dryRun),
       });
 
       results.created.push(createResult);
@@ -496,7 +491,7 @@ async function replicateTemplates(params) {
         templateName: job.template.name,
         language: job.template.language,
         targetIndex: job.targetIndex,
-        message: error.message
+        message: error.message,
       };
 
       results.errors.push(errorInfo);
@@ -514,27 +509,29 @@ async function replicateTemplates(params) {
       dryRun: Boolean(dryRun),
       continueOnError: Boolean(continueOnError),
       onlyApproved: Boolean(onlyApproved),
-      batchSize
+      batchSize,
     },
     totals: {
       foundTemplates: results.foundTemplates.length,
       targetRouters: targetRouterKeys.length,
       createJobs: createJobs.length,
-      uploadedAttachments: results.created.reduce((total, item) => total + Number(item.uploadedAttachments || 0), 0),
+      uploadedAttachments: results.created.reduce(
+        (total, item) => total + Number(item.uploadedAttachments || 0),
+        0,
+      ),
       created: results.created.length,
-      errors: results.errors.length
+      errors: results.errors.length,
     },
-    ...results
+    ...results,
   };
 }
 
 async function compareTemplates(params) {
-  const sourceRouterKey = typeof params?.sourceRouterKey === "string"
-    ? params.sourceRouterKey.trim()
-    : "";
+  const sourceRouterKey =
+    typeof params?.sourceRouterKey === "string" ? params.sourceRouterKey.trim() : "";
   const targetRouterKeys = normalizeStringList(
     params?.targetRouterKeys || params?.routerKeys,
-    "routerKeys"
+    "routerKeys",
   );
   const routerEntries = [];
   const seenRouterKeys = new Set();
@@ -543,7 +540,7 @@ async function compareTemplates(params) {
     routerEntries.push({
       routerKey: sourceRouterKey,
       routerIndex: 0,
-      role: "source"
+      role: "source",
     });
     seenRouterKeys.add(sourceRouterKey);
   }
@@ -553,51 +550,55 @@ async function compareTemplates(params) {
       routerEntries.push({
         routerKey,
         routerIndex: routerEntries.length,
-        role: sourceRouterKey ? "target" : "router"
+        role: sourceRouterKey ? "target" : "router",
       });
       seenRouterKeys.add(routerKey);
     }
   }
 
   if (routerEntries.length < 2) {
-    throw new InputError(sourceRouterKey
-      ? "Informe o router de origem e pelo menos um router de destino para comparar."
-      : "Informe pelo menos dois routers para comparar.");
+    throw new InputError(
+      sourceRouterKey
+        ? "Informe o router de origem e pelo menos um router de destino para comparar."
+        : "Informe pelo menos dois routers para comparar.",
+    );
   }
 
   const filters = {
     category: normalizeFilterText(params?.category),
-    status: normalizeFilterText(params?.status)
+    status: normalizeFilterText(params?.status),
   };
 
-  const routerResults = await Promise.all(routerEntries.map(async (routerEntry) => {
-    const templates = await getTemplatesFromRouter(routerEntry.routerKey);
-    const filteredTemplates = templates.filter(template => (
-      template.name
-      && template.language
-      && templateMatchesCompareFilters(template, filters)
-    ));
+  const routerResults = await Promise.all(
+    routerEntries.map(async (routerEntry) => {
+      const templates = await getTemplatesFromRouter(routerEntry.routerKey);
+      const filteredTemplates = templates.filter(
+        (template) =>
+          template.name && template.language && templateMatchesCompareFilters(template, filters),
+      );
 
-    const templatesByKey = new Map();
-    for (const template of filteredTemplates) {
-      const key = getTemplateKey(template);
-      if (!templatesByKey.has(key)) {
-        templatesByKey.set(key, template);
+      const templatesByKey = new Map();
+      for (const template of filteredTemplates) {
+        const key = getTemplateKey(template);
+        if (!templatesByKey.has(key)) {
+          templatesByKey.set(key, template);
+        }
       }
-    }
 
-    return {
-      routerIndex: routerEntry.routerIndex,
-      role: routerEntry.role,
-      totalTemplates: templates.length,
-      totalFilteredTemplates: templatesByKey.size,
-      templatesByKey
-    };
-  }));
+      return {
+        routerIndex: routerEntry.routerIndex,
+        role: routerEntry.role,
+        totalTemplates: templates.length,
+        totalFilteredTemplates: templatesByKey.size,
+        templatesByKey,
+      };
+    }),
+  );
 
   const firstRouter = routerResults[0];
-  const commonKeys = Array.from(firstRouter.templatesByKey.keys())
-    .filter(key => routerResults.every(router => router.templatesByKey.has(key)));
+  const commonKeys = Array.from(firstRouter.templatesByKey.keys()).filter((key) =>
+    routerResults.every((router) => router.templatesByKey.has(key)),
+  );
 
   const commonTemplates = commonKeys
     .map((key) => {
@@ -608,8 +609,8 @@ async function compareTemplates(params) {
         routers: routerResults.map((router) => ({
           routerIndex: router.routerIndex,
           role: router.role,
-          ...summarizeTemplate(router.templatesByKey.get(key))
-        }))
+          ...summarizeTemplate(router.templatesByKey.get(key)),
+        })),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.language.localeCompare(b.language));
@@ -620,14 +621,14 @@ async function compareTemplates(params) {
       routers: routerEntries.length,
       sourceRouterIncluded: Boolean(sourceRouterKey),
       commonTemplates: commonTemplates.length,
-      templatesByRouter: routerResults.map(router => ({
+      templatesByRouter: routerResults.map((router) => ({
         routerIndex: router.routerIndex,
         role: router.role,
         totalTemplates: router.totalTemplates,
-        totalFilteredTemplates: router.totalFilteredTemplates
-      }))
+        totalFilteredTemplates: router.totalFilteredTemplates,
+      })),
     },
-    commonTemplates
+    commonTemplates,
   };
 }
 
@@ -635,5 +636,5 @@ module.exports = {
   InputError,
   searchTemplates,
   compareTemplates,
-  replicateTemplates
+  replicateTemplates,
 };
