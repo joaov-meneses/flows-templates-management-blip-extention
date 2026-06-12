@@ -15,6 +15,7 @@ const {
   getFlowPreview,
   getFlowJson,
   createFlow,
+  updateFlowJson,
   publishFlow,
   replicateFlows,
 } = require("./server/flowService.cjs");
@@ -90,6 +91,15 @@ app.post("/api/flows/json", async (req, res, next) => {
 app.post("/api/flows/create", async (req, res, next) => {
   try {
     const result = await createFlow(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/flows/update-json", async (req, res, next) => {
+  try {
+    const result = await updateFlowJson(req.body);
     res.json(result);
   } catch (error) {
     next(error);

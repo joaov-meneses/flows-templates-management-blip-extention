@@ -11,20 +11,25 @@ import {
   LoaderCircle,
   MessageSquareText,
   Moon,
+  Pencil,
   Plus,
   Search,
   Send,
   Square,
   Sun,
+  Terminal,
   Trash2,
   X,
 } from "lucide-react";
 import { useIframeAutoHeight } from "../hooks/useIframeAutoHeight";
+import { COMMAND_METHODS } from "../lib/blipActions";
+import { getCurrentApplication, sendBlipCommand, showBlipAlert } from "../lib/blipProxy";
 import "../styles/blip-app.css";
 
-type ActiveView = "templates" | "flows";
+type ActiveView = "templates" | "flows" | "devs";
 type RouterModal = "source" | "targets" | null;
 type SortDirection = "asc" | "desc";
+type CommandDestination = "BlipService" | "MessagingHubService";
 
 type Template = {
   name: string;
@@ -113,8 +118,30 @@ type FlowCreateResponse = {
   createResponse: unknown;
   setJsonResponse: unknown;
 };
+type FlowUpdateJsonResponse = {
+  flow: FlowSummary;
+  setJsonResponse: unknown;
+};
 type FlowPublishResponse = { flowId: string; publishResponse: unknown };
 type OperationResult = { summary: string; payload: unknown; previewFlow?: FlowSummary };
+type PortalApplicationAccount = {
+  shortName: string;
+  name: string;
+  imageUri?: string;
+  template?: string;
+  hasPermission?: boolean;
+  tenantId?: string;
+  emailOwner?: string;
+};
+type ResolvedRouterKey = {
+  shortName: string;
+  key: string;
+  keyPreview: string;
+};
+type CurrentApplicationRouter = {
+  shortName: string;
+  accessKey?: string;
+};
 
 const DEFAULT_TEMPLATE_OPTIONS = {
   dryRun: false,
@@ -124,6 +151,12 @@ const DEFAULT_TEMPLATE_OPTIONS = {
 };
 const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
 const THEME_STORAGE_KEY = "create-templates-theme";
+const PORTAL_COMMAND_DESTINATION = "BlipService";
+const COMMAND_DESTINATIONS: CommandDestination[] = ["BlipService", "MessagingHubService"];
+const DEFAULT_DEV_COMMAND_TO = "postmaster@portal.blip.ai";
+const DEFAULT_DEV_COMMAND_URI = "/tenants/macro/users?$skip=0&$take=9999";
+const PORTAL_APPLICATIONS_URI = "/tenants/macro/applications";
+const ROUTER_ACCESS_COMMAND_ID = "759a6d6e-c787-4eb1-a49a-221f32a1d8aa";
 const emptyTemplateSearch: SearchResponse = {
   search: { templateName: "", onlyApproved: false },
   total: 0,
@@ -146,8 +179,29 @@ function flowKey(f: FlowSummary) {
 function maskRouterKey(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "Nenhum router configurado";
+  if (!trimmed.startsWith("Key ") && trimmed.length <= 36) return trimmed;
   const normalized = trimmed.startsWith("Key ") ? trimmed.slice(4) : trimmed;
   return `Key ${normalized.slice(0, 8)}••••${normalized.slice(-8)}`;
+}
+function decodeBase64(value: string) {
+  const binary = window.atob(value);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+
+  return new TextDecoder().decode(bytes);
+}
+function encodeBase64(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return window.btoa(binary);
+}
+function buildRouterKey(shortName: string, accessKey: string) {
+  const decodedAccessKey = decodeBase64(accessKey);
+  return `Key ${encodeBase64(`${shortName}:${decodedAccessKey}`)}`;
 }
 async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
   const response = await fetch(path, {
@@ -161,9 +215,14 @@ async function postJson<TResponse>(path: string, body: unknown): Promise<TRespon
 }
 async function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Iframes can expose Clipboard API while blocking it by permissions policy.
+    }
   }
+
   const ta = document.createElement("textarea");
   ta.value = text;
   ta.style.position = "fixed";
@@ -171,16 +230,130 @@ async function copyText(text: string) {
   document.body.appendChild(ta);
   ta.focus();
   ta.select();
-  document.execCommand("copy");
+  const copied = document.execCommand("copy");
   document.body.removeChild(ta);
+
+  if (!copied) {
+    throw new Error("Não foi possível copiar para a área de transferência.");
+  }
+}
+function createCommandId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+function getCommandFailureMessage(response: unknown, fallback: string) {
+  if (!isRecord(response)) return fallback;
+  const reason = response.reason;
+
+  if (isRecord(reason) && typeof reason.description === "string") {
+    return reason.description;
+  }
+
+  if (typeof response.message === "string") return response.message;
+  return fallback;
+}
+function extractCommandResource(response: unknown) {
+  if (isRecord(response) && response.status === "failure") {
+    throw new Error(
+      getCommandFailureMessage(response, "Falha ao executar command no Portal BLiP."),
+    );
+  }
+
+  if (isRecord(response) && "resource" in response) {
+    return response.resource;
+  }
+
+  return response;
+}
+function extractRouterApplications(response: unknown): PortalApplicationAccount[] {
+  const resource = extractCommandResource(response);
+  if (!isRecord(resource) || !Array.isArray(resource.items)) return [];
+
+  return resource.items
+    .filter((item): item is PortalApplicationAccount => {
+      if (!isRecord(item)) return false;
+      return (
+        item.hasPermission === true &&
+        item.template === "master" &&
+        typeof item.shortName === "string" &&
+        typeof item.name === "string"
+      );
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+function extractRouterKey(response: unknown, requestedShortName: string): ResolvedRouterKey {
+  const resource = extractCommandResource(response);
+
+  if (!isRecord(resource)) {
+    throw new Error(`Resposta inválida ao carregar a key do router ${requestedShortName}.`);
+  }
+
+  const shortName =
+    typeof resource.shortName === "string" && resource.shortName.trim()
+      ? resource.shortName.trim()
+      : requestedShortName;
+  const accessKey = typeof resource.accessKey === "string" ? resource.accessKey.trim() : "";
+
+  if (!accessKey) {
+    throw new Error(`Router ${shortName} não retornou accessKey.`);
+  }
+
+  try {
+    const key = buildRouterKey(shortName, accessKey);
+
+    return {
+      shortName,
+      key,
+      keyPreview: maskRouterKey(key),
+    };
+  } catch {
+    throw new Error(`Não foi possível gerar a key do router ${shortName}.`);
+  }
+}
+async function loadRouterKey(shortName: string) {
+  const command = {
+    method: COMMAND_METHODS.GET,
+    to: DEFAULT_DEV_COMMAND_TO,
+    uri: `/applications/${shortName}@msging.net`,
+    id: ROUTER_ACCESS_COMMAND_ID,
+  } as const;
+  const response = await sendBlipCommand(command, {
+    destination: PORTAL_COMMAND_DESTINATION,
+    timeout: 30000,
+  });
+
+  return extractRouterKey(response, shortName);
+}
+function extractCurrentApplicationRouter(response: unknown): CurrentApplicationRouter | null {
+  const resource = isRecord(response) && "response" in response ? response.response : response;
+
+  if (!isRecord(resource) || typeof resource.shortName !== "string") {
+    return null;
+  }
+
+  const accessKey = typeof resource.accessKey === "string" ? resource.accessKey.trim() : "";
+
+  return {
+    shortName: resource.shortName.trim(),
+    accessKey: accessKey || undefined,
+  };
 }
 
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
+  const didLoadCurrentApplicationRef = useRef(false);
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>("templates");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
+  const [sourceRouterShortName, setSourceRouterShortName] = useState("");
   const [targetRouterKeys, setTargetRouterKeys] = useState("");
+  const [targetRouterShortNames, setTargetRouterShortNames] = useState<string[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [templateSearchResult, setTemplateSearchResult] =
     useState<SearchResponse>(emptyTemplateSearch);
@@ -196,12 +369,21 @@ export default function CreateTemplatesApp() {
     useState<TemplateCompareResponse | null>(null);
   const [templateCompareNameSort, setTemplateCompareNameSort] = useState<SortDirection>("asc");
   const [isCreateFlowModalOpen, setIsCreateFlowModalOpen] = useState(false);
+  const [isEditFlowModalOpen, setIsEditFlowModalOpen] = useState(false);
+  const [editingFlow, setEditingFlow] = useState<FlowSummary | null>(null);
   const [draftSourceRouterKey, setDraftSourceRouterKey] = useState("");
   const [draftTargetRouterKeys, setDraftTargetRouterKeys] = useState("");
+  const [routerApplications, setRouterApplications] = useState<PortalApplicationAccount[]>([]);
+  const [routerApplicationsError, setRouterApplicationsError] = useState("");
+  const [routerApplicationSearch, setRouterApplicationSearch] = useState("");
+  const [isLoadingRouterApplications, setIsLoadingRouterApplications] = useState(false);
+  const [currentApplicationRouter, setCurrentApplicationRouter] =
+    useState<CurrentApplicationRouter | null>(null);
   const [newFlowName, setNewFlowName] = useState("");
   const [newFlowIsApi, setNewFlowIsApi] = useState(false);
   const [newFlowEndpointUri, setNewFlowEndpointUri] = useState("");
   const [newFlowJson, setNewFlowJson] = useState("");
+  const [editFlowJson, setEditFlowJson] = useState("");
   const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
   const [error, setError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
@@ -211,7 +393,15 @@ export default function CreateTemplatesApp() {
   const [isLoadingFlows, setIsLoadingFlows] = useState(false);
   const [isReplicatingFlows, setIsReplicatingFlows] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
+  const [isLoadingEditFlowJson, setIsLoadingEditFlowJson] = useState(false);
+  const [isUpdatingFlow, setIsUpdatingFlow] = useState(false);
   const [flowActionId, setFlowActionId] = useState("");
+  const [devCommandDestination, setDevCommandDestination] =
+    useState<CommandDestination>("BlipService");
+  const [devCommandTo, setDevCommandTo] = useState(DEFAULT_DEV_COMMAND_TO);
+  const [devCommandUri, setDevCommandUri] = useState(DEFAULT_DEV_COMMAND_URI);
+  const [isRunningDevCommand, setIsRunningDevCommand] = useState(false);
+  const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
 
   const isEmbedded = useIframeAutoHeight(shellRef);
 
@@ -226,7 +416,65 @@ export default function CreateTemplatesApp() {
     window.localStorage.setItem(THEME_STORAGE_KEY, isDarkTheme ? "dark" : "light");
   }, [isDarkTheme]);
 
-  const targetCount = splitLines(targetRouterKeys).length;
+  useEffect(() => {
+    if (!isEmbedded || didLoadCurrentApplicationRef.current) return;
+
+    didLoadCurrentApplicationRef.current = true;
+    let cancelled = false;
+
+    async function loadCurrentApplication() {
+      setIsLoadingCurrentApplication(true);
+
+      try {
+        const response = await getCurrentApplication();
+        if (cancelled) return;
+
+        const router = extractCurrentApplicationRouter(response);
+
+        setCurrentApplicationRouter(router);
+        if (router?.shortName) {
+          setSourceRouterShortName((current) => current || router.shortName);
+          setSourceRouterKey((current) => current);
+        }
+        setOperationResult({
+          summary: "getApplication carregado.",
+          payload: {
+            action: "getApplication",
+            response,
+          },
+        });
+      } catch (caughtError) {
+        if (cancelled) return;
+
+        const message =
+          caughtError instanceof Error ? caughtError.message : "Erro ao executar getApplication.";
+
+        setOperationResult({
+          summary: "Falha ao carregar getApplication.",
+          payload: {
+            action: "getApplication",
+            error: { message },
+          },
+        });
+      } finally {
+        if (!cancelled) setIsLoadingCurrentApplication(false);
+      }
+    }
+
+    void loadCurrentApplication();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmbedded]);
+
+  const targetCount = isEmbedded
+    ? targetRouterShortNames.length
+    : splitLines(targetRouterKeys).length;
+  const draftTargetRouterSet = useMemo(
+    () => new Set(splitLines(draftTargetRouterKeys)),
+    [draftTargetRouterKeys],
+  );
 
   const selectedTemplates = useMemo(
     () => templateSearchResult.templates.filter((t) => selectedTemplateKeys.has(templateKey(t))),
@@ -261,6 +509,17 @@ export default function CreateTemplatesApp() {
   const allVisibleFlowsSelected =
     filteredFlows.length > 0 && filteredFlows.every((f) => selectedFlowIds.has(flowKey(f)));
 
+  const filteredRouterApplications = useMemo(() => {
+    const q = routerApplicationSearch.trim().toLowerCase();
+    if (!q) return routerApplications;
+
+    return routerApplications.filter(
+      (application) =>
+        application.name.toLowerCase().includes(q) ||
+        application.shortName.toLowerCase().includes(q),
+    );
+  }, [routerApplicationSearch, routerApplications]);
+
   const headerCopy =
     activeView === "templates"
       ? {
@@ -268,25 +527,124 @@ export default function CreateTemplatesApp() {
           title: "Templates",
           description: "Replicação de templates entre routers BLiP",
         }
-      : {
-          kicker: "WhatsApp Flows",
-          title: "Flows",
-          description: "Consulta, visualização e cópia de flows entre routers BLiP",
-        };
+      : activeView === "flows"
+        ? {
+            kicker: "WhatsApp Flows",
+            title: "Flows",
+            description: "Consulta, visualização e cópia de flows entre routers BLiP",
+          }
+        : {
+            kicker: "Command Lab",
+            title: "Devs",
+            description: "Testes de commands no iframe do Portal BLiP",
+          };
+
+  async function loadRouterApplications() {
+    if (!isEmbedded) return;
+
+    setIsLoadingRouterApplications(true);
+    setRouterApplicationsError("");
+
+    const command = {
+      method: COMMAND_METHODS.GET,
+      to: DEFAULT_DEV_COMMAND_TO,
+      uri: PORTAL_APPLICATIONS_URI,
+      id: createCommandId(),
+    } as const;
+
+    try {
+      const response = await sendBlipCommand(command, {
+        destination: PORTAL_COMMAND_DESTINATION,
+        timeout: 30000,
+      });
+      const applications = extractRouterApplications(response);
+
+      setRouterApplications(applications);
+      if (applications.length === 0) {
+        setRouterApplicationsError("Nenhum router master com permissão encontrado.");
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Erro ao carregar routers.";
+
+      setRouterApplications([]);
+      setRouterApplicationsError(message);
+    } finally {
+      setIsLoadingRouterApplications(false);
+    }
+  }
+
+  function hasSourceRouterSelection() {
+    return isEmbedded
+      ? Boolean(sourceRouterShortName || sourceRouterKey.trim())
+      : Boolean(sourceRouterKey.trim());
+  }
+
+  function hasTargetRouterSelection() {
+    return isEmbedded
+      ? targetRouterShortNames.length > 0 || splitLines(targetRouterKeys).length > 0
+      : splitLines(targetRouterKeys).length > 0;
+  }
+
+  async function ensureSourceRouterKey() {
+    const cachedKey = sourceRouterKey.trim();
+    if (!isEmbedded) return cachedKey;
+    if (cachedKey) return cachedKey;
+    if (!sourceRouterShortName) return "";
+
+    if (
+      currentApplicationRouter?.shortName === sourceRouterShortName &&
+      currentApplicationRouter.accessKey
+    ) {
+      const key = buildRouterKey(sourceRouterShortName, currentApplicationRouter.accessKey);
+
+      setSourceRouterKey(key);
+      return key;
+    }
+
+    const router = await loadRouterKey(sourceRouterShortName);
+
+    setSourceRouterKey(router.key);
+    setSourceRouterShortName(router.shortName);
+
+    return router.key;
+  }
+
+  async function ensureTargetRouterKeys() {
+    const cachedKeys = splitLines(targetRouterKeys);
+
+    if (!isEmbedded) return cachedKeys;
+    if (cachedKeys.length > 0) return cachedKeys;
+    if (targetRouterShortNames.length === 0) return [];
+
+    const routers: ResolvedRouterKey[] = [];
+
+    for (const shortName of targetRouterShortNames) {
+      routers.push(await loadRouterKey(shortName));
+    }
+
+    const keys = routers.map((router) => router.key);
+
+    setTargetRouterKeys(keys.join("\n"));
+    setTargetRouterShortNames(routers.map((router) => router.shortName));
+
+    return keys;
+  }
 
   async function handleSearchTemplates(event: FormEvent) {
     event.preventDefault();
     setError("");
     setOperationResult(null);
-    if (!sourceRouterKey.trim()) {
-      setError("Informe a key do router de origem.");
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
       openSourceModal();
       return;
     }
     setIsSearchingTemplates(true);
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const data = await postJson<SearchResponse>("/api/templates/search", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         templateName: templateName.trim(),
         onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved,
       });
@@ -310,14 +668,14 @@ export default function CreateTemplatesApp() {
       setError("Selecione pelo menos um template.");
       return;
     }
-    const targets = splitLines(targetRouterKeys);
-    if (targets.length === 0) {
-      setError("Informe pelo menos uma key de destino.");
+    if (!hasTargetRouterSelection()) {
+      setError("Informe pelo menos um router de destino.");
       openTargetsModal();
       return;
     }
     setIsReplicatingTemplates(true);
     try {
+      const targets = await ensureTargetRouterKeys();
       const data = await postJson<TemplateReplicateResponse>("/api/templates/replicate", {
         targetRouterKeys: targets,
         templates: selectedTemplates,
@@ -337,21 +695,22 @@ export default function CreateTemplatesApp() {
   async function handleCompareTemplates(event?: FormEvent) {
     event?.preventDefault();
     setError("");
-    if (!sourceRouterKey.trim()) {
-      setError("Informe a key do router de origem para comparar.");
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem para comparar.");
       openSourceModal();
       return;
     }
-    const routers = splitLines(targetRouterKeys);
-    if (routers.length === 0) {
+    if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino para comparar com a origem.");
       openTargetsModal();
       return;
     }
     setIsComparingTemplates(true);
     try {
+      const sourceKey = await ensureSourceRouterKey();
+      const routers = await ensureTargetRouterKeys();
       const data = await postJson<TemplateCompareResponse>("/api/templates/compare", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         targetRouterKeys: routers,
         category: templateCompareCategory,
         status: templateCompareStatus,
@@ -385,8 +744,8 @@ export default function CreateTemplatesApp() {
     event?.preventDefault();
     setError("");
     setOperationResult(null);
-    if (!sourceRouterKey.trim()) {
-      setError("Informe a key do router de origem.");
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
       openSourceModal();
       return;
     }
@@ -402,9 +761,10 @@ export default function CreateTemplatesApp() {
     }
   }
 
-  async function loadFlowsFromSource() {
+  async function loadFlowsFromSource(sourceKey?: string) {
+    const resolvedSourceKey = sourceKey ?? (await ensureSourceRouterKey());
     const data = await postJson<FlowSearchResponse>("/api/flows/search", {
-      sourceRouterKey: sourceRouterKey.trim(),
+      sourceRouterKey: resolvedSourceKey,
     });
     setFlowSearchResult(data);
     setSelectedFlowIds(data.flows.length === 1 ? new Set([flowKey(data.flows[0])]) : new Set());
@@ -415,8 +775,9 @@ export default function CreateTemplatesApp() {
     setError("");
     setFlowActionId(`preview:${flow.id}`);
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const data = await postJson<FlowPreviewResponse>("/api/flows/preview", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         flowId: flow.id,
       });
       window.open(data.previewUrl, "_blank", "noopener,noreferrer");
@@ -432,8 +793,9 @@ export default function CreateTemplatesApp() {
     setError("");
     setFlowActionId(`json:${flow.id}`);
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const data = await postJson<FlowJsonResponse>("/api/flows/json", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         flowId: flow.id,
       });
       await copyText(JSON.stringify(data.json, null, 2));
@@ -445,15 +807,113 @@ export default function CreateTemplatesApp() {
     }
   }
 
+  async function handleOpenEditFlow(flow: FlowSummary) {
+    setError("");
+    setCopyNotice("");
+    setEditingFlow(flow);
+    setEditFlowJson("");
+    setIsEditFlowModalOpen(true);
+    setIsLoadingEditFlowJson(true);
+    setFlowActionId(`edit:${flow.id}`);
+
+    try {
+      const sourceKey = await ensureSourceRouterKey();
+      const data = await postJson<FlowJsonResponse>("/api/flows/json", {
+        sourceRouterKey: sourceKey,
+        flowId: flow.id,
+      });
+
+      setEditFlowJson(JSON.stringify(data.json, null, 2));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao carregar JSON do flow.");
+    } finally {
+      setIsLoadingEditFlowJson(false);
+      setFlowActionId("");
+    }
+  }
+
+  function closeEditFlowModal(options: { force?: boolean } = {}) {
+    if (isUpdatingFlow && !options.force) return;
+
+    setIsEditFlowModalOpen(false);
+    setEditingFlow(null);
+    setEditFlowJson("");
+    setIsLoadingEditFlowJson(false);
+    setError("");
+  }
+
+  async function handleSaveEditedFlow() {
+    if (!editingFlow) return;
+
+    setError("");
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(editFlowJson);
+    } catch {
+      setError("Informe um JSON completo válido.");
+      return;
+    }
+
+    let confirmed = false;
+    try {
+      confirmed = await showBlipAlert({
+        variant: "warning",
+        icon: "warning",
+        title: "Confirmar atualização",
+        body: "Ao prosseguir, o flow será atualizado e voltará ao estado <b>DRAFT</b>.",
+        buttons: {
+          cancel: "Cancelar",
+          confirm: "Confirmar",
+        },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao exibir confirmação.");
+      return;
+    }
+
+    if (!confirmed) return;
+
+    setIsUpdatingFlow(true);
+    setFlowActionId(`update:${editingFlow.id}`);
+    try {
+      const sourceKey = await ensureSourceRouterKey();
+      const data = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
+        sourceRouterKey: sourceKey,
+        flowId: editingFlow.id,
+        flowJson: parsedJson,
+      });
+
+      setFlowSearchResult((current) => ({
+        ...current,
+        flows: current.flows.map((flow) =>
+          flow.id === editingFlow.id ? { ...flow, status: "DRAFT" } : flow,
+        ),
+      }));
+      setOperationResult({
+        summary: `Flow "${editingFlow.name}" atualizado e retornou para draft.`,
+        payload: data,
+        previewFlow: { ...editingFlow, status: "DRAFT" },
+      });
+      closeEditFlowModal({ force: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao atualizar flow.");
+    } finally {
+      setIsUpdatingFlow(false);
+      setFlowActionId("");
+    }
+  }
+
   async function handlePublishFlow(flow: FlowSummary) {
     setError("");
     setFlowActionId(`publish:${flow.id}`);
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const data = await postJson<FlowPublishResponse>("/api/flows/publish", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         flowId: flow.id,
       });
-      await loadFlowsFromSource();
+      await loadFlowsFromSource(sourceKey);
       setOperationResult({
         summary: `Flow "${flow.name}" publicado com sucesso.`,
         payload: data,
@@ -468,8 +928,8 @@ export default function CreateTemplatesApp() {
 
   async function handleCreateFlow() {
     setError("");
-    if (!sourceRouterKey.trim()) {
-      setError("Informe a key do router de origem.");
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
       return;
     }
     const normalizedName = newFlowName.trim();
@@ -490,8 +950,9 @@ export default function CreateTemplatesApp() {
     }
     setIsCreatingFlow(true);
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const data = await postJson<FlowCreateResponse>("/api/flows/create", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         name: normalizedName,
         isFlowApi: newFlowIsApi,
         endpointUri: newFlowEndpointUri.trim(),
@@ -503,7 +964,7 @@ export default function CreateTemplatesApp() {
       setNewFlowEndpointUri("");
       setNewFlowJson("");
       setFlowFilter(data.flow.name);
-      await loadFlowsFromSource();
+      await loadFlowsFromSource(sourceKey);
       setOperationResult({
         summary: `Flow criado com sucesso. ID: ${data.flow.id}`,
         payload: data,
@@ -519,8 +980,8 @@ export default function CreateTemplatesApp() {
   async function handleReplicateFlows() {
     setError("");
     setOperationResult(null);
-    if (!sourceRouterKey.trim()) {
-      setError("Informe a key do router de origem.");
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
       openSourceModal();
       return;
     }
@@ -528,16 +989,17 @@ export default function CreateTemplatesApp() {
       setError("Selecione pelo menos um flow.");
       return;
     }
-    const targets = splitLines(targetRouterKeys);
-    if (targets.length === 0) {
-      setError("Informe pelo menos uma key de destino.");
+    if (!hasTargetRouterSelection()) {
+      setError("Informe pelo menos um router de destino.");
       openTargetsModal();
       return;
     }
     setIsReplicatingFlows(true);
     try {
+      const sourceKey = await ensureSourceRouterKey();
+      const targets = await ensureTargetRouterKeys();
       const data = await postJson<FlowReplicateResponse>("/api/flows/replicate", {
-        sourceRouterKey: sourceRouterKey.trim(),
+        sourceRouterKey: sourceKey,
         targetRouterKeys: targets,
         flows: selectedFlows,
         ...DEFAULT_FLOW_OPTIONS,
@@ -550,6 +1012,104 @@ export default function CreateTemplatesApp() {
       setError(e instanceof Error ? e.message : "Erro ao replicar flows.");
     } finally {
       setIsReplicatingFlows(false);
+    }
+  }
+
+  async function handleRunDevCommand(event: FormEvent) {
+    event.preventDefault();
+    const to = devCommandTo.trim();
+    const uri = devCommandUri.trim();
+
+    setError("");
+    setOperationResult(null);
+
+    if (!uri) {
+      setError("Informe a URI do command.");
+      return;
+    }
+
+    const command = {
+      method: COMMAND_METHODS.GET,
+      to,
+      uri,
+      id: createCommandId(),
+    } as const;
+
+    setIsRunningDevCommand(true);
+    setOperationResult({
+      summary: `Executando command em ${devCommandDestination}...`,
+      payload: {
+        destination: devCommandDestination,
+        command,
+        status: "loading",
+      },
+    });
+
+    try {
+      const response = await sendBlipCommand(command, {
+        destination: devCommandDestination,
+        timeout: 30000,
+      });
+
+      setOperationResult({
+        summary: `Command executado em ${devCommandDestination}.`,
+        payload: {
+          destination: devCommandDestination,
+          command,
+          response,
+        },
+      });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Erro ao executar command.";
+
+      setOperationResult({
+        summary: `Falha ao executar command em ${devCommandDestination}.`,
+        payload: {
+          destination: devCommandDestination,
+          command,
+          error: { message },
+        },
+      });
+    } finally {
+      setIsRunningDevCommand(false);
+    }
+  }
+
+  async function handleGetCurrentApplication() {
+    setError("");
+    setIsLoadingCurrentApplication(true);
+    setOperationResult({
+      summary: "Executando getApplication...",
+      payload: {
+        action: "getApplication",
+        status: "loading",
+      },
+    });
+
+    try {
+      const response = await getCurrentApplication();
+
+      setOperationResult({
+        summary: "getApplication executado.",
+        payload: {
+          action: "getApplication",
+          response,
+        },
+      });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Erro ao executar getApplication.";
+
+      setOperationResult({
+        summary: "Falha ao executar getApplication.",
+        payload: {
+          action: "getApplication",
+          error: { message },
+        },
+      });
+    } finally {
+      setIsLoadingCurrentApplication(false);
     }
   }
 
@@ -608,25 +1168,166 @@ export default function CreateTemplatesApp() {
     setCopyNotice("");
   }
   function openSourceModal() {
-    setDraftSourceRouterKey(sourceRouterKey);
+    setDraftSourceRouterKey(isEmbedded ? sourceRouterShortName : sourceRouterKey);
+    setRouterApplicationSearch("");
+    if (isEmbedded) void loadRouterApplications();
     setRouterModal("source");
   }
   function openTargetsModal() {
-    setDraftTargetRouterKeys(targetRouterKeys);
+    setDraftTargetRouterKeys(isEmbedded ? targetRouterShortNames.join("\n") : targetRouterKeys);
+    setRouterApplicationSearch("");
+    if (isEmbedded) void loadRouterApplications();
     setRouterModal("targets");
   }
   function closeRouterModal() {
     setRouterModal(null);
   }
   function saveSourceRouter() {
-    setSourceRouterKey(draftSourceRouterKey.trim());
-    setRouterModal(null);
+    const selectedShortName = draftSourceRouterKey.trim();
+
     setError("");
+    setRouterApplicationsError("");
+
+    if (!isEmbedded) {
+      setSourceRouterKey(selectedShortName);
+      setSourceRouterShortName("");
+      setRouterModal(null);
+      return;
+    }
+
+    setSourceRouterShortName(selectedShortName);
+    setSourceRouterKey("");
+    setRouterModal(null);
   }
   function saveTargetRouters() {
-    setTargetRouterKeys(splitLines(draftTargetRouterKeys).join("\n"));
-    setRouterModal(null);
+    const selectedShortNames = splitLines(draftTargetRouterKeys);
+
     setError("");
+    setRouterApplicationsError("");
+
+    if (!isEmbedded) {
+      setTargetRouterKeys(selectedShortNames.join("\n"));
+      setTargetRouterShortNames([]);
+      setRouterModal(null);
+      return;
+    }
+
+    setTargetRouterShortNames(selectedShortNames);
+    setTargetRouterKeys("");
+    setRouterModal(null);
+  }
+  function toggleDraftTargetRouter(shortName: string) {
+    setDraftTargetRouterKeys((current) => {
+      const next = new Set(splitLines(current));
+      if (next.has(shortName)) {
+        next.delete(shortName);
+      } else {
+        next.add(shortName);
+      }
+
+      return [...next].join("\n");
+    });
+  }
+  function renderRouterApplicationPicker() {
+    const isSourcePicker = routerModal === "source";
+
+    return (
+      <div className="router-application-picker">
+        <div className="router-picker-toolbar">
+          <label className="blip-native-field" htmlFor="routerApplicationSearch">
+            Buscar router
+            <input
+              id="routerApplicationSearch"
+              value={routerApplicationSearch}
+              onChange={(event) => setRouterApplicationSearch(event.target.value)}
+              placeholder="Nome ou shortname"
+            />
+          </label>
+          <button
+            className="blip-button secondary"
+            type="button"
+            onClick={() => void loadRouterApplications()}
+            disabled={isLoadingRouterApplications}
+          >
+            {isLoadingRouterApplications ? (
+              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <Search size={18} aria-hidden="true" />
+            )}
+            Atualizar
+          </button>
+        </div>
+
+        <div className="router-picker-meta">
+          <span>{filteredRouterApplications.length} routers disponíveis</span>
+          <span>
+            {isSourcePicker
+              ? draftSourceRouterKey || "Nenhum selecionado"
+              : `${draftTargetRouterSet.size} selecionados`}
+          </span>
+        </div>
+
+        {routerApplicationsError && (
+          <div className="ember-alert danger modal-alert" role="alert">
+            <AlertCircle size={18} aria-hidden="true" />
+            <span>{routerApplicationsError}</span>
+          </div>
+        )}
+
+        {isLoadingRouterApplications ? (
+          <div className="router-picker-empty">
+            <LoaderCircle className="spin" size={20} aria-hidden="true" />
+            <span>Carregando routers...</span>
+          </div>
+        ) : (
+          <div className="router-application-list">
+            {filteredRouterApplications.length === 0 ? (
+              <div className="router-picker-empty">
+                <span>Nenhum router disponível</span>
+              </div>
+            ) : (
+              filteredRouterApplications.map((application) => {
+                const selected = isSourcePicker
+                  ? draftSourceRouterKey === application.shortName
+                  : draftTargetRouterSet.has(application.shortName);
+
+                return (
+                  <label
+                    key={application.shortName}
+                    className={`router-application-option ${selected ? "selected" : ""}`}
+                  >
+                    <input
+                      type={isSourcePicker ? "radio" : "checkbox"}
+                      name={isSourcePicker ? "source-router-application" : undefined}
+                      checked={selected}
+                      onChange={() => {
+                        if (isSourcePicker) {
+                          setDraftSourceRouterKey(application.shortName);
+                          return;
+                        }
+
+                        toggleDraftTargetRouter(application.shortName);
+                      }}
+                    />
+                    <span className="router-application-avatar" aria-hidden="true">
+                      {application.imageUri ? (
+                        <img src={application.imageUri} alt="" loading="lazy" />
+                      ) : (
+                        <span>{application.name.slice(0, 1).toUpperCase()}</span>
+                      )}
+                    </span>
+                    <span className="router-application-copy">
+                      <strong>{application.name}</strong>
+                      <span>{application.shortName}</span>
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   const shellClassName = [
@@ -640,9 +1341,8 @@ export default function CreateTemplatesApp() {
   return (
     <main ref={shellRef} className={shellClassName}>
       <aside className="ember-sidebar" aria-label="Navegação da extensão">
-        <div className="ember-logo extension-logo" aria-label="BLiP">
-          <span className="blip-logo-mark">BLiP</span>
-          <span className="ember-logo-text">Create Templates</span>
+        <div className="ember-logo extension-logo" aria-label="Gerenciador de Templates e Flows">
+          <span className="ember-logo-text">Gerenciador de Templates e Flows</span>
         </div>
         <nav className="ember-side-nav">
           <button
@@ -661,6 +1361,14 @@ export default function CreateTemplatesApp() {
             <FileJson size={18} aria-hidden="true" />
             Flows
           </button>
+          <button
+            className={activeView === "devs" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("devs")}
+          >
+            <Terminal size={18} aria-hidden="true" />
+            Devs
+          </button>
         </nav>
       </aside>
 
@@ -676,15 +1384,31 @@ export default function CreateTemplatesApp() {
           <div className="ember-header-actions">
             <div className="router-summary">
               <span>Router de origem</span>
-              <strong>{maskRouterKey(sourceRouterKey)}</strong>
+              <strong>{sourceRouterShortName || maskRouterKey(sourceRouterKey)}</strong>
+              {hasSourceRouterSelection() ? (
+                <button
+                  className="router-summary-action icon-action"
+                  type="button"
+                  aria-label="Editar router de origem"
+                  title="Editar router de origem"
+                  onClick={openSourceModal}
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                </button>
+              ) : (
+                <button className="router-summary-action" type="button" onClick={openSourceModal}>
+                  Selecionar
+                </button>
+              )}
             </div>
-            <button className="blip-button secondary" type="button" onClick={openSourceModal}>
-              <Plus size={18} aria-hidden="true" />
-              {sourceRouterKey ? "Editar router de origem" : "Adicionar router de origem"}
-            </button>
-            <button className="blip-button secondary" type="button" onClick={clearResults}>
+            <button
+              className="blip-button secondary header-icon-button"
+              type="button"
+              aria-label="Limpar"
+              title="Limpar"
+              onClick={clearResults}
+            >
               <Trash2 size={18} aria-hidden="true" />
-              Limpar
             </button>
             <button
               className="theme-toggle-button"
@@ -716,12 +1440,8 @@ export default function CreateTemplatesApp() {
               <span>Destinos</span>
               <strong>{targetCount}</strong>
             </div>
-            <div className="ember-stat-card">
-              <span>Modo</span>
-              <strong>Criação</strong>
-            </div>
           </section>
-        ) : (
+        ) : activeView === "flows" ? (
           <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
             <div className="ember-stat-card">
               <span>Carregados</span>
@@ -738,6 +1458,25 @@ export default function CreateTemplatesApp() {
             <div className="ember-stat-card">
               <span>Destinos</span>
               <strong>{targetCount}</strong>
+            </div>
+          </section>
+        ) : (
+          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
+            <div className="ember-stat-card">
+              <span>Destino</span>
+              <strong>{devCommandDestination}</strong>
+            </div>
+            <div className="ember-stat-card">
+              <span>Método</span>
+              <strong>GET</strong>
+            </div>
+            <div className="ember-stat-card">
+              <span>Iframe</span>
+              <strong>{isEmbedded ? "Ativo" : "Fora"}</strong>
+            </div>
+            <div className="ember-stat-card">
+              <span>Metadata</span>
+              <strong>Sem</strong>
             </div>
           </section>
         )}
@@ -880,7 +1619,7 @@ export default function CreateTemplatesApp() {
               </table>
             </div>
           </section>
-        ) : (
+        ) : activeView === "flows" ? (
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>
@@ -916,17 +1655,6 @@ export default function CreateTemplatesApp() {
                 />
               </label>
               <button
-                className="blip-button secondary"
-                type="button"
-                onClick={() => {
-                  setError("");
-                  setIsCreateFlowModalOpen(true);
-                }}
-              >
-                <Plus size={18} aria-hidden="true" />
-                Criar flow agora
-              </button>
-              <button
                 className="blip-submit-button secondary"
                 type="submit"
                 disabled={isLoadingFlows}
@@ -936,7 +1664,18 @@ export default function CreateTemplatesApp() {
                 ) : (
                   <Search size={18} aria-hidden="true" />
                 )}
-                Carregar flows
+                Buscar
+              </button>
+              <button
+                className="blip-button secondary"
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setIsCreateFlowModalOpen(true);
+                }}
+              >
+                <Plus size={18} aria-hidden="true" />
+                Criar flow agora
               </button>
               <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
                 <Plus size={18} aria-hidden="true" />
@@ -1030,6 +1769,24 @@ export default function CreateTemplatesApp() {
                                 )}
                                 Copiar JSON
                               </button>
+                              <button
+                                className="table-action-button icon-only"
+                                type="button"
+                                aria-label={`Editar ${flow.name}`}
+                                title="Editar"
+                                onClick={() => void handleOpenEditFlow(flow)}
+                                disabled={
+                                  flowActionId === `edit:${flow.id}` ||
+                                  flowActionId === `update:${flow.id}`
+                                }
+                              >
+                                {flowActionId === `edit:${flow.id}` ||
+                                flowActionId === `update:${flow.id}` ? (
+                                  <LoaderCircle className="spin" size={16} aria-hidden="true" />
+                                ) : (
+                                  <Pencil size={16} aria-hidden="true" />
+                                )}
+                              </button>
                               {String(flow.status || "").toUpperCase() === "DRAFT" && (
                                 <button
                                   className="table-action-button publish"
@@ -1055,32 +1812,114 @@ export default function CreateTemplatesApp() {
               </table>
             </div>
           </section>
+        ) : (
+          <section className="ember-panel results-panel">
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Devs</h2>
+                <p>Envie commands GET pelo proxy do Portal BLiP sem metadata.</p>
+              </div>
+              <Terminal size={18} aria-hidden="true" />
+            </div>
+
+            <form className="template-filter-row dev-command-row" onSubmit={handleRunDevCommand}>
+              <label className="blip-native-field" htmlFor="devCommandDestination">
+                Destination
+                <select
+                  id="devCommandDestination"
+                  value={devCommandDestination}
+                  onChange={(event) =>
+                    setDevCommandDestination(event.target.value as CommandDestination)
+                  }
+                >
+                  {COMMAND_DESTINATIONS.map((destination) => (
+                    <option key={destination} value={destination}>
+                      {destination}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="blip-native-field" htmlFor="devCommandTo">
+                To
+                <input
+                  id="devCommandTo"
+                  value={devCommandTo}
+                  onChange={(event) => setDevCommandTo(event.target.value)}
+                  placeholder="postmaster@portal.blip.ai"
+                />
+              </label>
+              <label className="blip-native-field template-search-field" htmlFor="devCommandUri">
+                URI
+                <input
+                  id="devCommandUri"
+                  value={devCommandUri}
+                  onChange={(event) => setDevCommandUri(event.target.value)}
+                  placeholder="/resources"
+                />
+              </label>
+              <button
+                className="blip-button secondary"
+                type="button"
+                onClick={() => setDevCommandUri(DEFAULT_DEV_COMMAND_URI)}
+              >
+                <Clipboard size={18} aria-hidden="true" />
+                Padrão
+              </button>
+              <button
+                className="blip-button secondary"
+                type="button"
+                onClick={() => void handleGetCurrentApplication()}
+                disabled={isLoadingCurrentApplication || !isEmbedded}
+              >
+                {isLoadingCurrentApplication ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <FileJson size={18} aria-hidden="true" />
+                )}
+                Get application
+              </button>
+              <button
+                className="blip-submit-button primary"
+                type="submit"
+                disabled={isRunningDevCommand || !isEmbedded}
+              >
+                {isRunningDevCommand ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Send size={18} aria-hidden="true" />
+                )}
+                Executar
+              </button>
+            </form>
+          </section>
         )}
 
-        <section className="ember-panel output-panel">
-          <div className="ember-panel-title">
-            <div>
-              <h2>Resultado</h2>
-              <p>{operationResult?.summary || "Aguardando execução"}</p>
+        {activeView === "devs" && (
+          <section className="ember-panel output-panel">
+            <div className="ember-panel-title">
+              <div>
+                <h2>Resultado</h2>
+                <p>{operationResult?.summary || "Aguardando execução"}</p>
+              </div>
+              <div className="output-actions">
+                {operationResult?.previewFlow && (
+                  <button
+                    className="blip-button secondary"
+                    type="button"
+                    onClick={() => handlePreviewFlow(operationResult.previewFlow!)}
+                  >
+                    <Eye size={18} aria-hidden="true" />
+                    Visualizar
+                  </button>
+                )}
+                <FileJson size={18} aria-hidden="true" />
+              </div>
             </div>
-            <div className="output-actions">
-              {operationResult?.previewFlow && (
-                <button
-                  className="blip-button secondary"
-                  type="button"
-                  onClick={() => handlePreviewFlow(operationResult.previewFlow!)}
-                >
-                  <Eye size={18} aria-hidden="true" />
-                  Visualizar
-                </button>
-              )}
-              <FileJson size={18} aria-hidden="true" />
-            </div>
-          </div>
-          <pre className="code">
-            {operationResult ? JSON.stringify(operationResult.payload, null, 2) : "{}"}
-          </pre>
-        </section>
+            <pre className="code">
+              {operationResult ? JSON.stringify(operationResult.payload, null, 2) : "{}"}
+            </pre>
+          </section>
+        )}
 
         {isTemplateCompareModalOpen && (
           <div className="ember-modal-backdrop" role="presentation">
@@ -1362,6 +2201,77 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
+        {isEditFlowModalOpen && editingFlow && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal create-flow-modal"
+              aria-labelledby="edit-flow-modal-title"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="edit-flow-modal-title">Editar flow</h2>
+                  <p>{editingFlow.name}</p>
+                </div>
+                <button
+                  className="blip-button secondary icon-only"
+                  type="button"
+                  onClick={() => closeEditFlowModal()}
+                  disabled={isUpdatingFlow}
+                >
+                  <X size={18} aria-hidden="true" />
+                  <span>Fechar</span>
+                </button>
+              </div>
+
+              <div className="ember-modal-body">
+                {error && (
+                  <div className="ember-alert danger modal-alert" role="alert">
+                    <AlertCircle size={18} aria-hidden="true" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <label className="blip-native-field json-field" htmlFor="editFlowJson">
+                  JSON completo
+                  <textarea
+                    id="editFlowJson"
+                    value={editFlowJson}
+                    onChange={(e) => setEditFlowJson(e.target.value)}
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow}
+                    placeholder={isLoadingEditFlowJson ? "Carregando JSON..." : "{ ... }"}
+                  />
+                </label>
+              </div>
+
+              <div className="ember-modal-footer">
+                <button
+                  className="blip-button secondary"
+                  type="button"
+                  onClick={() => closeEditFlowModal()}
+                  disabled={isUpdatingFlow}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="blip-submit-button primary"
+                  type="button"
+                  onClick={handleSaveEditedFlow}
+                  disabled={isLoadingEditFlowJson || isUpdatingFlow}
+                >
+                  {isUpdatingFlow ? (
+                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                  ) : (
+                    <Pencil size={18} aria-hidden="true" />
+                  )}
+                  Salvar
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
         {routerModal && (
           <div className="ember-modal-backdrop" role="presentation">
             <section
@@ -1376,9 +2286,11 @@ export default function CreateTemplatesApp() {
                     {routerModal === "source" ? "Router de origem" : "Routers de destino"}
                   </h2>
                   <p>
-                    {routerModal === "source"
-                      ? "Informe a key que será usada para buscar templates e flows."
-                      : "Informe uma ou mais keys de destino, uma por linha."}
+                    {isEmbedded
+                      ? "Selecione os routers master em que você tem permissão."
+                      : routerModal === "source"
+                        ? "Informe a key que será usada para buscar templates e flows."
+                        : "Informe uma ou mais keys de destino, uma por linha."}
                   </p>
                 </div>
                 <button
@@ -1392,7 +2304,9 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-body">
-                {routerModal === "source" ? (
+                {isEmbedded ? (
+                  renderRouterApplicationPicker()
+                ) : routerModal === "source" ? (
                   <label className="blip-native-field textarea-field" htmlFor="sourceRouterModal">
                     Key de origem
                     <textarea

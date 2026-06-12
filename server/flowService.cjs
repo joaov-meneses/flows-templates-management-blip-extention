@@ -384,6 +384,33 @@ async function createFlow(params) {
   };
 }
 
+async function updateFlowJson(params) {
+  const { sourceRouterKey, flowId, flowJson } = params || {};
+  validateSourceRouterKey(sourceRouterKey);
+
+  if (!flowId) {
+    throw new InputError("flowId precisa ser informado.");
+  }
+
+  const normalizedFlowJson = normalizeFlowJson(flowJson);
+  const setJsonResponse = await sendBlipCommand(
+    sourceRouterKey,
+    buildCommand(
+      "set",
+      `/whatsapp-flows/flow-json/${encodeURIComponent(String(flowId))}`,
+      normalizedFlowJson,
+    ),
+  );
+
+  return {
+    flow: {
+      id: String(flowId),
+      status: "DRAFT",
+    },
+    setJsonResponse,
+  };
+}
+
 async function publishFlow(params) {
   const { sourceRouterKey, flowId } = params || {};
   validateSourceRouterKey(sourceRouterKey);
@@ -592,6 +619,7 @@ module.exports = {
   getFlowPreview,
   getFlowJson,
   createFlow,
+  updateFlowJson,
   publishFlow,
   replicateFlows,
 };

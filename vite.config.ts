@@ -11,6 +11,7 @@ const apiPort = Number(process.env.API_PORT || 3000);
 export default defineConfig({
   vite: {
     server: {
+      allowedHosts: [".ngrok-free.app"],
       proxy: {
         "/api": {
           target: `http://127.0.0.1:${apiPort}`,
