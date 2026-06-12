@@ -4,6 +4,7 @@ import { notifyPortalMessage, startIframeMessageProxy } from "../lib/blipProxy";
 
 const MIN_IFRAME_HEIGHT = 900;
 const IFRAME_HEIGHT_OFFSET = 24;
+const HEIGHT_CHANGE_RETRY_DELAYS = [300, 1000, 2500];
 
 function getExtensionContentHeight(element: HTMLElement) {
   return Math.ceil(
@@ -32,37 +33,50 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
     if (!isInsideIframe || !shellElement) return undefined;
 
     let animationFrameId: number | null = null;
-    let retryTimeoutId: number | null = null;
+    const retryTimeoutIds: number[] = [];
     let lastRequestedHeight = 0;
 
-    function requestHeightChange() {
+    function requestHeightChange(force = false) {
       animationFrameId = null;
 
       const height = getRequestedIframeHeight(shellElement);
-      if (height === lastRequestedHeight) return;
+      if (!force && height === lastRequestedHeight) return;
 
       lastRequestedHeight = height;
       notifyPortalMessage(BLIP_ACTIONS.HEIGHT_CHANGE, height);
     }
 
-    function scheduleHeightChange() {
+    function scheduleHeightChange(force = false) {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(requestHeightChange);
+      animationFrameId = requestAnimationFrame(() => requestHeightChange(force));
     }
 
-    scheduleHeightChange();
-    retryTimeoutId = window.setTimeout(scheduleHeightChange, 300);
+    scheduleHeightChange(true);
+    retryTimeoutIds.push(
+      ...HEIGHT_CHANGE_RETRY_DELAYS.map((delay) =>
+        window.setTimeout(() => scheduleHeightChange(true), delay),
+      ),
+    );
 
     const resizeObserver =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleHeightChange);
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => scheduleHeightChange(true));
 
     resizeObserver?.observe(shellElement);
+    mutationObserver?.observe(shellElement, {
+      attributeFilter: ["class"],
+      attributes: true,
+    });
     window.addEventListener("resize", scheduleHeightChange);
 
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      if (retryTimeoutId) window.clearTimeout(retryTimeoutId);
+      retryTimeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
       resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
       window.removeEventListener("resize", scheduleHeightChange);
     };
   }, [isInsideIframe, shellRef]);
