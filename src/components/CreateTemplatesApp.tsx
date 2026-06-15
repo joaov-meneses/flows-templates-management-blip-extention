@@ -23,7 +23,12 @@ import {
 } from "lucide-react";
 import { useIframeAutoHeight } from "../hooks/useIframeAutoHeight";
 import { COMMAND_METHODS } from "../lib/blipActions";
-import { getCurrentApplication, sendBlipCommand, showBlipAlert } from "../lib/blipProxy";
+import {
+  getAccount,
+  getCurrentApplication,
+  sendBlipCommand,
+  showBlipAlert,
+} from "../lib/blipProxy";
 import "../styles/blip-app.css";
 
 type ActiveView = "templates" | "flows" | "devs";
@@ -170,6 +175,12 @@ function splitLines(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+const DEV_ALLOWED_EMAILS = new Set(
+  splitLines(import.meta.env.VITE_DEV_ALLOWED_EMAILS ?? "").map(normalizeEmail),
+);
 function templateKey(t: Template) {
   return `${t.name}|${t.language}`;
 }
@@ -348,6 +359,7 @@ function extractCurrentApplicationRouter(response: unknown): CurrentApplicationR
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
   const didLoadCurrentApplicationRef = useRef(false);
+  const didVerifyDevAccessRef = useRef(false);
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>("templates");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
@@ -402,8 +414,10 @@ export default function CreateTemplatesApp() {
   const [devCommandUri, setDevCommandUri] = useState(DEFAULT_DEV_COMMAND_URI);
   const [isRunningDevCommand, setIsRunningDevCommand] = useState(false);
   const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
+  const [canAccessDevs, setCanAccessDevs] = useState(false);
 
   const isEmbedded = useIframeAutoHeight(shellRef);
+  const visibleActiveView = activeView === "devs" && !canAccessDevs ? "templates" : activeView;
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -415,6 +429,36 @@ export default function CreateTemplatesApp() {
   useEffect(() => {
     window.localStorage.setItem(THEME_STORAGE_KEY, isDarkTheme ? "dark" : "light");
   }, [isDarkTheme]);
+
+  useEffect(() => {
+    if (!isEmbedded || didVerifyDevAccessRef.current) return;
+
+    didVerifyDevAccessRef.current = true;
+    let cancelled = false;
+
+    async function verifyDevAccess() {
+      try {
+        const account = await getAccount();
+        if (cancelled) return;
+
+        setCanAccessDevs(DEV_ALLOWED_EMAILS.has(normalizeEmail(account.email || "")));
+      } catch {
+        if (!cancelled) setCanAccessDevs(false);
+      }
+    }
+
+    void verifyDevAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmbedded]);
+
+  useEffect(() => {
+    if (activeView === "devs" && !canAccessDevs) {
+      setActiveView("templates");
+    }
+  }, [activeView, canAccessDevs]);
 
   useEffect(() => {
     if (!isEmbedded || didLoadCurrentApplicationRef.current) return;
@@ -521,13 +565,13 @@ export default function CreateTemplatesApp() {
   }, [routerApplicationSearch, routerApplications]);
 
   const headerCopy =
-    activeView === "templates"
+    visibleActiveView === "templates"
       ? {
           kicker: "WhatsApp Templates",
           title: "Templates",
           description: "Replicação de templates entre routers BLiP",
         }
-      : activeView === "flows"
+      : visibleActiveView === "flows"
         ? {
             kicker: "WhatsApp Flows",
             title: "Flows",
@@ -1023,6 +1067,10 @@ export default function CreateTemplatesApp() {
     setError("");
     setOperationResult(null);
 
+    if (!canAccessDevs) {
+      return;
+    }
+
     if (!uri) {
       setError("Informe a URI do command.");
       return;
@@ -1346,7 +1394,7 @@ export default function CreateTemplatesApp() {
         </div>
         <nav className="ember-side-nav">
           <button
-            className={activeView === "templates" ? "active" : ""}
+            className={visibleActiveView === "templates" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("templates")}
           >
@@ -1354,21 +1402,23 @@ export default function CreateTemplatesApp() {
             Templates
           </button>
           <button
-            className={activeView === "flows" ? "active" : ""}
+            className={visibleActiveView === "flows" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("flows")}
           >
             <FileJson size={18} aria-hidden="true" />
             Flows
           </button>
-          <button
-            className={activeView === "devs" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("devs")}
-          >
-            <Terminal size={18} aria-hidden="true" />
-            Devs
-          </button>
+          {canAccessDevs && (
+            <button
+              className={visibleActiveView === "devs" ? "active" : ""}
+              type="button"
+              onClick={() => setActiveView("devs")}
+            >
+              <Terminal size={18} aria-hidden="true" />
+              Devs
+            </button>
+          )}
         </nav>
       </aside>
 
@@ -1426,7 +1476,7 @@ export default function CreateTemplatesApp() {
           </div>
         </header>
 
-        {activeView === "templates" ? (
+        {visibleActiveView === "templates" ? (
           <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
             <div className="ember-stat-card">
               <span>Encontrados</span>
@@ -1441,7 +1491,7 @@ export default function CreateTemplatesApp() {
               <strong>{targetCount}</strong>
             </div>
           </section>
-        ) : activeView === "flows" ? (
+        ) : visibleActiveView === "flows" ? (
           <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
             <div className="ember-stat-card">
               <span>Carregados</span>
@@ -1488,7 +1538,7 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
-        {activeView === "templates" ? (
+        {visibleActiveView === "templates" ? (
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>
@@ -1619,7 +1669,7 @@ export default function CreateTemplatesApp() {
               </table>
             </div>
           </section>
-        ) : activeView === "flows" ? (
+        ) : visibleActiveView === "flows" ? (
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>
@@ -1894,7 +1944,7 @@ export default function CreateTemplatesApp() {
           </section>
         )}
 
-        {activeView === "devs" && (
+        {visibleActiveView === "devs" && (
           <section className="ember-panel output-panel">
             <div className="ember-panel-title">
               <div>
