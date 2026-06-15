@@ -160,6 +160,12 @@ function summarizeFlow(flow) {
   };
 }
 
+function normalizeFlowName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeProvidedFlows(flows) {
   if (!Array.isArray(flows) || flows.length === 0) {
     throw new InputError("flows precisa ter pelo menos um flow selecionado.");
@@ -180,6 +186,43 @@ function normalizeProvidedFlows(flows) {
   return Array.from(uniqueFlows.values());
 }
 
+function normalizeProvidedFlowsByName(flows) {
+  const selectedFlows = normalizeProvidedFlows(flows);
+  const uniqueFlowNames = new Map();
+
+  for (const flow of selectedFlows) {
+    const normalizedName = normalizeFlowName(flow.name);
+
+    if (!normalizedName) {
+      throw new InputError("Cada flow selecionado precisa ter um nome para busca nos destinos.");
+    }
+
+    if (!uniqueFlowNames.has(normalizedName)) {
+      uniqueFlowNames.set(normalizedName, {
+        ...flow,
+        name: String(flow.name).trim(),
+        normalizedName,
+      });
+    }
+  }
+
+  return Array.from(uniqueFlowNames.values());
+}
+
+function indexFlowsByName(flows) {
+  const flowsByName = new Map();
+
+  for (const flow of flows) {
+    const normalizedName = normalizeFlowName(flow.name);
+
+    if (normalizedName && !flowsByName.has(normalizedName)) {
+      flowsByName.set(normalizedName, flow);
+    }
+  }
+
+  return flowsByName;
+}
+
 async function searchFlows(params) {
   const { sourceRouterKey } = params || {};
   validateSourceRouterKey(sourceRouterKey);
@@ -195,6 +238,11 @@ async function searchFlows(params) {
     total: flows.length,
     flows,
   };
+}
+
+async function getFlowsFromRouter(routerKey) {
+  const responseBody = await sendBlipCommand(routerKey, buildCommand("get", "/whatsapp-flows"));
+  return extractFlowsFromResponse(responseBody).map(summarizeFlow);
 }
 
 async function getFlowDetails(sourceRouterKey, flowId) {
@@ -411,6 +459,211 @@ async function updateFlowJson(params) {
   };
 }
 
+async function inspectFlowsOnTargetRouters({
+  targetRouterKeys,
+  selectedFlows,
+  batchSize,
+  continueOnError,
+}) {
+  const results = {
+    targetRouters: [],
+    matches: [],
+    missing: [],
+    errors: [],
+  };
+
+  await runInBatches(targetRouterKeys, batchSize, async (targetRouterKey, targetIndex) => {
+    try {
+      const targetFlows = await getFlowsFromRouter(targetRouterKey);
+      const flowsByName = indexFlowsByName(targetFlows);
+      const routerSummary = {
+        targetIndex,
+        totalFlows: targetFlows.length,
+        matched: 0,
+        missing: 0,
+      };
+
+      for (const selectedFlow of selectedFlows) {
+        const targetFlow = flowsByName.get(selectedFlow.normalizedName);
+
+        if (targetFlow) {
+          routerSummary.matched += 1;
+          results.matches.push({
+            targetRouterKey,
+            targetIndex,
+            sourceFlowId: selectedFlow.id,
+            sourceFlowName: selectedFlow.name,
+            flowId: targetFlow.id,
+            flowName: targetFlow.name,
+            status: targetFlow.status,
+          });
+          continue;
+        }
+
+        routerSummary.missing += 1;
+        results.missing.push({
+          targetIndex,
+          sourceFlowId: selectedFlow.id,
+          sourceFlowName: selectedFlow.name,
+          flowName: selectedFlow.name,
+        });
+      }
+
+      results.targetRouters.push(routerSummary);
+      return routerSummary;
+    } catch (error) {
+      const errorInfo = {
+        step: "load_target_flows",
+        targetIndex,
+        message: error.message,
+      };
+
+      results.errors.push(errorInfo);
+
+      if (!continueOnError) {
+        throw error;
+      }
+
+      return errorInfo;
+    }
+  });
+
+  results.targetRouters.sort((a, b) => a.targetIndex - b.targetIndex);
+  results.matches.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.flowName.localeCompare(b.flowName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.missing.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.flowName.localeCompare(b.flowName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.errors.sort((a, b) => (a.targetIndex ?? 0) - (b.targetIndex ?? 0));
+
+  return results;
+}
+
+function stripTargetRouterKey(match) {
+  const { targetRouterKey, ...publicMatch } = match;
+  return publicMatch;
+}
+
+async function bulkUpdateFlowJson(params) {
+  const {
+    flowJson,
+    publishAfterUpdate = false,
+    dryRun = false,
+    continueOnError = true,
+  } = params || {};
+  const batchSize = normalizeBatchSize(params?.batchSize);
+  const targetRouterKeys = Array.from(
+    new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
+  );
+
+  validateTargetRouterKeys(targetRouterKeys);
+
+  const selectedFlows = normalizeProvidedFlowsByName(params?.flows);
+  const normalizedFlowJson = normalizeFlowJson(flowJson);
+  const inspection = await inspectFlowsOnTargetRouters({
+    targetRouterKeys,
+    selectedFlows,
+    batchSize,
+    continueOnError,
+  });
+  const results = {
+    ...inspection,
+    updated: [],
+  };
+
+  if (!dryRun && inspection.matches.length > 0) {
+    await runInBatches(inspection.matches, batchSize, async (match) => {
+      try {
+        const setJsonResponse = await sendBlipCommand(
+          match.targetRouterKey,
+          buildCommand(
+            "set",
+            `/whatsapp-flows/flow-json/${encodeURIComponent(String(match.flowId))}`,
+            normalizedFlowJson,
+          ),
+        );
+        const publishResponse = publishAfterUpdate
+          ? await sendBlipCommand(
+              match.targetRouterKey,
+              buildCommand(
+                "get",
+                `/whatsapp-flows/publish/${encodeURIComponent(String(match.flowId))}`,
+              ),
+            )
+          : null;
+        const updateResult = {
+          status: "success",
+          targetIndex: match.targetIndex,
+          sourceFlowId: match.sourceFlowId,
+          sourceFlowName: match.sourceFlowName,
+          flowId: match.flowId,
+          flowName: match.flowName,
+          previousStatus: match.status,
+          nextStatus: publishAfterUpdate ? "PUBLISHED" : "DRAFT",
+          setJsonResponse,
+          publishResponse,
+        };
+
+        results.updated.push(updateResult);
+        return updateResult;
+      } catch (error) {
+        const errorInfo = {
+          step: publishAfterUpdate ? "update_and_publish_flow" : "update_flow",
+          targetIndex: match.targetIndex,
+          flowId: match.flowId,
+          flowName: match.flowName,
+          sourceFlowId: match.sourceFlowId,
+          sourceFlowName: match.sourceFlowName,
+          message: error.message,
+        };
+
+        results.errors.push(errorInfo);
+
+        if (!continueOnError) {
+          throw error;
+        }
+
+        return errorInfo;
+      }
+    });
+  }
+
+  results.updated.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.flowName.localeCompare(b.flowName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.errors.sort((a, b) => (a.targetIndex ?? 0) - (b.targetIndex ?? 0));
+
+  return {
+    options: {
+      continueOnError: Boolean(continueOnError),
+      batchSize,
+      dryRun: Boolean(dryRun),
+      publishAfterUpdate: Boolean(publishAfterUpdate),
+    },
+    totals: {
+      selectedFlows: selectedFlows.length,
+      targetRouters: targetRouterKeys.length,
+      matched: inspection.matches.length,
+      missing: inspection.missing.length,
+      updated: results.updated.length,
+      published: results.updated.filter((item) => item.publishResponse).length,
+      errors: results.errors.length,
+    },
+    targetRouters: results.targetRouters,
+    matches: results.matches.map(stripTargetRouterKey),
+    missing: results.missing,
+    updated: results.updated,
+    errors: results.errors,
+  };
+}
+
 async function publishFlow(params) {
   const { sourceRouterKey, flowId } = params || {};
   validateSourceRouterKey(sourceRouterKey);
@@ -620,6 +873,7 @@ module.exports = {
   getFlowJson,
   createFlow,
   updateFlowJson,
+  bulkUpdateFlowJson,
   publishFlow,
   replicateFlows,
 };

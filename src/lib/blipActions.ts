@@ -8,5 +8,9 @@ export const BLIP_ACTIONS = {
 export const COMMAND_METHODS = {
   GET: "get",
   SET: "set",
+  MERGE: "merge",
   DELETE: "delete",
+  SUBSCRIBE: "subscribe",
+  UNSUBSCRIBE: "unsubscribe",
+  OBSERVE: "observe",
 } as const;

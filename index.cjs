@@ -16,9 +16,17 @@ const {
   getFlowJson,
   createFlow,
   updateFlowJson,
+  bulkUpdateFlowJson,
   publishFlow,
   replicateFlows,
 } = require("./server/flowService.cjs");
+const {
+  InputError: PluginInputError,
+  searchPlugins,
+  savePlugins,
+  getPluginConflicts,
+  replicatePlugins,
+} = require("./server/pluginService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -106,6 +114,15 @@ app.post("/api/flows/update-json", async (req, res, next) => {
   }
 });
 
+app.post("/api/flows/bulk-update-json", async (req, res, next) => {
+  try {
+    const result = await bulkUpdateFlowJson(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/flows/publish", async (req, res, next) => {
   try {
     const result = await publishFlow(req.body);
@@ -118,6 +135,42 @@ app.post("/api/flows/publish", async (req, res, next) => {
 app.post("/api/flows/replicate", async (req, res, next) => {
   try {
     const result = await replicateFlows(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/plugins/search", async (req, res, next) => {
+  try {
+    const result = await searchPlugins(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/plugins/save", async (req, res, next) => {
+  try {
+    const result = await savePlugins(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/plugins/conflicts", async (req, res, next) => {
+  try {
+    const result = await getPluginConflicts(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/plugins/replicate", async (req, res, next) => {
+  try {
+    const result = await replicatePlugins(req.body);
     res.json(result);
   } catch (error) {
     next(error);
@@ -219,7 +272,9 @@ if (fs.existsSync(clientDistPath)) {
 
 app.use((error, _req, res, _next) => {
   const statusCode =
-    error instanceof InputError || error instanceof FlowInputError
+    error instanceof InputError ||
+    error instanceof FlowInputError ||
+    error instanceof PluginInputError
       ? error.statusCode
       : error.statusCode || 500;
 
