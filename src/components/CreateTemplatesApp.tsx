@@ -2124,12 +2124,15 @@ export default function CreateTemplatesApp() {
     setPluginsLoaded(false);
     resetPluginDraft();
   }
-  function clearResults() {
+  function clearTemplateAndFlowResults() {
     setTemplateSearchResult(emptyTemplateSearch);
     setSelectedTemplateKeys(new Set());
     setFlowSearchResult(emptyFlowSearch);
     setSelectedFlowIds(new Set());
     setFlowFilter("");
+  }
+  function clearResults() {
+    clearTemplateAndFlowResults();
     clearPluginManagerState();
     setOperationResult(null);
     setError("");
@@ -2157,15 +2160,21 @@ export default function CreateTemplatesApp() {
     setRouterApplicationsError("");
 
     if (!isEmbedded) {
+      const sourceChanged = selectedShortName !== sourceRouterKey.trim();
+
       setSourceRouterKey(selectedShortName);
       setSourceRouterShortName("");
+      if (sourceChanged) clearTemplateAndFlowResults();
       clearPluginManagerState();
       setRouterModal(null);
       return;
     }
 
+    const sourceChanged = selectedShortName !== sourceRouterShortName;
+
     setSourceRouterShortName(selectedShortName);
     setSourceRouterKey("");
+    if (sourceChanged) clearTemplateAndFlowResults();
     clearPluginManagerState();
     setRouterModal(null);
   }
