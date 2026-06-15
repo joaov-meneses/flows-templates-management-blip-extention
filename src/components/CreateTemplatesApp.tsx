@@ -1219,12 +1219,15 @@ export default function CreateTemplatesApp() {
   async function confirmBulkFlowUpdate(preflight: FlowBulkUpdateResponse) {
     const missingFlows = preflight.missing;
     const targetErrors = preflight.errors.filter((item) => item.step === "load_target_flows");
-    const publishedMatches = preflight.matches.filter(isPublishedFlow);
+    const publishedMatches = [
+      ...(editingFlow && isPublishedFlow(editingFlow) ? [editingFlow] : []),
+      ...preflight.matches.filter(isPublishedFlow),
+    ];
     const issueSections: string[] = [];
 
     if (missingFlows.length > 0) {
       issueSections.push(
-        `<p>Alguns flows selecionados não foram encontrados nos routers de destino:</p>${buildBulkFlowIssueList(
+        `<p>Alguns flows não foram encontrados nos routers de destino:</p>${buildBulkFlowIssueList(
           missingFlows,
         )}`,
       );
@@ -1241,7 +1244,7 @@ export default function CreateTemplatesApp() {
     if (editFlowPublishAfterSave) {
       return confirmFlowAction(
         "Confirmar alteração e publicação em massa",
-        `<p>Os flows encontrados nos routers de destino serão atualizados e publicados em seguida.</p>${issueSections.join(
+        `<p>O flow atual e os flows encontrados nos routers de destino serão atualizados e publicados em seguida.</p>${issueSections.join(
           "",
         )}`,
         "Alterar e publicar",
@@ -1251,7 +1254,7 @@ export default function CreateTemplatesApp() {
     if (publishedMatches.length > 0) {
       return confirmFlowAction(
         "Confirmar atualização em massa",
-        `<p>Os flows publicados encontrados serão atualizados e voltarão ao estado <b>DRAFT</b>.</p>${issueSections.join(
+        `<p>Os flows publicados serão atualizados e voltarão ao estado <b>DRAFT</b>.</p>${issueSections.join(
           "",
         )}`,
         "Alterar flows",
@@ -1261,7 +1264,7 @@ export default function CreateTemplatesApp() {
     if (issueSections.length > 0) {
       return confirmFlowAction(
         "Flows não encontrados",
-        `${issueSections.join("")}<p>A alteração será aplicada apenas nos flows encontrados.</p>`,
+        `${issueSections.join("")}<p>A alteração será aplicada no flow atual e nos destinos encontrados.</p>`,
         "Alterar encontrados",
       );
     }
@@ -1270,13 +1273,10 @@ export default function CreateTemplatesApp() {
   }
 
   async function handleSaveBulkEditedFlows() {
+    if (!editingFlow) return;
+
     setError("");
     setOperationResult(null);
-
-    if (selectedFlows.length === 0) {
-      setError("Selecione pelo menos um flow.");
-      return;
-    }
 
     if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino.");
@@ -1299,7 +1299,7 @@ export default function CreateTemplatesApp() {
       const publishAfterUpdate = editFlowPublishAfterSave;
       const requestBody = {
         targetRouterKeys: targets,
-        flows: selectedFlows,
+        flows: [editingFlow],
         flowJson: parsedJson,
         publishAfterUpdate,
         ...DEFAULT_FLOW_OPTIONS,
@@ -1309,29 +1309,59 @@ export default function CreateTemplatesApp() {
         dryRun: true,
       });
 
-      if (preflight.totals.matched === 0) {
-        setOperationResult({
-          summary: "Nenhum flow selecionado foi encontrado nos routers de destino.",
-          payload: preflight,
-        });
-        setError("Nenhum dos flows selecionados foi encontrado nos routers de destino.");
-        return;
-      }
-
       const confirmed = await confirmBulkFlowUpdate(preflight);
       if (!confirmed) return;
 
-      const data = await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
-        ...requestBody,
-        dryRun: false,
+      const sourceKey = await ensureSourceRouterKey();
+      const sourceUpdate = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
+        sourceRouterKey: sourceKey,
+        flowId: editingFlow.id,
+        flowJson: parsedJson,
       });
+      const sourcePublish = publishAfterUpdate
+        ? await postJson<FlowPublishResponse>("/api/flows/publish", {
+            sourceRouterKey: sourceKey,
+            flowId: editingFlow.id,
+          })
+        : null;
+      const data =
+        preflight.totals.matched > 0
+          ? await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
+              ...requestBody,
+              dryRun: false,
+            })
+          : {
+              ...preflight,
+              options: {
+                ...preflight.options,
+                dryRun: false,
+              },
+            };
+      const nextStatus = publishAfterUpdate ? "PUBLISHED" : "DRAFT";
       const summary = publishAfterUpdate
-        ? `${data.totals.updated} flows atualizados, ${data.totals.published} publicados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`
-        : `${data.totals.updated} flows atualizados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`;
+        ? `Flow atual atualizado e publicado; ${data.totals.updated} destinos atualizados, ${data.totals.published} publicados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`
+        : `Flow atual atualizado; ${data.totals.updated} destinos atualizados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`;
 
+      if (publishAfterUpdate) {
+        await loadFlowsFromSource(sourceKey);
+      } else {
+        setFlowSearchResult((current) => ({
+          ...current,
+          flows: current.flows.map((flow) =>
+            flow.id === editingFlow.id ? { ...flow, status: nextStatus } : flow,
+          ),
+        }));
+      }
       setOperationResult({
         summary,
-        payload: data,
+        payload: {
+          source: {
+            update: sourceUpdate,
+            publish: sourcePublish,
+          },
+          targets: data,
+        },
+        previewFlow: { ...editingFlow, status: nextStatus },
       });
       closeEditFlowModal({ force: true });
     } catch (e) {
@@ -3476,17 +3506,8 @@ export default function CreateTemplatesApp() {
                     className="blip-button secondary"
                     type="button"
                     onClick={handleSaveBulkEditedFlows}
-                    disabled={
-                      isLoadingEditFlowJson ||
-                      isUpdatingFlow ||
-                      isBulkUpdatingFlows ||
-                      selectedFlows.length === 0
-                    }
-                    title={
-                      selectedFlows.length === 0
-                        ? "Selecione pelo menos um flow na lista"
-                        : "Alterar flows selecionados nos routers de destino"
-                    }
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
+                    title="Alterar este flow nos routers de destino"
                   >
                     {isBulkUpdatingFlows ? (
                       <LoaderCircle className="spin" size={18} aria-hidden="true" />
