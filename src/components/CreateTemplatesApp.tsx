@@ -542,7 +542,6 @@ export default function CreateTemplatesApp() {
   const [templateCompareNameSort, setTemplateCompareNameSort] = useState<SortDirection>("asc");
   const [isCreateFlowModalOpen, setIsCreateFlowModalOpen] = useState(false);
   const [isEditFlowModalOpen, setIsEditFlowModalOpen] = useState(false);
-  const [isBulkEditFlowModalOpen, setIsBulkEditFlowModalOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<FlowSummary | null>(null);
   const [draftSourceRouterKey, setDraftSourceRouterKey] = useState("");
   const [draftTargetRouterKeys, setDraftTargetRouterKeys] = useState("");
@@ -557,9 +556,7 @@ export default function CreateTemplatesApp() {
   const [newFlowEndpointUri, setNewFlowEndpointUri] = useState("");
   const [newFlowJson, setNewFlowJson] = useState("");
   const [editFlowJson, setEditFlowJson] = useState("");
-  const [bulkEditFlowJson, setBulkEditFlowJson] = useState("");
   const [editFlowPublishAfterSave, setEditFlowPublishAfterSave] = useState(false);
-  const [bulkEditFlowPublishAfterSave, setBulkEditFlowPublishAfterSave] = useState(false);
   const [pluginDraftId, setPluginDraftId] = useState("");
   const [pluginDraftName, setPluginDraftName] = useState("");
   const [pluginDraftUrl, setPluginDraftUrl] = useState("");
@@ -1133,7 +1130,7 @@ export default function CreateTemplatesApp() {
   }
 
   function closeEditFlowModal(options: { force?: boolean } = {}) {
-    if (isUpdatingFlow && !options.force) return;
+    if ((isUpdatingFlow || isBulkUpdatingFlows) && !options.force) return;
 
     setIsEditFlowModalOpen(false);
     setEditingFlow(null);
@@ -1219,35 +1216,6 @@ export default function CreateTemplatesApp() {
     }
   }
 
-  function handleOpenBulkEditFlows() {
-    setError("");
-    setCopyNotice("");
-
-    if (selectedFlows.length === 0) {
-      setError("Selecione pelo menos um flow.");
-      return;
-    }
-
-    if (!hasTargetRouterSelection()) {
-      setError("Informe pelo menos um router de destino.");
-      openTargetsModal();
-      return;
-    }
-
-    setBulkEditFlowJson("");
-    setBulkEditFlowPublishAfterSave(false);
-    setIsBulkEditFlowModalOpen(true);
-  }
-
-  function closeBulkEditFlowModal(options: { force?: boolean } = {}) {
-    if (isBulkUpdatingFlows && !options.force) return;
-
-    setIsBulkEditFlowModalOpen(false);
-    setBulkEditFlowJson("");
-    setBulkEditFlowPublishAfterSave(false);
-    setError("");
-  }
-
   async function confirmBulkFlowUpdate(preflight: FlowBulkUpdateResponse) {
     const missingFlows = preflight.missing;
     const targetErrors = preflight.errors.filter((item) => item.step === "load_target_flows");
@@ -1270,7 +1238,7 @@ export default function CreateTemplatesApp() {
       );
     }
 
-    if (bulkEditFlowPublishAfterSave) {
+    if (editFlowPublishAfterSave) {
       return confirmFlowAction(
         "Confirmar alteração e publicação em massa",
         `<p>Os flows encontrados nos routers de destino serão atualizados e publicados em seguida.</p>${issueSections.join(
@@ -1317,7 +1285,7 @@ export default function CreateTemplatesApp() {
 
     let parsedJson: unknown;
     try {
-      parsedJson = JSON.parse(bulkEditFlowJson);
+      parsedJson = JSON.parse(editFlowJson);
     } catch {
       setError("Informe um JSON completo válido.");
       return;
@@ -1328,11 +1296,12 @@ export default function CreateTemplatesApp() {
 
     try {
       const targets = await ensureTargetRouterKeys();
+      const publishAfterUpdate = editFlowPublishAfterSave;
       const requestBody = {
         targetRouterKeys: targets,
         flows: selectedFlows,
         flowJson: parsedJson,
-        publishAfterUpdate: bulkEditFlowPublishAfterSave,
+        publishAfterUpdate,
         ...DEFAULT_FLOW_OPTIONS,
       };
       const preflight = await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
@@ -1356,7 +1325,7 @@ export default function CreateTemplatesApp() {
         ...requestBody,
         dryRun: false,
       });
-      const summary = bulkEditFlowPublishAfterSave
+      const summary = publishAfterUpdate
         ? `${data.totals.updated} flows atualizados, ${data.totals.published} publicados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`
         : `${data.totals.updated} flows atualizados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`;
 
@@ -1364,7 +1333,7 @@ export default function CreateTemplatesApp() {
         summary,
         payload: data,
       });
-      closeBulkEditFlowModal({ force: true });
+      closeEditFlowModal({ force: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao atualizar flows em massa.");
     } finally {
@@ -2467,19 +2436,6 @@ export default function CreateTemplatesApp() {
                   : "Adicionar routers de destino"}
               </button>
               <button
-                className="blip-button secondary"
-                type="button"
-                onClick={handleOpenBulkEditFlows}
-                disabled={isBulkUpdatingFlows || selectedFlows.length === 0}
-              >
-                {isBulkUpdatingFlows && flowActionId === "bulk-update" ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <FileJson size={18} aria-hidden="true" />
-                )}
-                Alterar JSON
-              </button>
-              <button
                 className="blip-submit-button primary"
                 type="button"
                 onClick={handleReplicateTemplates}
@@ -3463,7 +3419,7 @@ export default function CreateTemplatesApp() {
                   className="blip-button secondary icon-only"
                   type="button"
                   onClick={() => closeEditFlowModal()}
-                  disabled={isUpdatingFlow}
+                  disabled={isUpdatingFlow || isBulkUpdatingFlows}
                 >
                   <X size={18} aria-hidden="true" />
                   <span>Fechar</span>
@@ -3484,7 +3440,7 @@ export default function CreateTemplatesApp() {
                     id="editFlowJson"
                     value={editFlowJson}
                     onChange={(e) => setEditFlowJson(e.target.value)}
-                    disabled={isLoadingEditFlowJson || isUpdatingFlow}
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
                     placeholder={isLoadingEditFlowJson ? "Carregando JSON..." : "{ ... }"}
                   />
                 </label>
@@ -3494,7 +3450,7 @@ export default function CreateTemplatesApp() {
                     type="checkbox"
                     checked={editFlowPublishAfterSave}
                     onChange={(event) => setEditFlowPublishAfterSave(event.target.checked)}
-                    disabled={isLoadingEditFlowJson || isUpdatingFlow}
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
                   />
                   <span className="flow-switch-track" aria-hidden="true">
                     <span className="flow-switch-thumb" />
@@ -3511,123 +3467,52 @@ export default function CreateTemplatesApp() {
                   className="blip-button secondary"
                   type="button"
                   onClick={() => closeEditFlowModal()}
-                  disabled={isUpdatingFlow}
+                  disabled={isUpdatingFlow || isBulkUpdatingFlows}
                 >
                   Cancelar
                 </button>
-                <button
-                  className="blip-submit-button primary"
-                  type="button"
-                  onClick={handleSaveEditedFlow}
-                  disabled={isLoadingEditFlowJson || isUpdatingFlow}
-                >
-                  {isUpdatingFlow ? (
-                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                  ) : editFlowPublishAfterSave ? (
-                    <Send size={18} aria-hidden="true" />
-                  ) : (
-                    <Pencil size={18} aria-hidden="true" />
-                  )}
-                  {editFlowPublishAfterSave ? "Salvar e publicar" : "Salvar"}
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {isBulkEditFlowModalOpen && (
-          <div className="ember-modal-backdrop" role="presentation">
-            <section
-              className="ember-modal create-flow-modal"
-              aria-labelledby="bulk-edit-flow-modal-title"
-              role="dialog"
-              aria-modal="true"
-            >
-              <div className="ember-modal-header">
-                <div>
-                  <h2 id="bulk-edit-flow-modal-title">Alterar JSON em massa</h2>
-                  <p>
-                    {selectedFlows.length} flows selecionados, {targetCount} destinos configurados
-                  </p>
+                <div className="flow-edit-footer-actions">
+                  <button
+                    className="blip-button secondary"
+                    type="button"
+                    onClick={handleSaveBulkEditedFlows}
+                    disabled={
+                      isLoadingEditFlowJson ||
+                      isUpdatingFlow ||
+                      isBulkUpdatingFlows ||
+                      selectedFlows.length === 0
+                    }
+                    title={
+                      selectedFlows.length === 0
+                        ? "Selecione pelo menos um flow na lista"
+                        : "Alterar flows selecionados nos routers de destino"
+                    }
+                  >
+                    {isBulkUpdatingFlows ? (
+                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                    ) : editFlowPublishAfterSave ? (
+                      <Send size={18} aria-hidden="true" />
+                    ) : (
+                      <FileJson size={18} aria-hidden="true" />
+                    )}
+                    Alterar em massa
+                  </button>
+                  <button
+                    className="blip-submit-button primary"
+                    type="button"
+                    onClick={handleSaveEditedFlow}
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
+                  >
+                    {isUpdatingFlow ? (
+                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                    ) : editFlowPublishAfterSave ? (
+                      <Send size={18} aria-hidden="true" />
+                    ) : (
+                      <Pencil size={18} aria-hidden="true" />
+                    )}
+                    {editFlowPublishAfterSave ? "Salvar e publicar" : "Salvar"}
+                  </button>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
-                  type="button"
-                  onClick={() => closeBulkEditFlowModal()}
-                  disabled={isBulkUpdatingFlows}
-                >
-                  <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
-              </div>
-
-              <div className="ember-modal-body">
-                {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
-                <div className="flow-bulk-summary" aria-label="Flows selecionados">
-                  {selectedFlows.slice(0, 8).map((flow) => (
-                    <span key={flow.id}>{flow.name}</span>
-                  ))}
-                  {selectedFlows.length > 8 && <span>+{selectedFlows.length - 8} flows</span>}
-                </div>
-
-                <label className="blip-native-field json-field" htmlFor="bulkEditFlowJson">
-                  JSON completo para aplicar
-                  <textarea
-                    id="bulkEditFlowJson"
-                    value={bulkEditFlowJson}
-                    onChange={(e) => setBulkEditFlowJson(e.target.value)}
-                    disabled={isBulkUpdatingFlows}
-                    placeholder='{"version":"7.3","screens":[]}'
-                  />
-                </label>
-
-                <label className="flow-publish-switch">
-                  <input
-                    type="checkbox"
-                    checked={bulkEditFlowPublishAfterSave}
-                    onChange={(event) => setBulkEditFlowPublishAfterSave(event.target.checked)}
-                    disabled={isBulkUpdatingFlows}
-                  />
-                  <span className="flow-switch-track" aria-hidden="true">
-                    <span className="flow-switch-thumb" />
-                  </span>
-                  <span className="flow-switch-copy">
-                    <strong>Publicar após salvar</strong>
-                    <span>Atualiza os JSONs encontrados e publica os flows na mesma ação.</span>
-                  </span>
-                </label>
-              </div>
-
-              <div className="ember-modal-footer">
-                <button
-                  className="blip-button secondary"
-                  type="button"
-                  onClick={() => closeBulkEditFlowModal()}
-                  disabled={isBulkUpdatingFlows}
-                >
-                  Cancelar
-                </button>
-                <button
-                  className="blip-submit-button primary"
-                  type="button"
-                  onClick={handleSaveBulkEditedFlows}
-                  disabled={isBulkUpdatingFlows}
-                >
-                  {isBulkUpdatingFlows ? (
-                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                  ) : bulkEditFlowPublishAfterSave ? (
-                    <Send size={18} aria-hidden="true" />
-                  ) : (
-                    <FileJson size={18} aria-hidden="true" />
-                  )}
-                  {bulkEditFlowPublishAfterSave ? "Alterar e publicar" : "Alterar flows"}
-                </button>
               </div>
             </section>
           </div>
