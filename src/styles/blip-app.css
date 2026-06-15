@@ -1117,6 +1117,9 @@
 .create-flow-modal {
   width: min(860px, 100%);
 }
+.bulk-flow-modal {
+  width: min(1040px, 100%);
+}
 .compare-modal {
   width: min(1040px, 100%);
 }
@@ -1175,6 +1178,32 @@
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+}
+.bulk-flow-table-wrap {
+  max-height: 420px;
+}
+.flow-mapping-table {
+  min-width: 900px;
+}
+.flow-mapping-table td {
+  vertical-align: top;
+}
+.flow-mapping-table td > strong,
+.flow-mapping-table td > .mono-cell,
+.flow-mapping-subtle {
+  display: block;
+}
+.flow-mapping-subtle {
+  margin-top: 4px;
+  color: var(--blip-content-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.compact-field {
+  gap: 5px;
+}
+.compact-field select {
+  min-width: 280px;
 }
 .flow-publish-switch {
   width: fit-content;

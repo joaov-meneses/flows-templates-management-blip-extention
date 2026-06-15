@@ -149,6 +149,7 @@ type FlowBulkUpdateMatch = {
   flowId: string;
   flowName: string;
   status?: string;
+  matchType?: "name" | "selected";
 };
 type FlowBulkUpdateMissing = {
   targetIndex: number;
@@ -162,6 +163,11 @@ type FlowBulkUpdateError = {
   flowId?: string;
   flowName?: string;
   message: string;
+};
+type FlowBulkUpdateOverride = {
+  targetIndex: number;
+  sourceFlowId: string;
+  flowId: string;
 };
 type FlowBulkUpdateResponse = {
   options: {
@@ -184,6 +190,7 @@ type FlowBulkUpdateResponse = {
     totalFlows: number;
     matched: number;
     missing: number;
+    availableFlows: FlowSummary[];
   }>;
   matches: FlowBulkUpdateMatch[];
   missing: FlowBulkUpdateMissing[];
@@ -542,6 +549,7 @@ export default function CreateTemplatesApp() {
   const [templateCompareNameSort, setTemplateCompareNameSort] = useState<SortDirection>("asc");
   const [isCreateFlowModalOpen, setIsCreateFlowModalOpen] = useState(false);
   const [isEditFlowModalOpen, setIsEditFlowModalOpen] = useState(false);
+  const [isBulkFlowMappingModalOpen, setIsBulkFlowMappingModalOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<FlowSummary | null>(null);
   const [draftSourceRouterKey, setDraftSourceRouterKey] = useState("");
   const [draftTargetRouterKeys, setDraftTargetRouterKeys] = useState("");
@@ -557,6 +565,8 @@ export default function CreateTemplatesApp() {
   const [newFlowJson, setNewFlowJson] = useState("");
   const [editFlowJson, setEditFlowJson] = useState("");
   const [editFlowPublishAfterSave, setEditFlowPublishAfterSave] = useState(false);
+  const [bulkFlowPreflight, setBulkFlowPreflight] = useState<FlowBulkUpdateResponse | null>(null);
+  const [bulkFlowSelections, setBulkFlowSelections] = useState<Record<string, string>>({});
   const [pluginDraftId, setPluginDraftId] = useState("");
   const [pluginDraftName, setPluginDraftName] = useState("");
   const [pluginDraftUrl, setPluginDraftUrl] = useState("");
@@ -1136,6 +1146,9 @@ export default function CreateTemplatesApp() {
     setEditingFlow(null);
     setEditFlowJson("");
     setEditFlowPublishAfterSave(false);
+    setIsBulkFlowMappingModalOpen(false);
+    setBulkFlowPreflight(null);
+    setBulkFlowSelections({});
     setIsLoadingEditFlowJson(false);
     setError("");
   }
@@ -1272,7 +1285,34 @@ export default function CreateTemplatesApp() {
     return true;
   }
 
-  async function handleSaveBulkEditedFlows() {
+  function closeBulkFlowMappingModal(options: { force?: boolean } = {}) {
+    if (isBulkUpdatingFlows && !options.force) return;
+
+    setIsBulkFlowMappingModalOpen(false);
+    setBulkFlowPreflight(null);
+    setBulkFlowSelections({});
+    setError("");
+  }
+
+  function buildBulkFlowOverrides(): FlowBulkUpdateOverride[] {
+    if (!editingFlow || !bulkFlowPreflight) return [];
+
+    const missingTargetIndexes = new Set(
+      bulkFlowPreflight.missing
+        .filter((missing) => missing.sourceFlowId === editingFlow.id)
+        .map((missing) => String(missing.targetIndex)),
+    );
+
+    return Object.entries(bulkFlowSelections)
+      .filter(([targetIndex, flowId]) => missingTargetIndexes.has(targetIndex) && flowId)
+      .map(([targetIndex, flowId]) => ({
+        targetIndex: Number(targetIndex),
+        sourceFlowId: editingFlow.id,
+        flowId,
+      }));
+  }
+
+  async function handleOpenBulkFlowMappingModal() {
     if (!editingFlow) return;
 
     setError("");
@@ -1296,20 +1336,63 @@ export default function CreateTemplatesApp() {
 
     try {
       const targets = await ensureTargetRouterKeys();
+      const preflight = await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
+        targetRouterKeys: targets,
+        flows: [editingFlow],
+        flowJson: parsedJson,
+        publishAfterUpdate: editFlowPublishAfterSave,
+        ...DEFAULT_FLOW_OPTIONS,
+        dryRun: true,
+      });
+
+      setBulkFlowPreflight(preflight);
+      setBulkFlowSelections({});
+      setIsBulkFlowMappingModalOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao verificar flows nos destinos.");
+    } finally {
+      setIsBulkUpdatingFlows(false);
+      setFlowActionId("");
+    }
+  }
+
+  async function handleConfirmBulkFlowMapping() {
+    if (!editingFlow || !bulkFlowPreflight) return;
+
+    setError("");
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(editFlowJson);
+    } catch {
+      setError("Informe um JSON completo válido.");
+      return;
+    }
+
+    setIsBulkUpdatingFlows(true);
+    setFlowActionId("bulk-update");
+
+    try {
+      const targets = await ensureTargetRouterKeys();
       const publishAfterUpdate = editFlowPublishAfterSave;
+      const targetFlowOverrides = buildBulkFlowOverrides();
       const requestBody = {
         targetRouterKeys: targets,
         flows: [editingFlow],
         flowJson: parsedJson,
         publishAfterUpdate,
+        targetFlowOverrides,
         ...DEFAULT_FLOW_OPTIONS,
       };
-      const preflight = await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
-        ...requestBody,
-        dryRun: true,
-      });
+      const effectivePreflight =
+        targetFlowOverrides.length > 0
+          ? await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
+              ...requestBody,
+              dryRun: true,
+            })
+          : bulkFlowPreflight;
 
-      const confirmed = await confirmBulkFlowUpdate(preflight);
+      const confirmed = await confirmBulkFlowUpdate(effectivePreflight);
       if (!confirmed) return;
 
       const sourceKey = await ensureSourceRouterKey();
@@ -1325,15 +1408,15 @@ export default function CreateTemplatesApp() {
           })
         : null;
       const data =
-        preflight.totals.matched > 0
+        effectivePreflight.totals.matched > 0
           ? await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
               ...requestBody,
               dryRun: false,
             })
           : {
-              ...preflight,
+              ...effectivePreflight,
               options: {
-                ...preflight.options,
+                ...effectivePreflight.options,
                 dryRun: false,
               },
             };
@@ -1363,6 +1446,7 @@ export default function CreateTemplatesApp() {
         },
         previewFlow: { ...editingFlow, status: nextStatus },
       });
+      closeBulkFlowMappingModal({ force: true });
       closeEditFlowModal({ force: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao atualizar flows em massa.");
@@ -3505,7 +3589,7 @@ export default function CreateTemplatesApp() {
                   <button
                     className="blip-button secondary"
                     type="button"
-                    onClick={handleSaveBulkEditedFlows}
+                    onClick={handleOpenBulkFlowMappingModal}
                     disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
                     title="Alterar este flow nos routers de destino"
                   >
@@ -3534,6 +3618,183 @@ export default function CreateTemplatesApp() {
                     {editFlowPublishAfterSave ? "Salvar e publicar" : "Salvar"}
                   </button>
                 </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {isBulkFlowMappingModalOpen && bulkFlowPreflight && editingFlow && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal bulk-flow-modal"
+              aria-labelledby="bulk-flow-modal-title"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="bulk-flow-modal-title">Alterar em massa</h2>
+                  <p>
+                    {bulkFlowPreflight.totals.targetRouters} destinos,{" "}
+                    {bulkFlowPreflight.totals.matched} encontrados,{" "}
+                    {bulkFlowPreflight.totals.missing} sem match por nome
+                  </p>
+                </div>
+                <button
+                  className="blip-button secondary icon-only"
+                  type="button"
+                  onClick={() => closeBulkFlowMappingModal()}
+                  disabled={isBulkUpdatingFlows}
+                >
+                  <X size={18} aria-hidden="true" />
+                  <span>Fechar</span>
+                </button>
+              </div>
+
+              <div className="ember-modal-body">
+                {error && (
+                  <div className="ember-alert danger modal-alert" role="alert">
+                    <AlertCircle size={18} aria-hidden="true" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <div className="ember-table-wrap bulk-flow-table-wrap">
+                  <table className="ember-table flow-mapping-table">
+                    <thead>
+                      <tr>
+                        <th>Router destino</th>
+                        <th>De</th>
+                        <th>Para</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkFlowPreflight.targetRouters.map((targetRouter) => {
+                        const targetIndexKey = String(targetRouter.targetIndex);
+                        const match = bulkFlowPreflight.matches.find(
+                          (item) =>
+                            item.targetIndex === targetRouter.targetIndex &&
+                            item.sourceFlowId === editingFlow.id,
+                        );
+                        const selectedFlowId = bulkFlowSelections[targetIndexKey] || "";
+                        const selectedFlow = targetRouter.availableFlows.find(
+                          (flow) => flow.id === selectedFlowId,
+                        );
+
+                        return (
+                          <tr key={targetIndexKey}>
+                            <td>
+                              <strong>{getTargetRouterLabel(targetRouter.targetIndex)}</strong>
+                              <span className="flow-mapping-subtle">
+                                {targetRouter.totalFlows} flows
+                              </span>
+                            </td>
+                            <td>
+                              <strong>{editingFlow.name}</strong>
+                              <span className="mono-cell">{editingFlow.id}</span>
+                            </td>
+                            <td>
+                              {match ? (
+                                <>
+                                  <strong>{match.flowName}</strong>
+                                  <span className="mono-cell">{match.flowId}</span>
+                                </>
+                              ) : (
+                                <label
+                                  className="blip-native-field compact-field"
+                                  htmlFor={`bulkFlowTarget-${targetIndexKey}`}
+                                >
+                                  Flow do destino
+                                  <select
+                                    id={`bulkFlowTarget-${targetIndexKey}`}
+                                    value={selectedFlowId}
+                                    onChange={(event) =>
+                                      setBulkFlowSelections((current) => ({
+                                        ...current,
+                                        [targetIndexKey]: event.target.value,
+                                      }))
+                                    }
+                                    disabled={
+                                      isBulkUpdatingFlows ||
+                                      targetRouter.availableFlows.length === 0
+                                    }
+                                  >
+                                    <option value="">Não alterar destino</option>
+                                    {targetRouter.availableFlows.map((flow) => (
+                                      <option key={flow.id} value={flow.id}>
+                                        {flow.name} - {flow.id}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {selectedFlow && (
+                                    <span className="mono-cell">{selectedFlow.id}</span>
+                                  )}
+                                </label>
+                              )}
+                            </td>
+                            <td>
+                              {match ? (
+                                <span className="ember-status published">Achado</span>
+                              ) : selectedFlow ? (
+                                <span className="ember-status pending">Selecionado</span>
+                              ) : (
+                                <span className="ember-status failed">Sem match</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {bulkFlowPreflight.errors
+                        .filter((item) => item.step === "load_target_flows")
+                        .map((item) => (
+                          <tr key={`error-${item.targetIndex}`}>
+                            <td>
+                              <strong>
+                                {typeof item.targetIndex === "number"
+                                  ? getTargetRouterLabel(item.targetIndex)
+                                  : "Destino"}
+                              </strong>
+                            </td>
+                            <td>
+                              <strong>{editingFlow.name}</strong>
+                              <span className="mono-cell">{editingFlow.id}</span>
+                            </td>
+                            <td>{item.message}</td>
+                            <td>
+                              <span className="ember-status failed">Erro</span>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="ember-modal-footer">
+                <button
+                  className="blip-button secondary"
+                  type="button"
+                  onClick={() => closeBulkFlowMappingModal()}
+                  disabled={isBulkUpdatingFlows}
+                >
+                  Voltar
+                </button>
+                <button
+                  className="blip-submit-button primary"
+                  type="button"
+                  onClick={handleConfirmBulkFlowMapping}
+                  disabled={isBulkUpdatingFlows}
+                >
+                  {isBulkUpdatingFlows ? (
+                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                  ) : editFlowPublishAfterSave ? (
+                    <Send size={18} aria-hidden="true" />
+                  ) : (
+                    <FileJson size={18} aria-hidden="true" />
+                  )}
+                  {editFlowPublishAfterSave ? "Alterar e publicar" : "Alterar"}
+                </button>
               </div>
             </section>
           </div>

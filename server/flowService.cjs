@@ -223,6 +223,54 @@ function indexFlowsByName(flows) {
   return flowsByName;
 }
 
+function buildTargetFlowOverrideKey(targetIndex, sourceFlowId) {
+  return `${targetIndex}|${sourceFlowId}`;
+}
+
+function normalizeTargetFlowOverrides(overrides, selectedFlows) {
+  if (overrides == null) {
+    return new Map();
+  }
+
+  if (!Array.isArray(overrides)) {
+    throw new InputError("targetFlowOverrides precisa ser um array.");
+  }
+
+  const overridesByTargetAndSource = new Map();
+  const selectedFlowIds = new Set(selectedFlows.map((flow) => flow.id));
+
+  for (const override of overrides) {
+    if (!override || typeof override !== "object") {
+      throw new InputError("Cada override de flow precisa ser um objeto.");
+    }
+
+    const targetIndex = Number(override.targetIndex);
+    const flowId = String(override.flowId || "").trim();
+    const sourceFlowId =
+      typeof override.sourceFlowId === "string" && override.sourceFlowId.trim()
+        ? override.sourceFlowId.trim()
+        : selectedFlows.length === 1
+          ? selectedFlows[0].id
+          : "";
+
+    if (!Number.isInteger(targetIndex) || targetIndex < 0) {
+      throw new InputError("targetIndex do override precisa ser um inteiro maior ou igual a zero.");
+    }
+
+    if (!flowId) {
+      continue;
+    }
+
+    if (!sourceFlowId || !selectedFlowIds.has(sourceFlowId)) {
+      throw new InputError("sourceFlowId do override precisa referenciar um flow selecionado.");
+    }
+
+    overridesByTargetAndSource.set(buildTargetFlowOverrideKey(targetIndex, sourceFlowId), flowId);
+  }
+
+  return overridesByTargetAndSource;
+}
+
 async function searchFlows(params) {
   const { sourceRouterKey } = params || {};
   validateSourceRouterKey(sourceRouterKey);
@@ -462,6 +510,7 @@ async function updateFlowJson(params) {
 async function inspectFlowsOnTargetRouters({
   targetRouterKeys,
   selectedFlows,
+  targetFlowOverrides,
   batchSize,
   continueOnError,
 }) {
@@ -481,9 +530,32 @@ async function inspectFlowsOnTargetRouters({
         totalFlows: targetFlows.length,
         matched: 0,
         missing: 0,
+        availableFlows: targetFlows,
       };
 
       for (const selectedFlow of selectedFlows) {
+        const overrideFlowId = targetFlowOverrides.get(
+          buildTargetFlowOverrideKey(targetIndex, selectedFlow.id),
+        );
+        const overrideFlow = overrideFlowId
+          ? targetFlows.find((flow) => flow.id === overrideFlowId)
+          : null;
+
+        if (overrideFlow) {
+          routerSummary.matched += 1;
+          results.matches.push({
+            targetRouterKey,
+            targetIndex,
+            sourceFlowId: selectedFlow.id,
+            sourceFlowName: selectedFlow.name,
+            flowId: overrideFlow.id,
+            flowName: overrideFlow.name,
+            status: overrideFlow.status,
+            matchType: "selected",
+          });
+          continue;
+        }
+
         const targetFlow = flowsByName.get(selectedFlow.normalizedName);
 
         if (targetFlow) {
@@ -496,6 +568,7 @@ async function inspectFlowsOnTargetRouters({
             flowId: targetFlow.id,
             flowName: targetFlow.name,
             status: targetFlow.status,
+            matchType: "name",
           });
           continue;
         }
@@ -564,10 +637,15 @@ async function bulkUpdateFlowJson(params) {
   validateTargetRouterKeys(targetRouterKeys);
 
   const selectedFlows = normalizeProvidedFlowsByName(params?.flows);
+  const targetFlowOverrides = normalizeTargetFlowOverrides(
+    params?.targetFlowOverrides,
+    selectedFlows,
+  );
   const normalizedFlowJson = normalizeFlowJson(flowJson);
   const inspection = await inspectFlowsOnTargetRouters({
     targetRouterKeys,
     selectedFlows,
+    targetFlowOverrides,
     batchSize,
     continueOnError,
   });
