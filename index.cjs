@@ -18,6 +18,7 @@ const {
   updateFlowJson,
   bulkUpdateFlowJson,
   publishFlow,
+  deprecateFlow,
   replicateFlows,
 } = require("./server/flowService.cjs");
 const {
@@ -126,6 +127,15 @@ app.post("/api/flows/bulk-update-json", async (req, res, next) => {
 app.post("/api/flows/publish", async (req, res, next) => {
   try {
     const result = await publishFlow(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/flows/deprecate", async (req, res, next) => {
+  try {
+    const result = await deprecateFlow(req.body);
     res.json(result);
   } catch (error) {
     next(error);

@@ -761,6 +761,28 @@ async function publishFlow(params) {
   };
 }
 
+async function deprecateFlow(params) {
+  const { sourceRouterKey, flowId } = params || {};
+  validateSourceRouterKey(sourceRouterKey);
+
+  if (!flowId) {
+    throw new InputError("flowId precisa ser informado.");
+  }
+
+  const deprecateResponse = await sendBlipCommand(
+    sourceRouterKey,
+    buildCommand("get", `/whatsapp-flows/deprecate/${encodeURIComponent(String(flowId))}`),
+    {
+      commandUrl: HTTP_MSGING_COMMANDS_URL,
+    },
+  );
+
+  return {
+    flowId: String(flowId),
+    deprecateResponse,
+  };
+}
+
 async function createFlowOnTarget({
   targetRouterKey,
   targetIndex,
@@ -953,5 +975,6 @@ module.exports = {
   updateFlowJson,
   bulkUpdateFlowJson,
   publishFlow,
+  deprecateFlow,
   replicateFlows,
 };

@@ -142,6 +142,7 @@ type FlowUpdateJsonResponse = {
   setJsonResponse: unknown;
 };
 type FlowPublishResponse = { flowId: string; publishResponse: unknown };
+type FlowDeprecateResponse = { flowId: string; deprecateResponse: unknown };
 type FlowBulkUpdateMatch = {
   targetIndex: number;
   sourceFlowId: string;
@@ -325,6 +326,11 @@ function flowKey(f: FlowSummary) {
 }
 function isPublishedFlow(flow: Pick<FlowSummary, "status"> | FlowBulkUpdateMatch) {
   return String(flow.status || "").toUpperCase() === "PUBLISHED";
+}
+function isDeprecatedFlow(flow: Pick<FlowSummary, "status">) {
+  const status = String(flow.status || "").toUpperCase();
+
+  return status === "DEPRECATED" || status === "DISABLED";
 }
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => {
@@ -1473,6 +1479,42 @@ export default function CreateTemplatesApp() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao publicar flow.");
+    } finally {
+      setFlowActionId("");
+    }
+  }
+
+  async function handleDeprecateFlow(flow: FlowSummary) {
+    setError("");
+
+    const confirmed = await confirmFlowAction(
+      "Confirmar desativação",
+      `Ao prosseguir, o flow <b>${escapeHtml(flow.name || flow.id)}</b> será desativado.`,
+      "Desativar",
+    );
+
+    if (!confirmed) return;
+
+    setFlowActionId(`deprecate:${flow.id}`);
+    try {
+      const sourceKey = await ensureSourceRouterKey();
+      const data = await postJson<FlowDeprecateResponse>("/api/flows/deprecate", {
+        sourceRouterKey: sourceKey,
+        flowId: flow.id,
+      });
+
+      setFlowSearchResult((current) => ({
+        ...current,
+        flows: current.flows.map((currentFlow) =>
+          currentFlow.id === flow.id ? { ...currentFlow, status: "DEPRECATED" } : currentFlow,
+        ),
+      }));
+      setOperationResult({
+        summary: `Flow "${flow.name}" desativado com sucesso.`,
+        payload: data,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao desativar flow.");
     } finally {
       setFlowActionId("");
     }
@@ -2804,6 +2846,21 @@ export default function CreateTemplatesApp() {
                                     <Send size={16} aria-hidden="true" />
                                   )}
                                   Publicar
+                                </button>
+                              )}
+                              {!isDeprecatedFlow(flow) && (
+                                <button
+                                  className="table-action-button danger"
+                                  type="button"
+                                  onClick={() => handleDeprecateFlow(flow)}
+                                  disabled={flowActionId === `deprecate:${flow.id}`}
+                                >
+                                  {flowActionId === `deprecate:${flow.id}` ? (
+                                    <LoaderCircle className="spin" size={16} aria-hidden="true" />
+                                  ) : (
+                                    <Trash2 size={16} aria-hidden="true" />
+                                  )}
+                                  Desativar
                                 </button>
                               )}
                             </div>

@@ -904,7 +904,9 @@
   background: rgba(132, 235, 188, 0.45);
 }
 .ember-status.rejected,
-.ember-status.failed {
+.ember-status.failed,
+.ember-status.deprecated,
+.ember-status.disabled {
   color: var(--blip-danger);
   background: rgba(250, 190, 190, 0.56);
 }
