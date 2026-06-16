@@ -254,6 +254,8 @@ type ResolvedRouterKey = {
 };
 type CurrentApplicationRouter = {
   shortName: string;
+  name?: string;
+  imageUri?: string;
   accessKey?: string;
 };
 
@@ -526,9 +528,13 @@ function extractCurrentApplicationRouter(response: unknown): CurrentApplicationR
   }
 
   const accessKey = typeof resource.accessKey === "string" ? resource.accessKey.trim() : "";
+  const name = typeof resource.name === "string" ? resource.name.trim() : "";
+  const imageUri = typeof resource.imageUri === "string" ? resource.imageUri.trim() : "";
 
   return {
     shortName: resource.shortName.trim(),
+    name: name || undefined,
+    imageUri: imageUri || undefined,
     accessKey: accessKey || undefined,
   };
 }
@@ -789,6 +795,32 @@ export default function CreateTemplatesApp() {
         application.shortName.toLowerCase().includes(q),
     );
   }, [routerApplicationSearch, routerApplications]);
+
+  const sourceRouterApplication = useMemo(() => {
+    const selectedShortName = sourceRouterShortName.trim();
+    if (!selectedShortName) return null;
+
+    const listedApplication = routerApplications.find(
+      (application) => application.shortName === selectedShortName,
+    );
+    if (listedApplication) return listedApplication;
+
+    if (currentApplicationRouter?.shortName === selectedShortName) {
+      return {
+        shortName: currentApplicationRouter.shortName,
+        name: currentApplicationRouter.name || currentApplicationRouter.shortName,
+        imageUri: currentApplicationRouter.imageUri,
+      };
+    }
+
+    return null;
+  }, [currentApplicationRouter, routerApplications, sourceRouterShortName]);
+
+  const sourceRouterDisplayName =
+    sourceRouterApplication?.name ||
+    sourceRouterShortName ||
+    (sourceRouterKey.trim() ? "Router configurado" : "Nenhum router selecionado");
+  const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
   const headerCopy =
     visibleActiveView === "templates"
@@ -2454,8 +2486,22 @@ export default function CreateTemplatesApp() {
           </div>
           <div className="ember-header-actions">
             <div className="router-summary">
-              <span>Router de origem</span>
-              <strong>{sourceRouterShortName || maskRouterKey(sourceRouterKey)}</strong>
+              <span className="router-summary-label">Router de origem</span>
+              <div className="router-summary-main">
+                {hasSourceRouterSelection() && (
+                  <span className="router-summary-avatar" aria-hidden="true">
+                    {sourceRouterApplication?.imageUri ? (
+                      <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
+                    ) : (
+                      <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
+                    )}
+                  </span>
+                )}
+                <span className="router-summary-copy">
+                  <strong>{sourceRouterDisplayName}</strong>
+                  <span>{sourceRouterDisplayId}</span>
+                </span>
+              </div>
               {hasSourceRouterSelection() ? (
                 <button
                   className="router-summary-action icon-action"
