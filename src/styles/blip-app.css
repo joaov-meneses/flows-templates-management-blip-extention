@@ -1064,6 +1064,14 @@
   border-color: rgba(30, 107, 241, 0.45);
   background: var(--blip-row-selected);
 }
+.router-application-option.disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+.router-application-option.disabled:hover {
+  border-color: var(--blip-border-soft);
+  background: var(--blip-surface-0);
+}
 .router-application-option input {
   accent-color: var(--blip-primary);
 }

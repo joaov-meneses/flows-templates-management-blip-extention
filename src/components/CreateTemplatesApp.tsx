@@ -292,6 +292,16 @@ function splitLines(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+function removeRouterSelection(values: string[], blockedRouter: string) {
+  const normalizedBlockedRouter = blockedRouter.trim();
+
+  if (!normalizedBlockedRouter) return values;
+
+  return values.filter((value) => value.trim() !== normalizedBlockedRouter);
+}
+function removeRouterSelectionFromLines(value: string, blockedRouter: string) {
+  return removeRouterSelection(splitLines(value), blockedRouter).join("\n");
+}
 function getDevCommandTypeLabel(type: DevCommandType) {
   return DEV_COMMAND_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? "Sem type";
 }
@@ -703,11 +713,17 @@ export default function CreateTemplatesApp() {
   }, [isEmbedded]);
 
   const targetCount = isEmbedded
-    ? targetRouterShortNames.length
-    : splitLines(targetRouterKeys).length;
+    ? removeRouterSelection(targetRouterShortNames, sourceRouterShortName).length
+    : removeRouterSelection(splitLines(targetRouterKeys), sourceRouterKey).length;
   const draftTargetRouterSet = useMemo(
-    () => new Set(splitLines(draftTargetRouterKeys)),
-    [draftTargetRouterKeys],
+    () =>
+      new Set(
+        removeRouterSelection(
+          splitLines(draftTargetRouterKeys),
+          routerModal === "targets" && isEmbedded ? sourceRouterShortName : "",
+        ),
+      ),
+    [draftTargetRouterKeys, isEmbedded, routerModal, sourceRouterShortName],
   );
 
   const selectedTemplates = useMemo(
@@ -842,8 +858,9 @@ export default function CreateTemplatesApp() {
 
   function hasTargetRouterSelection() {
     return isEmbedded
-      ? targetRouterShortNames.length > 0 || splitLines(targetRouterKeys).length > 0
-      : splitLines(targetRouterKeys).length > 0;
+      ? removeRouterSelection(targetRouterShortNames, sourceRouterShortName).length > 0 ||
+          removeRouterSelection(splitLines(targetRouterKeys), sourceRouterKey).length > 0
+      : removeRouterSelection(splitLines(targetRouterKeys), sourceRouterKey).length > 0;
   }
 
   async function ensureSourceRouterKey() {
@@ -871,15 +888,20 @@ export default function CreateTemplatesApp() {
   }
 
   async function ensureTargetRouterKeys() {
-    const cachedKeys = splitLines(targetRouterKeys);
+    const blockedSourceKey = sourceRouterKey.trim();
+    const cachedKeys = removeRouterSelection(splitLines(targetRouterKeys), blockedSourceKey);
 
     if (!isEmbedded) return cachedKeys;
     if (cachedKeys.length > 0) return cachedKeys;
-    if (targetRouterShortNames.length === 0) return [];
+    const allowedTargetShortNames = removeRouterSelection(
+      targetRouterShortNames,
+      sourceRouterShortName,
+    );
+    if (allowedTargetShortNames.length === 0) return [];
 
     const routers: ResolvedRouterKey[] = [];
 
-    for (const shortName of targetRouterShortNames) {
+    for (const shortName of allowedTargetShortNames) {
       routers.push(await loadRouterKey(shortName));
     }
 
@@ -2187,7 +2209,11 @@ export default function CreateTemplatesApp() {
     setRouterModal("source");
   }
   function openTargetsModal() {
-    setDraftTargetRouterKeys(isEmbedded ? targetRouterShortNames.join("\n") : targetRouterKeys);
+    setDraftTargetRouterKeys(
+      isEmbedded
+        ? removeRouterSelection(targetRouterShortNames, sourceRouterShortName).join("\n")
+        : removeRouterSelectionFromLines(targetRouterKeys, sourceRouterKey),
+    );
     setRouterApplicationSearch("");
     if (isEmbedded) void loadRouterApplications();
     setRouterModal("targets");
@@ -2206,6 +2232,7 @@ export default function CreateTemplatesApp() {
 
       setSourceRouterKey(selectedShortName);
       setSourceRouterShortName("");
+      setTargetRouterKeys((current) => removeRouterSelectionFromLines(current, selectedShortName));
       if (sourceChanged) clearTemplateAndFlowResults();
       clearPluginManagerState();
       setRouterModal(null);
@@ -2216,12 +2243,16 @@ export default function CreateTemplatesApp() {
 
     setSourceRouterShortName(selectedShortName);
     setSourceRouterKey("");
+    setTargetRouterShortNames((current) => removeRouterSelection(current, selectedShortName));
+    setTargetRouterKeys("");
     if (sourceChanged) clearTemplateAndFlowResults();
     clearPluginManagerState();
     setRouterModal(null);
   }
   function saveTargetRouters() {
-    const selectedShortNames = splitLines(draftTargetRouterKeys);
+    const selectedShortNames = isEmbedded
+      ? removeRouterSelection(splitLines(draftTargetRouterKeys), sourceRouterShortName)
+      : removeRouterSelection(splitLines(draftTargetRouterKeys), sourceRouterKey);
 
     setError("");
     setRouterApplicationsError("");
@@ -2238,6 +2269,8 @@ export default function CreateTemplatesApp() {
     setRouterModal(null);
   }
   function toggleDraftTargetRouter(shortName: string) {
+    if (shortName.trim() === sourceRouterShortName.trim()) return;
+
     setDraftTargetRouterKeys((current) => {
       const next = new Set(splitLines(current));
       if (next.has(shortName)) {
@@ -2251,6 +2284,7 @@ export default function CreateTemplatesApp() {
   }
   function renderRouterApplicationPicker() {
     const isSourcePicker = routerModal === "source";
+    const blockedTargetShortName = isSourcePicker ? "" : sourceRouterShortName.trim();
 
     return (
       <div className="router-application-picker">
@@ -2308,25 +2342,39 @@ export default function CreateTemplatesApp() {
               </div>
             ) : (
               filteredRouterApplications.map((application) => {
+                const blockedAsTarget = application.shortName === blockedTargetShortName;
                 const selected = isSourcePicker
                   ? draftSourceRouterKey === application.shortName
-                  : draftTargetRouterSet.has(application.shortName);
+                  : !blockedAsTarget && draftTargetRouterSet.has(application.shortName);
 
                 return (
                   <label
                     key={application.shortName}
-                    className={`router-application-option ${selected ? "selected" : ""}`}
+                    className={`router-application-option ${selected ? "selected" : ""} ${
+                      blockedAsTarget ? "disabled" : ""
+                    }`}
+                    title={
+                      blockedAsTarget
+                        ? "Router de origem não pode ser selecionado como destino."
+                        : undefined
+                    }
+                    aria-disabled={blockedAsTarget || undefined}
                   >
                     <input
                       type={isSourcePicker ? "radio" : "checkbox"}
                       name={isSourcePicker ? "source-router-application" : undefined}
                       checked={selected}
+                      disabled={blockedAsTarget}
                       onChange={() => {
                         if (isSourcePicker) {
                           setDraftSourceRouterKey(application.shortName);
+                          setDraftTargetRouterKeys((current) =>
+                            removeRouterSelectionFromLines(current, application.shortName),
+                          );
                           return;
                         }
 
+                        if (blockedAsTarget) return;
                         toggleDraftTargetRouter(application.shortName);
                       }}
                     />
