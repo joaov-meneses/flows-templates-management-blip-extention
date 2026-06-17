@@ -237,7 +237,13 @@ type PluginReplicateResponse = {
   copied: unknown[];
   errors: unknown[];
 };
-type OperationResult = { summary: string; payload: unknown; previewFlow?: FlowSummary };
+type OperationResult = {
+  summary: string;
+  payload: unknown;
+  previewFlow?: FlowSummary;
+  status?: "success" | "warning";
+  view?: ActiveView;
+};
 type PortalApplicationAccount = {
   shortName: string;
   name: string;
@@ -538,6 +544,46 @@ function extractCurrentApplicationRouter(response: unknown): CurrentApplicationR
     accessKey: accessKey || undefined,
   };
 }
+function buildTemplateReplicateSummary(data: TemplateReplicateResponse) {
+  const hasFailures = data.totals.errors > 0 || data.totals.created < data.totals.createJobs;
+
+  if (!hasFailures) {
+    return `Replicação concluída com sucesso em todos os destinos: ${data.totals.created}/${data.totals.createJobs} criação(ões), ${data.totals.uploadedAttachments} imagem(ns).`;
+  }
+
+  return `Replicação concluída com falhas: ${data.totals.created}/${data.totals.createJobs} criação(ões) feitas, ${data.totals.errors} erro(s).`;
+}
+function buildFlowReplicateSummary(data: FlowReplicateResponse) {
+  const hasFailures = data.totals.errors > 0 || data.totals.copied < data.totals.createJobs;
+
+  if (!hasFailures) {
+    return `Replicação concluída com sucesso em todos os destinos: ${data.totals.copied}/${data.totals.createJobs} flow(s) copiados.`;
+  }
+
+  return `Replicação concluída com falhas: ${data.totals.copied}/${data.totals.createJobs} flow(s) copiados, ${data.totals.errors} erro(s).`;
+}
+function buildBulkFlowUpdateSummary(
+  data: FlowBulkUpdateResponse,
+  sourceErrors: number,
+  publishAfterUpdate: boolean,
+) {
+  const hasFailures = sourceErrors > 0 || data.totals.errors > 0 || data.totals.missing > 0;
+  const action = publishAfterUpdate ? "Alteração e publicação" : "Alteração";
+
+  if (!hasFailures) {
+    return `${action} em massa concluída com sucesso: origem e ${data.totals.updated}/${data.totals.matched} destino(s) atualizados.`;
+  }
+
+  return `${action} em massa concluída com pendências: origem ${
+    sourceErrors > 0 ? "falhou" : "OK"
+  }, ${data.totals.updated}/${data.totals.matched} destino(s) atualizados, ${data.totals.missing} sem match, ${data.totals.errors + sourceErrors} erro(s).`;
+}
+function getOperationStatus(errorCount: number) {
+  return errorCount > 0 ? "warning" : "success";
+}
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
@@ -624,6 +670,10 @@ export default function CreateTemplatesApp() {
 
   const isEmbedded = useIframeAutoHeight(shellRef);
   const visibleActiveView = activeView === "devs" && !canAccessDevs ? "templates" : activeView;
+  const pageOperationResult =
+    visibleActiveView !== "devs" && operationResult?.view === visibleActiveView
+      ? operationResult
+      : null;
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -1048,8 +1098,12 @@ export default function CreateTemplatesApp() {
         ...DEFAULT_TEMPLATE_OPTIONS,
       });
       setOperationResult({
-        summary: `${data.totals.created} criações, ${data.totals.uploadedAttachments} imagens, ${data.totals.errors} erros`,
+        summary: buildTemplateReplicateSummary(data),
         payload: data,
+        status: getOperationStatus(
+          data.totals.errors + (data.totals.created < data.totals.createJobs ? 1 : 0),
+        ),
+        view: "templates",
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao replicar templates.");
@@ -1279,6 +1333,8 @@ export default function CreateTemplatesApp() {
             : `Flow "${editingFlow.name}" atualizado em draft.`,
         payload: { update: data, publish: publishData },
         previewFlow: { ...editingFlow, status: nextStatus },
+        status: "success",
+        view: "flows",
       });
       closeEditFlowModal({ force: true });
     } catch (e) {
@@ -1456,17 +1512,46 @@ export default function CreateTemplatesApp() {
       if (!confirmed) return;
 
       const sourceKey = await ensureSourceRouterKey();
-      const sourceUpdate = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
-        sourceRouterKey: sourceKey,
-        flowId: editingFlow.id,
-        flowJson: parsedJson,
-      });
-      const sourcePublish = publishAfterUpdate
-        ? await postJson<FlowPublishResponse>("/api/flows/publish", {
+      const sourceResult: {
+        update: FlowUpdateJsonResponse | null;
+        publish: FlowPublishResponse | null;
+        errors: FlowBulkUpdateError[];
+      } = {
+        update: null,
+        publish: null,
+        errors: [],
+      };
+
+      try {
+        sourceResult.update = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
+          sourceRouterKey: sourceKey,
+          flowId: editingFlow.id,
+          flowJson: parsedJson,
+        });
+      } catch (caughtError) {
+        sourceResult.errors.push({
+          step: "update_source_flow",
+          flowId: editingFlow.id,
+          flowName: editingFlow.name,
+          message: getErrorMessage(caughtError, "Erro ao atualizar flow de origem."),
+        });
+      }
+
+      if (publishAfterUpdate && sourceResult.update) {
+        try {
+          sourceResult.publish = await postJson<FlowPublishResponse>("/api/flows/publish", {
             sourceRouterKey: sourceKey,
             flowId: editingFlow.id,
-          })
-        : null;
+          });
+        } catch (caughtError) {
+          sourceResult.errors.push({
+            step: "publish_source_flow",
+            flowId: editingFlow.id,
+            flowName: editingFlow.name,
+            message: getErrorMessage(caughtError, "Erro ao publicar flow de origem."),
+          });
+        }
+      }
       const data =
         effectivePreflight.totals.matched > 0
           ? await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
@@ -1480,14 +1565,20 @@ export default function CreateTemplatesApp() {
                 dryRun: false,
               },
             };
-      const nextStatus = publishAfterUpdate ? "PUBLISHED" : "DRAFT";
-      const summary = publishAfterUpdate
-        ? `Flow atual atualizado e publicado; ${data.totals.updated} destinos atualizados, ${data.totals.published} publicados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`
-        : `Flow atual atualizado; ${data.totals.updated} destinos atualizados, ${data.totals.missing} ausentes, ${data.totals.errors} erros.`;
+      const nextStatus = sourceResult.publish
+        ? "PUBLISHED"
+        : sourceResult.update
+          ? "DRAFT"
+          : editingFlow.status;
+      const summary = buildBulkFlowUpdateSummary(
+        data,
+        sourceResult.errors.length,
+        publishAfterUpdate,
+      );
 
-      if (publishAfterUpdate) {
+      if (sourceResult.publish) {
         await loadFlowsFromSource(sourceKey);
-      } else {
+      } else if (sourceResult.update) {
         setFlowSearchResult((current) => ({
           ...current,
           flows: current.flows.map((flow) =>
@@ -1498,13 +1589,14 @@ export default function CreateTemplatesApp() {
       setOperationResult({
         summary,
         payload: {
-          source: {
-            update: sourceUpdate,
-            publish: sourcePublish,
-          },
+          source: sourceResult,
           targets: data,
         },
         previewFlow: { ...editingFlow, status: nextStatus },
+        status: getOperationStatus(
+          sourceResult.errors.length + data.totals.errors + data.totals.missing,
+        ),
+        view: "flows",
       });
       closeBulkFlowMappingModal({ force: true });
       closeEditFlowModal({ force: true });
@@ -1530,6 +1622,8 @@ export default function CreateTemplatesApp() {
         summary: `Flow "${flow.name}" publicado com sucesso.`,
         payload: data,
         previewFlow: { ...flow, status: "PUBLISHED" },
+        status: "success",
+        view: "flows",
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao publicar flow.");
@@ -1566,6 +1660,8 @@ export default function CreateTemplatesApp() {
       setOperationResult({
         summary: `Flow "${flow.name}" desativado com sucesso.`,
         payload: data,
+        status: "success",
+        view: "flows",
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao desativar flow.");
@@ -1617,6 +1713,8 @@ export default function CreateTemplatesApp() {
         summary: `Flow criado com sucesso. ID: ${data.flow.id}`,
         payload: data,
         previewFlow: data.flow,
+        status: "success",
+        view: "flows",
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao criar flow.");
@@ -1653,8 +1751,12 @@ export default function CreateTemplatesApp() {
         ...DEFAULT_FLOW_OPTIONS,
       });
       setOperationResult({
-        summary: `${data.totals.publicKeyUploads} public keys, ${data.totals.copied} flows copiados, ${data.totals.errors} erros`,
+        summary: buildFlowReplicateSummary(data),
         payload: data,
+        status: getOperationStatus(
+          data.totals.errors + (data.totals.copied < data.totals.createJobs ? 1 : 0),
+        ),
+        view: "flows",
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao replicar flows.");
@@ -2625,6 +2727,21 @@ export default function CreateTemplatesApp() {
           <div className="ember-alert danger" role="alert">
             <AlertCircle size={18} aria-hidden="true" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {pageOperationResult && (
+          <div
+            className={`ember-alert ${pageOperationResult.status === "warning" ? "warning" : "success"}`}
+            role={pageOperationResult.status === "warning" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {pageOperationResult.status === "warning" ? (
+              <AlertCircle size={18} aria-hidden="true" />
+            ) : (
+              <CheckSquare size={18} aria-hidden="true" />
+            )}
+            <span>{pageOperationResult.summary}</span>
           </div>
         )}
 

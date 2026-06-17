@@ -623,13 +623,9 @@ function stripTargetRouterKey(match) {
 }
 
 async function bulkUpdateFlowJson(params) {
-  const {
-    flowJson,
-    publishAfterUpdate = false,
-    dryRun = false,
-    continueOnError = true,
-  } = params || {};
+  const { flowJson, publishAfterUpdate = false, dryRun = false } = params || {};
   const batchSize = normalizeBatchSize(params?.batchSize);
+  const continueOnError = true;
   const targetRouterKeys = Array.from(
     new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
   );
@@ -701,10 +697,6 @@ async function bulkUpdateFlowJson(params) {
         };
 
         results.errors.push(errorInfo);
-
-        if (!continueOnError) {
-          throw error;
-        }
 
         return errorInfo;
       }
@@ -845,11 +837,12 @@ async function loadFlowPayload(sourceRouterKey, flow) {
 }
 
 async function replicateFlows(params) {
-  const { sourceRouterKey, flows, continueOnError = true } = params || {};
+  const { sourceRouterKey, flows } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
 
   const batchSize = normalizeBatchSize(params?.batchSize);
+  const continueOnError = true;
   const targetRouterKeys = Array.from(
     new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
   );
@@ -881,10 +874,6 @@ async function replicateFlows(params) {
       };
       results.errors.push(errorInfo);
 
-      if (!continueOnError) {
-        throw error;
-      }
-
       return errorInfo;
     }
   });
@@ -904,10 +893,6 @@ async function replicateFlows(params) {
           message: error.message,
         };
         results.errors.push(errorInfo);
-
-        if (!continueOnError) {
-          throw error;
-        }
 
         return errorInfo;
       }
@@ -939,10 +924,6 @@ async function replicateFlows(params) {
         message: error.message,
       };
       results.errors.push(errorInfo);
-
-      if (!continueOnError) {
-        throw error;
-      }
 
       return errorInfo;
     }

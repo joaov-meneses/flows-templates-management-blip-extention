@@ -631,6 +631,11 @@
   border: 1px solid rgba(0, 122, 66, 0.22);
   background: linear-gradient(180deg, rgba(132, 235, 188, 0.28), rgba(132, 235, 188, 0.14));
 }
+.ember-alert.warning {
+  color: var(--blip-warning);
+  border: 1px solid rgba(159, 114, 0, 0.28);
+  background: linear-gradient(180deg, rgba(253, 233, 155, 0.34), rgba(253, 233, 155, 0.16));
+}
 
 /* ---------- Panels ---------- */
 .ember-grid {

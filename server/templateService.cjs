@@ -364,10 +364,6 @@ async function loadTemplatesByNames({
 
       results.errors.push(errorInfo);
 
-      if (!continueOnError) {
-        throw error;
-      }
-
       return errorInfo;
     }
   });
@@ -430,11 +426,11 @@ async function replicateTemplates(params) {
     templateNames,
     templates: providedTemplates,
     dryRun = false,
-    continueOnError = true,
     onlyApproved = false,
   } = params || {};
 
   const batchSize = normalizeBatchSize(params?.batchSize);
+  const continueOnError = true;
   const targetRouterKeys = normalizeStringList(params?.targetRouterKeys, "targetRouterKeys");
   validateTargetRouterKeys(targetRouterKeys);
 
@@ -495,10 +491,6 @@ async function replicateTemplates(params) {
       };
 
       results.errors.push(errorInfo);
-
-      if (!continueOnError) {
-        throw error;
-      }
 
       return errorInfo;
     }
