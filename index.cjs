@@ -7,6 +7,8 @@ const {
   InputError,
   searchTemplates,
   compareTemplates,
+  deleteTemplate,
+  bulkDeleteTemplates,
   replicateTemplates,
 } = require("./server/templateService.cjs");
 const {
@@ -64,6 +66,24 @@ app.post("/api/templates/replicate", async (req, res, next) => {
 app.post("/api/templates/compare", async (req, res, next) => {
   try {
     const result = await compareTemplates(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/templates/delete", async (req, res, next) => {
+  try {
+    const result = await deleteTemplate(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/templates/bulk-delete", async (req, res, next) => {
+  try {
+    const result = await bulkDeleteTemplates(req.body);
     res.json(result);
   } catch (error) {
     next(error);

@@ -154,6 +154,14 @@ function summarizeTemplate(template) {
   };
 }
 
+function normalizeTemplateName(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeTemplateNameKey(value) {
+  return normalizeTemplateName(value).toLowerCase();
+}
+
 function normalizeFilterText(value) {
   return typeof value === "string" ? value.trim().toUpperCase() : "";
 }
@@ -196,6 +204,15 @@ function buildCreateTemplateCommand(template) {
     to: "postmaster@wa.gw.msging.net",
     uri: "/message-templates",
     resource: buildTemplateResource(template),
+  };
+}
+
+function buildDeleteTemplateCommand(templateName) {
+  return {
+    id: randomUUID(),
+    method: "delete",
+    to: "postmaster@wa.gw.msging.net",
+    uri: `/message-templates/${encodeURIComponent(String(templateName))}`,
   };
 }
 
@@ -392,6 +409,90 @@ function normalizeProvidedTemplates(templates) {
   return Array.from(templatesByNameAndLanguage.values());
 }
 
+function normalizeTemplatesForDeletion({ templates, templateNames }) {
+  const templatesByName = new Map();
+
+  if (Array.isArray(templates)) {
+    for (const template of templates) {
+      if (!template || typeof template !== "object") {
+        continue;
+      }
+
+      const name = normalizeTemplateName(template.name);
+      if (!name) continue;
+
+      const nameKey = normalizeTemplateNameKey(name);
+      const existing = templatesByName.get(nameKey) || {
+        name,
+        languages: [],
+        category: template.category,
+        status: template.status,
+      };
+      const language = normalizeTemplateName(template.language);
+
+      if (language && !existing.languages.includes(language)) {
+        existing.languages.push(language);
+      }
+
+      if (!existing.category && template.category) {
+        existing.category = template.category;
+      }
+
+      if (!existing.status && template.status) {
+        existing.status = template.status;
+      }
+
+      templatesByName.set(nameKey, existing);
+    }
+  }
+
+  if (templatesByName.size === 0) {
+    for (const templateName of normalizeStringList(templateNames, "templateNames")) {
+      const name = normalizeTemplateName(templateName);
+      if (!name) continue;
+
+      templatesByName.set(normalizeTemplateNameKey(name), {
+        name,
+        languages: [],
+      });
+    }
+  }
+
+  const normalizedTemplates = Array.from(templatesByName.values());
+
+  if (normalizedTemplates.length === 0) {
+    throw new InputError("templates precisa ter pelo menos um template selecionado.");
+  }
+
+  return normalizedTemplates;
+}
+
+function indexTemplatesByName(templates) {
+  const templatesByName = new Map();
+
+  for (const template of templates) {
+    const nameKey = normalizeTemplateNameKey(template?.name);
+    if (!nameKey) continue;
+
+    const matches = templatesByName.get(nameKey) || [];
+    matches.push(template);
+    templatesByName.set(nameKey, matches);
+  }
+
+  return templatesByName;
+}
+
+function summarizeTemplateLanguages(templates) {
+  return Array.from(
+    new Set(templates.map((template) => normalizeTemplateName(template?.language)).filter(Boolean)),
+  );
+}
+
+function stripTargetRouterKey(match) {
+  const { targetRouterKey, ...publicMatch } = match;
+  return publicMatch;
+}
+
 async function createTemplateOnTargetRouter({ template, targetRouterKey, targetIndex, dryRun }) {
   if (dryRun) {
     const attachmentsToUpload = getImageHeaderHandleSlots(template);
@@ -518,6 +619,201 @@ async function replicateTemplates(params) {
   };
 }
 
+async function deleteTemplate(params) {
+  const routerKey =
+    typeof params?.routerKey === "string" ? params.routerKey : params?.sourceRouterKey;
+  const templateName = normalizeTemplateName(params?.templateName);
+
+  validateSourceRouterKey(routerKey);
+
+  if (!templateName) {
+    throw new InputError("templateName precisa ser informado.");
+  }
+
+  const response = await sendBlipCommand(routerKey, buildDeleteTemplateCommand(templateName));
+
+  return {
+    status: "success",
+    templateName,
+    targetIndex: typeof params?.targetIndex === "number" ? params.targetIndex : undefined,
+    response,
+  };
+}
+
+async function inspectTemplatesOnTargetRouters({
+  targetRouterKeys,
+  selectedTemplates,
+  batchSize,
+  continueOnError,
+}) {
+  const results = {
+    targetRouters: [],
+    matches: [],
+    missing: [],
+    errors: [],
+  };
+
+  await runInBatches(targetRouterKeys, batchSize, async (targetRouterKey, targetIndex) => {
+    try {
+      const targetTemplates = await getTemplatesFromRouter(targetRouterKey);
+      const templatesByName = indexTemplatesByName(targetTemplates);
+      const routerSummary = {
+        targetIndex,
+        totalTemplates: targetTemplates.length,
+        matched: 0,
+        missing: 0,
+      };
+
+      for (const selectedTemplate of selectedTemplates) {
+        const targetMatches = templatesByName.get(normalizeTemplateNameKey(selectedTemplate.name));
+
+        if (targetMatches?.length) {
+          const firstMatch = targetMatches[0];
+          routerSummary.matched += 1;
+          results.matches.push({
+            targetRouterKey,
+            targetIndex,
+            sourceTemplateName: selectedTemplate.name,
+            templateName: firstMatch.name || selectedTemplate.name,
+            languages: summarizeTemplateLanguages(targetMatches),
+            category: firstMatch.category,
+            status: firstMatch.status,
+            matchedTemplates: targetMatches.map(summarizeTemplate),
+          });
+          continue;
+        }
+
+        routerSummary.missing += 1;
+        results.missing.push({
+          targetIndex,
+          sourceTemplateName: selectedTemplate.name,
+          templateName: selectedTemplate.name,
+        });
+      }
+
+      results.targetRouters.push(routerSummary);
+      return routerSummary;
+    } catch (error) {
+      const errorInfo = {
+        step: "load_target_templates",
+        targetIndex,
+        message: error.message,
+      };
+
+      results.errors.push(errorInfo);
+
+      if (!continueOnError) {
+        throw error;
+      }
+
+      return errorInfo;
+    }
+  });
+
+  results.targetRouters.sort((a, b) => a.targetIndex - b.targetIndex);
+  results.matches.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.templateName.localeCompare(b.templateName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.missing.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.templateName.localeCompare(b.templateName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.errors.sort((a, b) => (a.targetIndex ?? 0) - (b.targetIndex ?? 0));
+
+  return results;
+}
+
+async function bulkDeleteTemplates(params) {
+  const batchSize = normalizeBatchSize(params?.batchSize);
+  const continueOnError = true;
+  const dryRun = Boolean(params?.dryRun);
+  const targetRouterKeys = Array.from(
+    new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
+  );
+
+  validateTargetRouterKeys(targetRouterKeys);
+
+  const selectedTemplates = normalizeTemplatesForDeletion({
+    templates: params?.templates,
+    templateNames: params?.templateNames,
+  });
+  const inspection = await inspectTemplatesOnTargetRouters({
+    targetRouterKeys,
+    selectedTemplates,
+    batchSize,
+    continueOnError,
+  });
+  const results = {
+    ...inspection,
+    deleted: [],
+  };
+
+  if (!dryRun && inspection.matches.length > 0) {
+    await runInBatches(inspection.matches, batchSize, async (match) => {
+      try {
+        const response = await sendBlipCommand(
+          match.targetRouterKey,
+          buildDeleteTemplateCommand(match.templateName),
+        );
+        const deleteResult = {
+          status: "success",
+          targetIndex: match.targetIndex,
+          sourceTemplateName: match.sourceTemplateName,
+          templateName: match.templateName,
+          languages: match.languages,
+          response,
+        };
+
+        results.deleted.push(deleteResult);
+        return deleteResult;
+      } catch (error) {
+        const errorInfo = {
+          step: "delete_template",
+          targetIndex: match.targetIndex,
+          sourceTemplateName: match.sourceTemplateName,
+          templateName: match.templateName,
+          message: error.message,
+        };
+
+        results.errors.push(errorInfo);
+
+        return errorInfo;
+      }
+    });
+  }
+
+  results.deleted.sort(
+    (a, b) =>
+      a.targetIndex - b.targetIndex ||
+      a.templateName.localeCompare(b.templateName, "pt-BR", { sensitivity: "base" }),
+  );
+  results.errors.sort((a, b) => (a.targetIndex ?? 0) - (b.targetIndex ?? 0));
+
+  return {
+    options: {
+      continueOnError: Boolean(continueOnError),
+      batchSize,
+      dryRun,
+    },
+    totals: {
+      selectedTemplates: selectedTemplates.length,
+      targetRouters: targetRouterKeys.length,
+      matched: inspection.matches.length,
+      missing: inspection.missing.length,
+      deleted: results.deleted.length,
+      errors: results.errors.length,
+    },
+    targetRouters: results.targetRouters,
+    matches: results.matches.map(stripTargetRouterKey),
+    missing: results.missing,
+    deleted: results.deleted,
+    errors: results.errors,
+  };
+}
+
 async function compareTemplates(params) {
   const sourceRouterKey =
     typeof params?.sourceRouterKey === "string" ? params.sourceRouterKey.trim() : "";
@@ -628,5 +924,7 @@ module.exports = {
   InputError,
   searchTemplates,
   compareTemplates,
+  deleteTemplate,
+  bulkDeleteTemplates,
   replicateTemplates,
 };

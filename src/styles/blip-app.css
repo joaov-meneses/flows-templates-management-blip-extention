@@ -707,12 +707,12 @@
 
 .template-filter-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(220px, 1fr) repeat(6, auto);
   gap: 8px;
   align-items: end;
 }
 .flow-filter-row {
-  grid-template-columns: minmax(260px, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(260px, 1fr) repeat(4, auto);
 }
 .devs-panel {
   display: grid;
@@ -1176,6 +1176,9 @@
 .bulk-flow-modal {
   width: min(1040px, 100%);
 }
+.template-delete-modal {
+  width: min(1040px, 100%);
+}
 .compare-modal {
   width: min(1040px, 100%);
 }
@@ -1238,14 +1241,25 @@
 .bulk-flow-table-wrap {
   max-height: 420px;
 }
+.template-delete-table-wrap {
+  max-height: 420px;
+}
 .flow-mapping-table {
   min-width: 900px;
+}
+.template-delete-table {
+  min-width: 860px;
 }
 .flow-mapping-table td {
   vertical-align: top;
 }
+.template-delete-table td {
+  vertical-align: top;
+}
 .flow-mapping-table td > strong,
 .flow-mapping-table td > .mono-cell,
+.template-delete-table td > strong,
+.template-delete-table td > .mono-cell,
 .flow-mapping-subtle {
   display: block;
 }
@@ -1254,6 +1268,46 @@
   color: var(--blip-content-soft);
   font-size: 12px;
   font-weight: 700;
+}
+.danger-text {
+  color: var(--blip-danger);
+}
+.template-delete-progress {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 12px 14px;
+  background: var(--blip-summary-bg);
+}
+.template-delete-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--blip-content-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+.template-delete-progress-copy strong {
+  color: var(--blip-content);
+  font-size: 14px;
+}
+.template-delete-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--blip-surface-2);
+}
+.template-delete-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blip-danger);
+  transition: width 180ms ease;
+}
+.status-spinner {
+  margin-right: 4px;
 }
 .compact-field {
   gap: 5px;

@@ -106,6 +106,82 @@ type TemplateCompareResponse = {
     }>;
   }>;
 };
+type TemplateDeleteMode = "source" | "bulk";
+type TemplateDeleteItem = {
+  name: string;
+  languages: string[];
+  category?: string;
+  status?: string;
+};
+type TemplateDeleteTargetRouter = {
+  targetIndex: number;
+  totalTemplates: number;
+  matched: number;
+  missing: number;
+};
+type TemplateDeleteMatch = {
+  targetIndex: number;
+  sourceTemplateName: string;
+  templateName: string;
+  languages: string[];
+  category?: string;
+  status?: string;
+};
+type TemplateDeleteMissing = {
+  targetIndex: number;
+  sourceTemplateName: string;
+  templateName: string;
+};
+type TemplateDeleteError = {
+  step: string;
+  targetIndex?: number;
+  sourceTemplateName?: string;
+  templateName?: string;
+  message: string;
+};
+type TemplateDeleteResponse = {
+  status: "success";
+  templateName: string;
+  targetIndex?: number;
+  response: unknown;
+};
+type TemplateBulkDeleteResponse = {
+  options: {
+    continueOnError: boolean;
+    batchSize: number;
+    dryRun: boolean;
+  };
+  totals: {
+    selectedTemplates: number;
+    targetRouters: number;
+    matched: number;
+    missing: number;
+    deleted: number;
+    errors: number;
+  };
+  targetRouters: TemplateDeleteTargetRouter[];
+  matches: TemplateDeleteMatch[];
+  missing: TemplateDeleteMissing[];
+  deleted: TemplateDeleteResponse[];
+  errors: TemplateDeleteError[];
+};
+type TemplateDeleteProgress = {
+  total: number;
+  processed: number;
+  removed: number;
+  failed: number;
+};
+type TemplateDeleteJobState = {
+  status: "pending" | "running" | "success" | "error";
+  message?: string;
+};
+type TemplateDeleteJob = {
+  key: string;
+  routerKey: string;
+  routerLabel: string;
+  targetIndex?: number;
+  templateName: string;
+};
 
 type FlowSummary = {
   id: string;
@@ -293,6 +369,12 @@ const emptyTemplateSearch: SearchResponse = {
 };
 const emptyFlowSearch: FlowSearchResponse = { total: 0, flows: [] };
 const emptyPluginSearch: PluginSearchResponse = { total: 0, plugins: [] };
+const emptyTemplateDeleteProgress: TemplateDeleteProgress = {
+  total: 0,
+  processed: 0,
+  removed: 0,
+  failed: 0,
+};
 
 function splitLines(value: string) {
   return value
@@ -338,6 +420,42 @@ const DEV_ALLOWED_EMAILS = new Set(
 );
 function templateKey(t: Template) {
   return `${t.name}|${t.language}`;
+}
+function normalizeTemplateDeleteName(value: string) {
+  return value.trim().toLocaleLowerCase("pt-BR");
+}
+function getTemplateDeleteItems(templates: Template[]) {
+  const templatesByName = new Map<string, TemplateDeleteItem>();
+
+  for (const template of templates) {
+    const name = template.name.trim();
+    if (!name) continue;
+
+    const nameKey = normalizeTemplateDeleteName(name);
+    const existing = templatesByName.get(nameKey) || {
+      name,
+      languages: [],
+      category: template.category,
+      status: template.status,
+    };
+    const language = template.language.trim();
+
+    if (language && !existing.languages.includes(language)) {
+      existing.languages.push(language);
+    }
+
+    if (!existing.category && template.category) {
+      existing.category = template.category;
+    }
+
+    if (!existing.status && template.status) {
+      existing.status = template.status;
+    }
+
+    templatesByName.set(nameKey, existing);
+  }
+
+  return Array.from(templatesByName.values());
 }
 function flowKey(f: FlowSummary) {
   return String(f.id);
@@ -553,6 +671,15 @@ function buildTemplateReplicateSummary(data: TemplateReplicateResponse) {
 
   return `Replicação concluída com falhas: ${data.totals.created}/${data.totals.createJobs} criação(ões) feitas, ${data.totals.errors} erro(s).`;
 }
+function buildTemplateDeleteSummary(mode: TemplateDeleteMode, progress: TemplateDeleteProgress) {
+  const scope = mode === "source" ? "na origem" : "nos destinos";
+
+  if (progress.failed === 0) {
+    return `Deleção concluída ${scope}: ${progress.removed}/${progress.total} template(s) removidos.`;
+  }
+
+  return `Deleção concluída com falhas ${scope}: ${progress.removed}/${progress.total} template(s) removidos, ${progress.failed} erro(s).`;
+}
 function buildFlowReplicateSummary(data: FlowReplicateResponse) {
   const hasFailures = data.totals.errors > 0 || data.totals.copied < data.totals.createJobs;
 
@@ -615,6 +742,19 @@ export default function CreateTemplatesApp() {
   const [templateCompareResult, setTemplateCompareResult] =
     useState<TemplateCompareResponse | null>(null);
   const [templateCompareNameSort, setTemplateCompareNameSort] = useState<SortDirection>("asc");
+  const [isTemplateDeleteModalOpen, setIsTemplateDeleteModalOpen] = useState(false);
+  const [templateDeleteMode, setTemplateDeleteMode] = useState<TemplateDeleteMode>("source");
+  const [templateDeleteItems, setTemplateDeleteItems] = useState<TemplateDeleteItem[]>([]);
+  const [templateDeletePreflight, setTemplateDeletePreflight] =
+    useState<TemplateBulkDeleteResponse | null>(null);
+  const [templateDeleteSourceKey, setTemplateDeleteSourceKey] = useState("");
+  const [templateDeleteTargetKeys, setTemplateDeleteTargetKeys] = useState<string[]>([]);
+  const [templateDeleteProgress, setTemplateDeleteProgress] = useState<TemplateDeleteProgress>(
+    emptyTemplateDeleteProgress,
+  );
+  const [templateDeleteJobStates, setTemplateDeleteJobStates] = useState<
+    Record<string, TemplateDeleteJobState>
+  >({});
   const [isCreateFlowModalOpen, setIsCreateFlowModalOpen] = useState(false);
   const [isEditFlowModalOpen, setIsEditFlowModalOpen] = useState(false);
   const [isBulkFlowMappingModalOpen, setIsBulkFlowMappingModalOpen] = useState(false);
@@ -646,6 +786,8 @@ export default function CreateTemplatesApp() {
   const [isSearchingTemplates, setIsSearchingTemplates] = useState(false);
   const [isReplicatingTemplates, setIsReplicatingTemplates] = useState(false);
   const [isComparingTemplates, setIsComparingTemplates] = useState(false);
+  const [isInspectingTemplateDeletion, setIsInspectingTemplateDeletion] = useState(false);
+  const [isDeletingTemplates, setIsDeletingTemplates] = useState(false);
   const [isLoadingFlows, setIsLoadingFlows] = useState(false);
   const [isReplicatingFlows, setIsReplicatingFlows] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
@@ -786,9 +928,23 @@ export default function CreateTemplatesApp() {
     () => templateSearchResult.templates.filter((t) => selectedTemplateKeys.has(templateKey(t))),
     [templateSearchResult.templates, selectedTemplateKeys],
   );
+  const selectedTemplateDeleteItems = useMemo(
+    () => getTemplateDeleteItems(selectedTemplates),
+    [selectedTemplates],
+  );
   const allVisibleTemplatesSelected =
     templateSearchResult.templates.length > 0 &&
     selectedTemplates.length === templateSearchResult.templates.length;
+  const templateDeleteRunnableCount =
+    templateDeleteMode === "source"
+      ? templateDeleteItems.length
+      : (templateDeletePreflight?.matches.length ?? 0);
+  const templateDeleteProgressTotal = templateDeleteProgress.total || templateDeleteRunnableCount;
+  const templateDeleteProgressPercent =
+    templateDeleteProgress.total > 0
+      ? Math.round((templateDeleteProgress.processed / templateDeleteProgress.total) * 100)
+      : 0;
+  const hasTemplateDeleteStarted = templateDeleteProgress.total > 0;
 
   const displayedCompareTemplates = useMemo(() => {
     const templates = templateCompareResult?.commonTemplates ?? [];
@@ -1146,6 +1302,290 @@ export default function CreateTemplatesApp() {
     } finally {
       setIsComparingTemplates(false);
     }
+  }
+
+  function closeTemplateDeleteModal(options: { force?: boolean } = {}) {
+    if (isDeletingTemplates && !options.force) return;
+
+    setIsTemplateDeleteModalOpen(false);
+    setTemplateDeletePreflight(null);
+    setTemplateDeleteItems([]);
+    setTemplateDeleteSourceKey("");
+    setTemplateDeleteTargetKeys([]);
+    setTemplateDeleteProgress(emptyTemplateDeleteProgress);
+    setTemplateDeleteJobStates({});
+    setError("");
+  }
+
+  function getTemplateDeleteJobKey(targetIndex: number | undefined, templateName: string) {
+    const routerKey = typeof targetIndex === "number" ? `target:${targetIndex}` : "source";
+    return `${routerKey}|${normalizeTemplateDeleteName(templateName)}`;
+  }
+
+  function getTemplateDeleteRouterLabel(targetIndex?: number) {
+    return typeof targetIndex === "number" ? getTargetRouterLabel(targetIndex) : "Origem";
+  }
+
+  function renderTemplateDeleteStatus(
+    jobState: TemplateDeleteJobState | undefined,
+    fallbackLabel: string,
+    fallbackClassName: string,
+  ) {
+    if (jobState?.status === "running") {
+      return (
+        <span className="ember-status pending">
+          <LoaderCircle className="spin status-spinner" size={12} aria-hidden="true" />
+          Removendo
+        </span>
+      );
+    }
+
+    if (jobState?.status === "success") {
+      return <span className="ember-status published">Removido</span>;
+    }
+
+    if (jobState?.status === "error") {
+      return <span className="ember-status failed">Erro</span>;
+    }
+
+    return <span className={`ember-status ${fallbackClassName}`}>{fallbackLabel}</span>;
+  }
+
+  function buildSourceTemplateDeleteJobs() {
+    return templateDeleteItems.map((template) => ({
+      key: getTemplateDeleteJobKey(undefined, template.name),
+      routerKey: templateDeleteSourceKey,
+      routerLabel: "Origem",
+      templateName: template.name,
+    }));
+  }
+
+  function buildBulkTemplateDeleteJobs() {
+    if (!templateDeletePreflight) return [];
+
+    return templateDeletePreflight.matches
+      .map((match) => {
+        const routerKey = templateDeleteTargetKeys[match.targetIndex] || "";
+
+        return {
+          key: getTemplateDeleteJobKey(match.targetIndex, match.templateName),
+          routerKey,
+          routerLabel: getTargetRouterLabel(match.targetIndex),
+          targetIndex: match.targetIndex,
+          templateName: match.templateName,
+        };
+      })
+      .filter((job) => job.routerKey);
+  }
+
+  function buildTemplateDeleteJobs() {
+    return templateDeleteMode === "source"
+      ? buildSourceTemplateDeleteJobs()
+      : buildBulkTemplateDeleteJobs();
+  }
+
+  function removeDeletedTemplatesFromSource(templateNames: string[]) {
+    const deletedNames = new Set(templateNames.map(normalizeTemplateDeleteName));
+
+    setTemplateSearchResult((current) => {
+      const templates = current.templates.filter(
+        (template) => !deletedNames.has(normalizeTemplateDeleteName(template.name)),
+      );
+
+      return {
+        ...current,
+        total: templates.length,
+        templates,
+      };
+    });
+    setSelectedTemplateKeys((current) => {
+      const next = new Set<string>();
+
+      for (const key of current) {
+        const [templateNameFromKey] = key.split("|");
+
+        if (!deletedNames.has(normalizeTemplateDeleteName(templateNameFromKey || ""))) {
+          next.add(key);
+        }
+      }
+
+      return next;
+    });
+  }
+
+  async function handleOpenSourceTemplateDeleteModal() {
+    setError("");
+    setOperationResult(null);
+
+    if (selectedTemplateDeleteItems.length === 0) {
+      setError("Selecione pelo menos um template.");
+      return;
+    }
+
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
+      openSourceModal();
+      return;
+    }
+
+    setTemplateDeleteMode("source");
+    setIsInspectingTemplateDeletion(true);
+
+    try {
+      const sourceKey = await ensureSourceRouterKey();
+
+      setTemplateDeleteItems(selectedTemplateDeleteItems);
+      setTemplateDeleteSourceKey(sourceKey);
+      setTemplateDeleteTargetKeys([]);
+      setTemplateDeletePreflight(null);
+      setTemplateDeleteProgress(emptyTemplateDeleteProgress);
+      setTemplateDeleteJobStates({});
+      setIsTemplateDeleteModalOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao preparar deleção de templates.");
+    } finally {
+      setIsInspectingTemplateDeletion(false);
+    }
+  }
+
+  async function handleOpenBulkTemplateDeleteModal() {
+    setError("");
+    setOperationResult(null);
+
+    if (selectedTemplateDeleteItems.length === 0) {
+      setError("Selecione pelo menos um template.");
+      return;
+    }
+
+    if (!hasTargetRouterSelection()) {
+      setError("Informe pelo menos um router de destino.");
+      openTargetsModal();
+      return;
+    }
+
+    setTemplateDeleteMode("bulk");
+    setIsInspectingTemplateDeletion(true);
+
+    try {
+      const targets = await ensureTargetRouterKeys();
+      const preflight = await postJson<TemplateBulkDeleteResponse>("/api/templates/bulk-delete", {
+        targetRouterKeys: targets,
+        templates: selectedTemplates,
+        batchSize: DEFAULT_TEMPLATE_OPTIONS.batchSize,
+        dryRun: true,
+      });
+
+      setTemplateDeleteItems(selectedTemplateDeleteItems);
+      setTemplateDeleteTargetKeys(targets);
+      setTemplateDeleteSourceKey("");
+      setTemplateDeletePreflight(preflight);
+      setTemplateDeleteProgress(emptyTemplateDeleteProgress);
+      setTemplateDeleteJobStates({});
+      setIsTemplateDeleteModalOpen(true);
+    } catch (e) {
+      setTemplateDeletePreflight(null);
+      setError(e instanceof Error ? e.message : "Erro ao verificar templates nos destinos.");
+    } finally {
+      setIsInspectingTemplateDeletion(false);
+    }
+  }
+
+  async function handleConfirmTemplateDelete() {
+    setError("");
+
+    const jobs = buildTemplateDeleteJobs();
+
+    if (jobs.length === 0) {
+      setError("Nenhum template encontrado para deletar.");
+      return;
+    }
+
+    const currentMode = templateDeleteMode;
+    const initialJobStates = jobs.reduce<Record<string, TemplateDeleteJobState>>((acc, job) => {
+      acc[job.key] = { status: "pending" };
+      return acc;
+    }, {});
+    const deleted: TemplateDeleteResponse[] = [];
+    const errors: TemplateDeleteError[] = [];
+
+    setIsDeletingTemplates(true);
+    setTemplateDeleteProgress({
+      total: jobs.length,
+      processed: 0,
+      removed: 0,
+      failed: 0,
+    });
+    setTemplateDeleteJobStates(initialJobStates);
+
+    for (const job of jobs) {
+      setTemplateDeleteJobStates((current) => ({
+        ...current,
+        [job.key]: { status: "running" },
+      }));
+
+      try {
+        const result = await postJson<TemplateDeleteResponse>("/api/templates/delete", {
+          routerKey: job.routerKey,
+          templateName: job.templateName,
+          targetIndex: job.targetIndex,
+        });
+
+        deleted.push(result);
+        setTemplateDeleteJobStates((current) => ({
+          ...current,
+          [job.key]: { status: "success" },
+        }));
+        setTemplateDeleteProgress((current) => ({
+          ...current,
+          processed: current.processed + 1,
+          removed: current.removed + 1,
+        }));
+      } catch (caughtError) {
+        const message = getErrorMessage(caughtError, "Erro ao deletar template.");
+
+        errors.push({
+          step: "delete_template",
+          targetIndex: job.targetIndex,
+          templateName: job.templateName,
+          message,
+        });
+        setTemplateDeleteJobStates((current) => ({
+          ...current,
+          [job.key]: { status: "error", message },
+        }));
+        setTemplateDeleteProgress((current) => ({
+          ...current,
+          processed: current.processed + 1,
+          failed: current.failed + 1,
+        }));
+      }
+    }
+
+    const finalProgress = {
+      total: jobs.length,
+      processed: jobs.length,
+      removed: deleted.length,
+      failed: errors.length,
+    };
+
+    setTemplateDeleteProgress(finalProgress);
+
+    if (currentMode === "source" && deleted.length > 0) {
+      removeDeletedTemplatesFromSource(deleted.map((item) => item.templateName));
+    }
+
+    setOperationResult({
+      summary: buildTemplateDeleteSummary(currentMode, finalProgress),
+      payload: {
+        mode: currentMode,
+        preflight: templateDeletePreflight,
+        deleted,
+        errors,
+      },
+      status: errors.length > 0 ? "warning" : "success",
+      view: "templates",
+    });
+    setIsDeletingTemplates(false);
   }
 
   async function handleCopyJson(payload: unknown, successMessage: string) {
@@ -2332,6 +2772,7 @@ export default function CreateTemplatesApp() {
   function clearResults() {
     clearTemplateAndFlowResults();
     clearPluginManagerState();
+    closeTemplateDeleteModal({ force: true });
     setOperationResult(null);
     setError("");
     setCopyNotice("");
@@ -2812,10 +3253,46 @@ export default function CreateTemplatesApp() {
                   : "Adicionar routers de destino"}
               </button>
               <button
+                className="blip-button secondary danger"
+                type="button"
+                onClick={handleOpenSourceTemplateDeleteModal}
+                disabled={
+                  isInspectingTemplateDeletion ||
+                  isDeletingTemplates ||
+                  selectedTemplates.length === 0
+                }
+              >
+                {isInspectingTemplateDeletion && templateDeleteMode === "source" ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={18} aria-hidden="true" />
+                )}
+                Deletar
+              </button>
+              <button
+                className="blip-button secondary danger"
+                type="button"
+                onClick={handleOpenBulkTemplateDeleteModal}
+                disabled={
+                  isInspectingTemplateDeletion ||
+                  isDeletingTemplates ||
+                  selectedTemplates.length === 0
+                }
+              >
+                {isInspectingTemplateDeletion && templateDeleteMode === "bulk" ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={18} aria-hidden="true" />
+                )}
+                Deletar em massa
+              </button>
+              <button
                 className="blip-submit-button primary"
                 type="button"
                 onClick={handleReplicateTemplates}
-                disabled={isReplicatingTemplates || selectedTemplates.length === 0}
+                disabled={
+                  isReplicatingTemplates || isDeletingTemplates || selectedTemplates.length === 0
+                }
               >
                 {isReplicatingTemplates ? (
                   <LoaderCircle className="spin" size={18} aria-hidden="true" />
@@ -3689,6 +4166,205 @@ export default function CreateTemplatesApp() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {isTemplateDeleteModalOpen && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal template-delete-modal"
+              aria-labelledby="template-delete-modal-title"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="template-delete-modal-title">
+                    {templateDeleteMode === "source" ? "Deletar templates" : "Deletar em massa"}
+                  </h2>
+                  <p>
+                    {templateDeleteMode === "source"
+                      ? `${templateDeleteItems.length} selecionado(s) na origem`
+                      : `${templateDeletePreflight?.totals.targetRouters ?? 0} destinos, ${templateDeletePreflight?.totals.matched ?? 0} encontrados, ${templateDeletePreflight?.totals.missing ?? 0} sem match`}
+                  </p>
+                </div>
+                <button
+                  className="blip-button secondary icon-only"
+                  type="button"
+                  onClick={() => closeTemplateDeleteModal()}
+                  disabled={isDeletingTemplates}
+                >
+                  <X size={18} aria-hidden="true" />
+                  <span>Fechar</span>
+                </button>
+              </div>
+
+              <div className="ember-modal-body">
+                {error && (
+                  <div className="ember-alert danger modal-alert" role="alert">
+                    <AlertCircle size={18} aria-hidden="true" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <div className="template-delete-progress" aria-live="polite">
+                  <div className="template-delete-progress-copy">
+                    <strong>
+                      {templateDeleteProgress.removed} de {templateDeleteProgressTotal} removidos
+                    </strong>
+                    <span>
+                      {templateDeleteProgress.processed} processados
+                      {templateDeleteProgress.failed > 0
+                        ? `, ${templateDeleteProgress.failed} falha(s)`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="template-delete-progress-track" aria-hidden="true">
+                    <span style={{ width: `${templateDeleteProgressPercent}%` }} />
+                  </div>
+                </div>
+
+                <div className="ember-table-wrap template-delete-table-wrap">
+                  <table className="ember-table template-delete-table">
+                    <thead>
+                      <tr>
+                        <th>Router</th>
+                        <th>Template</th>
+                        <th>Tipo</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {templateDeleteMode === "source"
+                        ? templateDeleteItems.map((template) => {
+                            const jobKey = getTemplateDeleteJobKey(undefined, template.name);
+                            const jobState = templateDeleteJobStates[jobKey];
+
+                            return (
+                              <tr key={jobKey}>
+                                <td>
+                                  <strong>Origem</strong>
+                                </td>
+                                <td>
+                                  <strong>{template.name}</strong>
+                                  <span className="mono-cell">
+                                    {template.languages.join(", ") || "-"}
+                                  </span>
+                                  {jobState?.message && (
+                                    <span className="flow-mapping-subtle danger-text">
+                                      {jobState.message}
+                                    </span>
+                                  )}
+                                </td>
+                                <td>{template.category || "-"}</td>
+                                <td>
+                                  {renderTemplateDeleteStatus(jobState, "Selecionado", "pending")}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        : templateDeletePreflight?.targetRouters.flatMap((targetRouter) =>
+                            templateDeleteItems.map((template) => {
+                              const match = templateDeletePreflight.matches.find(
+                                (item) =>
+                                  item.targetIndex === targetRouter.targetIndex &&
+                                  normalizeTemplateDeleteName(item.sourceTemplateName) ===
+                                    normalizeTemplateDeleteName(template.name),
+                              );
+                              const rowKey = match
+                                ? getTemplateDeleteJobKey(match.targetIndex, match.templateName)
+                                : `missing:${targetRouter.targetIndex}:${normalizeTemplateDeleteName(
+                                    template.name,
+                                  )}`;
+                              const jobState = match ? templateDeleteJobStates[rowKey] : undefined;
+                              const languages = match?.languages.length
+                                ? match.languages
+                                : template.languages;
+
+                              return (
+                                <tr key={rowKey}>
+                                  <td>
+                                    <strong>
+                                      {getTemplateDeleteRouterLabel(targetRouter.targetIndex)}
+                                    </strong>
+                                    <span className="flow-mapping-subtle">
+                                      {targetRouter.totalTemplates} templates
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong>{match?.templateName || template.name}</strong>
+                                    <span className="mono-cell">{languages.join(", ") || "-"}</span>
+                                    {jobState?.message && (
+                                      <span className="flow-mapping-subtle danger-text">
+                                        {jobState.message}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td>{match?.category || template.category || "-"}</td>
+                                  <td>
+                                    {match
+                                      ? renderTemplateDeleteStatus(jobState, "Achado", "published")
+                                      : renderTemplateDeleteStatus(
+                                          undefined,
+                                          "Sem match",
+                                          "failed",
+                                        )}
+                                  </td>
+                                </tr>
+                              );
+                            }),
+                          )}
+                      {templateDeleteMode === "bulk" &&
+                        templateDeletePreflight?.errors
+                          .filter((item) => item.step === "load_target_templates")
+                          .map((item) => (
+                            <tr key={`error-${item.targetIndex}`}>
+                              <td>
+                                <strong>
+                                  {typeof item.targetIndex === "number"
+                                    ? getTemplateDeleteRouterLabel(item.targetIndex)
+                                    : "Destino"}
+                                </strong>
+                              </td>
+                              <td colSpan={2}>{item.message}</td>
+                              <td>
+                                <span className="ember-status failed">Erro</span>
+                              </td>
+                            </tr>
+                          ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="ember-modal-footer">
+                <button
+                  className="blip-button secondary"
+                  type="button"
+                  onClick={() => closeTemplateDeleteModal()}
+                  disabled={isDeletingTemplates}
+                >
+                  Fechar
+                </button>
+                <button
+                  className="blip-button secondary danger"
+                  type="button"
+                  onClick={handleConfirmTemplateDelete}
+                  disabled={
+                    isDeletingTemplates ||
+                    hasTemplateDeleteStarted ||
+                    templateDeleteRunnableCount === 0
+                  }
+                >
+                  {isDeletingTemplates ? (
+                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={18} aria-hidden="true" />
+                  )}
+                  Deletar
+                </button>
               </div>
             </section>
           </div>
