@@ -672,7 +672,7 @@ function buildTemplateReplicateSummary(data: TemplateReplicateResponse) {
   return `Replicação concluída com falhas: ${data.totals.created}/${data.totals.createJobs} criação(ões) feitas, ${data.totals.errors} erro(s).`;
 }
 function buildTemplateDeleteSummary(mode: TemplateDeleteMode, progress: TemplateDeleteProgress) {
-  const scope = mode === "source" ? "na origem" : "nos destinos";
+  const scope = mode === "source" ? "na origem" : "na origem e nos destinos";
 
   if (progress.failed === 0) {
     return `Deleção concluída ${scope}: ${progress.removed}/${progress.total} template(s) removidos.`;
@@ -938,7 +938,7 @@ export default function CreateTemplatesApp() {
   const templateDeleteRunnableCount =
     templateDeleteMode === "source"
       ? templateDeleteItems.length
-      : (templateDeletePreflight?.matches.length ?? 0);
+      : templateDeleteItems.length + (templateDeletePreflight?.matches.length ?? 0);
   const templateDeleteProgressTotal = templateDeleteProgress.total || templateDeleteRunnableCount;
   const templateDeleteProgressPercent =
     templateDeleteProgress.total > 0
@@ -1352,18 +1352,20 @@ export default function CreateTemplatesApp() {
   }
 
   function buildSourceTemplateDeleteJobs() {
-    return templateDeleteItems.map((template) => ({
-      key: getTemplateDeleteJobKey(undefined, template.name),
-      routerKey: templateDeleteSourceKey,
-      routerLabel: "Origem",
-      templateName: template.name,
-    }));
+    return templateDeleteItems
+      .map((template) => ({
+        key: getTemplateDeleteJobKey(undefined, template.name),
+        routerKey: templateDeleteSourceKey,
+        routerLabel: "Origem",
+        templateName: template.name,
+      }))
+      .filter((job) => job.routerKey);
   }
 
   function buildBulkTemplateDeleteJobs() {
     if (!templateDeletePreflight) return [];
 
-    return templateDeletePreflight.matches
+    const targetJobs = templateDeletePreflight.matches
       .map((match) => {
         const routerKey = templateDeleteTargetKeys[match.targetIndex] || "";
 
@@ -1376,6 +1378,8 @@ export default function CreateTemplatesApp() {
         };
       })
       .filter((job) => job.routerKey);
+
+    return [...buildSourceTemplateDeleteJobs(), ...targetJobs];
   }
 
   function buildTemplateDeleteJobs() {
@@ -1457,6 +1461,12 @@ export default function CreateTemplatesApp() {
       return;
     }
 
+    if (!hasSourceRouterSelection()) {
+      setError("Informe o router de origem.");
+      openSourceModal();
+      return;
+    }
+
     if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino.");
       openTargetsModal();
@@ -1467,6 +1477,7 @@ export default function CreateTemplatesApp() {
     setIsInspectingTemplateDeletion(true);
 
     try {
+      const sourceKey = await ensureSourceRouterKey();
       const targets = await ensureTargetRouterKeys();
       const preflight = await postJson<TemplateBulkDeleteResponse>("/api/templates/bulk-delete", {
         targetRouterKeys: targets,
@@ -1477,7 +1488,7 @@ export default function CreateTemplatesApp() {
 
       setTemplateDeleteItems(selectedTemplateDeleteItems);
       setTemplateDeleteTargetKeys(targets);
-      setTemplateDeleteSourceKey("");
+      setTemplateDeleteSourceKey(sourceKey);
       setTemplateDeletePreflight(preflight);
       setTemplateDeleteProgress(emptyTemplateDeleteProgress);
       setTemplateDeleteJobStates({});
@@ -1570,8 +1581,12 @@ export default function CreateTemplatesApp() {
 
     setTemplateDeleteProgress(finalProgress);
 
-    if (currentMode === "source" && deleted.length > 0) {
-      removeDeletedTemplatesFromSource(deleted.map((item) => item.templateName));
+    const sourceDeletedTemplateNames = deleted
+      .filter((item) => item.targetIndex === undefined)
+      .map((item) => item.templateName);
+
+    if (sourceDeletedTemplateNames.length > 0) {
+      removeDeletedTemplatesFromSource(sourceDeletedTemplateNames);
     }
 
     setOperationResult({
@@ -4187,7 +4202,7 @@ export default function CreateTemplatesApp() {
                   <p>
                     {templateDeleteMode === "source"
                       ? `${templateDeleteItems.length} selecionado(s) na origem`
-                      : `${templateDeletePreflight?.totals.targetRouters ?? 0} destinos, ${templateDeletePreflight?.totals.matched ?? 0} encontrados, ${templateDeletePreflight?.totals.missing ?? 0} sem match`}
+                      : `${templateDeleteItems.length} na origem, ${templateDeletePreflight?.totals.targetRouters ?? 0} destinos, ${templateDeletePreflight?.totals.matched ?? 0} encontrados, ${templateDeletePreflight?.totals.missing ?? 0} sem match`}
                   </p>
                 </div>
                 <button
@@ -4265,57 +4280,95 @@ export default function CreateTemplatesApp() {
                               </tr>
                             );
                           })
-                        : templateDeletePreflight?.targetRouters.flatMap((targetRouter) =>
-                            templateDeleteItems.map((template) => {
-                              const match = templateDeletePreflight.matches.find(
-                                (item) =>
-                                  item.targetIndex === targetRouter.targetIndex &&
-                                  normalizeTemplateDeleteName(item.sourceTemplateName) ===
-                                    normalizeTemplateDeleteName(template.name),
-                              );
-                              const rowKey = match
-                                ? getTemplateDeleteJobKey(match.targetIndex, match.templateName)
-                                : `missing:${targetRouter.targetIndex}:${normalizeTemplateDeleteName(
-                                    template.name,
-                                  )}`;
-                              const jobState = match ? templateDeleteJobStates[rowKey] : undefined;
-                              const languages = match?.languages.length
-                                ? match.languages
-                                : template.languages;
+                        : [
+                            ...templateDeleteItems.map((template) => {
+                              const jobKey = getTemplateDeleteJobKey(undefined, template.name);
+                              const jobState = templateDeleteJobStates[jobKey];
 
                               return (
-                                <tr key={rowKey}>
+                                <tr key={jobKey}>
                                   <td>
-                                    <strong>
-                                      {getTemplateDeleteRouterLabel(targetRouter.targetIndex)}
-                                    </strong>
-                                    <span className="flow-mapping-subtle">
-                                      {targetRouter.totalTemplates} templates
-                                    </span>
+                                    <strong>Origem</strong>
+                                    <span className="flow-mapping-subtle">Router atual</span>
                                   </td>
                                   <td>
-                                    <strong>{match?.templateName || template.name}</strong>
-                                    <span className="mono-cell">{languages.join(", ") || "-"}</span>
+                                    <strong>{template.name}</strong>
+                                    <span className="mono-cell">
+                                      {template.languages.join(", ") || "-"}
+                                    </span>
                                     {jobState?.message && (
                                       <span className="flow-mapping-subtle danger-text">
                                         {jobState.message}
                                       </span>
                                     )}
                                   </td>
-                                  <td>{match?.category || template.category || "-"}</td>
+                                  <td>{template.category || "-"}</td>
                                   <td>
-                                    {match
-                                      ? renderTemplateDeleteStatus(jobState, "Achado", "published")
-                                      : renderTemplateDeleteStatus(
-                                          undefined,
-                                          "Sem match",
-                                          "failed",
-                                        )}
+                                    {renderTemplateDeleteStatus(jobState, "Selecionado", "pending")}
                                   </td>
                                 </tr>
                               );
                             }),
-                          )}
+                            ...(templateDeletePreflight?.targetRouters.flatMap((targetRouter) =>
+                              templateDeleteItems.map((template) => {
+                                const match = templateDeletePreflight.matches.find(
+                                  (item) =>
+                                    item.targetIndex === targetRouter.targetIndex &&
+                                    normalizeTemplateDeleteName(item.sourceTemplateName) ===
+                                      normalizeTemplateDeleteName(template.name),
+                                );
+                                const rowKey = match
+                                  ? getTemplateDeleteJobKey(match.targetIndex, match.templateName)
+                                  : `missing:${targetRouter.targetIndex}:${normalizeTemplateDeleteName(
+                                      template.name,
+                                    )}`;
+                                const jobState = match
+                                  ? templateDeleteJobStates[rowKey]
+                                  : undefined;
+                                const languages = match?.languages.length
+                                  ? match.languages
+                                  : template.languages;
+
+                                return (
+                                  <tr key={rowKey}>
+                                    <td>
+                                      <strong>
+                                        {getTemplateDeleteRouterLabel(targetRouter.targetIndex)}
+                                      </strong>
+                                      <span className="flow-mapping-subtle">
+                                        {targetRouter.totalTemplates} templates
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <strong>{match?.templateName || template.name}</strong>
+                                      <span className="mono-cell">
+                                        {languages.join(", ") || "-"}
+                                      </span>
+                                      {jobState?.message && (
+                                        <span className="flow-mapping-subtle danger-text">
+                                          {jobState.message}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td>{match?.category || template.category || "-"}</td>
+                                    <td>
+                                      {match
+                                        ? renderTemplateDeleteStatus(
+                                            jobState,
+                                            "Achado",
+                                            "published",
+                                          )
+                                        : renderTemplateDeleteStatus(
+                                            undefined,
+                                            "Sem match",
+                                            "failed",
+                                          )}
+                                    </td>
+                                  </tr>
+                                );
+                              }),
+                            ) ?? []),
+                          ]}
                       {templateDeleteMode === "bulk" &&
                         templateDeletePreflight?.errors
                           .filter((item) => item.step === "load_target_templates")
