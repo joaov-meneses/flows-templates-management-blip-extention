@@ -714,6 +714,17 @@
 .flow-filter-row {
   grid-template-columns: minmax(260px, 1fr) repeat(4, auto);
 }
+.flow-public-key-field {
+  max-width: 760px;
+  margin-top: 14px;
+}
+.flow-public-key-field textarea,
+.public-key-field textarea {
+  min-height: 132px;
+  font-family: "JetBrains Mono", "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
 .devs-panel {
   display: grid;
   gap: 16px;
