@@ -3,15 +3,6 @@ const { randomUUID } = require("node:crypto");
 const MSGING_COMMANDS_URL = "https://msging.net/commands";
 const HTTP_MSGING_COMMANDS_URL = "https://http.msging.net/commands";
 const DEFAULT_BATCH_SIZE = 15;
-const BUSINESS_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAobejfP2Gbt4/Hvqwrgcm
-O/98+0koGf3Y9WqayHiQofNI/eMPdHdf+o2mOG3r3R6bVq0bmatX7FcFvBSama6l
-Uc9WcZc2mLVMu+oq2qCwYlj0ZZESLyjM13Rtg1WoLlNntYogCS982kL8yECQs9vz
-a+ahYCqc47leCIU3RZSGcAHNIpkTP48zIboftNfc1I/EGgvfBkdVs689FRh2DvLO
-CqVivtUuzfSCsl6fqFmEND4KXXG2ANTsxGPjdDZxwjGsbNpbvVsRUw5q1V+gR6XO
-nJDyEO0QebZX/qE/NPP5tev+YwHr50gwJTxwrGu4rqvYlxTtJkeATqSDSffWG5UD
-ewIDAQAB
------END PUBLIC KEY-----`;
 
 class InputError extends Error {
   constructor(message) {
@@ -60,6 +51,14 @@ function normalizeBatchSize(batchSize) {
   }
 
   return normalized;
+}
+
+function normalizeBusinessPublicKey(businessPublicKey) {
+  if (typeof businessPublicKey !== "string" || !businessPublicKey.trim()) {
+    throw new InputError("business_public_key precisa ser informada para Flow API.");
+  }
+
+  return businessPublicKey.trim();
 }
 
 async function sendBlipCommand(routerKey, command, options = {}) {
@@ -124,11 +123,11 @@ function buildCommand(method, uri, resource) {
   return command;
 }
 
-async function uploadFlowPublicKey(targetRouterKey, targetIndex) {
+async function uploadFlowPublicKey(targetRouterKey, targetIndex, businessPublicKey) {
   const response = await sendBlipCommand(
     targetRouterKey,
     buildCommand("set", "/whatsapp-flows/public-key/upload", {
-      business_public_key: BUSINESS_PUBLIC_KEY,
+      business_public_key: businessPublicKey,
     }),
     {
       commandUrl: HTTP_MSGING_COMMANDS_URL,
@@ -150,14 +149,27 @@ function extractFlowsFromResponse(responseBody) {
   return Array.isArray(flows) ? flows : [];
 }
 
-function summarizeFlow(flow) {
-  return {
+function summarizeFlow(flow, details = flow) {
+  const endpointUri =
+    typeof details?.endpoint_uri === "string" && details.endpoint_uri.trim()
+      ? details.endpoint_uri.trim()
+      : typeof flow?.endpoint_uri === "string"
+        ? flow.endpoint_uri.trim()
+        : "";
+  const summary = {
     id: String(flow.id || ""),
     name: flow.name || "",
     status: flow.status,
     categories: Array.isArray(flow.categories) ? flow.categories : [],
     validation_errors: Array.isArray(flow.validation_errors) ? flow.validation_errors : [],
+    isFlowApi: Boolean(endpointUri),
   };
+
+  if (endpointUri) {
+    summary.endpoint_uri = endpointUri;
+  }
+
+  return summary;
 }
 
 function normalizeFlowName(name) {
@@ -280,7 +292,11 @@ async function searchFlows(params) {
     buildCommand("get", "/whatsapp-flows"),
   );
 
-  const flows = extractFlowsFromResponse(responseBody).map(summarizeFlow);
+  const listedFlows = extractFlowsFromResponse(responseBody);
+  const flows = await runInBatches(listedFlows, DEFAULT_BATCH_SIZE, async (flow) => {
+    const details = await getFlowDetails(sourceRouterKey, flow.id);
+    return summarizeFlow(flow, details);
+  });
 
   return {
     total: flows.length,
@@ -437,16 +453,27 @@ function buildNewFlowResource({ name, isFlowApi, endpointUri }) {
 }
 
 async function createFlow(params) {
-  const { sourceRouterKey, name, isFlowApi = false, endpointUri = "", flowJson } = params || {};
+  const {
+    sourceRouterKey,
+    name,
+    isFlowApi = false,
+    endpointUri = "",
+    businessPublicKey,
+    flowJson,
+  } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
 
+  const normalizedIsFlowApi = Boolean(isFlowApi);
   const normalizedFlowJson = normalizeFlowJson(flowJson);
   const createResource = buildNewFlowResource({
     name,
-    isFlowApi: Boolean(isFlowApi),
+    isFlowApi: normalizedIsFlowApi,
     endpointUri,
   });
+  const publicKeyUpload = normalizedIsFlowApi
+    ? await uploadFlowPublicKey(sourceRouterKey, 0, normalizeBusinessPublicKey(businessPublicKey))
+    : null;
 
   const createResponse = await sendBlipCommand(
     sourceRouterKey,
@@ -474,7 +501,9 @@ async function createFlow(params) {
       status: "DRAFT",
       categories: createResource.categories,
       endpoint_uri: createResource.endpoint_uri,
+      isFlowApi: normalizedIsFlowApi,
     },
+    publicKeyUpload,
     createResponse,
     setJsonResponse,
   };
@@ -856,20 +885,17 @@ async function replicateFlows(params) {
     errors: [],
   };
 
-  const targetsWithPublicKey = [];
-  await runInBatches(targetRouterKeys, batchSize, async (targetRouterKey, targetIndex) => {
+  const payloads = [];
+  await runInBatches(selectedFlows, batchSize, async (flow) => {
     try {
-      const uploadResult = await uploadFlowPublicKey(targetRouterKey, targetIndex);
-      results.publicKeyUploads.push(uploadResult);
-      targetsWithPublicKey.push({
-        targetRouterKey,
-        targetIndex,
-      });
-      return uploadResult;
+      const payload = await loadFlowPayload(sourceRouterKey, flow);
+      payloads.push(payload);
+      return payload;
     } catch (error) {
       const errorInfo = {
-        step: "upload_public_key",
-        targetIndex,
+        step: "load_flow",
+        flowId: flow.id,
+        flowName: flow.name,
         message: error.message,
       };
       results.errors.push(errorInfo);
@@ -878,18 +904,34 @@ async function replicateFlows(params) {
     }
   });
 
-  const payloads = [];
-  if (targetsWithPublicKey.length > 0) {
-    await runInBatches(selectedFlows, batchSize, async (flow) => {
+  const allTargets = targetRouterKeys.map((targetRouterKey, targetIndex) => ({
+    targetRouterKey,
+    targetIndex,
+  }));
+  const hasFlowApi = payloads.some((payload) => Boolean(payload.flowDetails?.endpoint_uri));
+  let targetsReadyForApiFlows = allTargets;
+
+  if (hasFlowApi) {
+    const normalizedBusinessPublicKey = normalizeBusinessPublicKey(params?.businessPublicKey);
+    targetsReadyForApiFlows = [];
+
+    await runInBatches(allTargets, batchSize, async ({ targetRouterKey, targetIndex }) => {
       try {
-        const payload = await loadFlowPayload(sourceRouterKey, flow);
-        payloads.push(payload);
-        return payload;
+        const uploadResult = await uploadFlowPublicKey(
+          targetRouterKey,
+          targetIndex,
+          normalizedBusinessPublicKey,
+        );
+        results.publicKeyUploads.push(uploadResult);
+        targetsReadyForApiFlows.push({
+          targetRouterKey,
+          targetIndex,
+        });
+        return uploadResult;
       } catch (error) {
         const errorInfo = {
-          step: "load_flow",
-          flowId: flow.id,
-          flowName: flow.name,
+          step: "upload_public_key",
+          targetIndex,
           message: error.message,
         };
         results.errors.push(errorInfo);
@@ -901,7 +943,11 @@ async function replicateFlows(params) {
 
   const createJobs = [];
   for (const payload of payloads) {
-    for (const target of targetsWithPublicKey) {
+    const eligibleTargets = payload.flowDetails?.endpoint_uri
+      ? targetsReadyForApiFlows
+      : allTargets;
+
+    for (const target of eligibleTargets) {
       createJobs.push({
         ...payload,
         targetRouterKey: target.targetRouterKey,

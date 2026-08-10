@@ -189,6 +189,8 @@ type FlowSummary = {
   status?: string;
   categories?: string[];
   validation_errors?: unknown[];
+  endpoint_uri?: string;
+  isFlowApi?: boolean;
 };
 
 type FlowSearchResponse = { total: number; flows: FlowSummary[] };
@@ -209,7 +211,8 @@ type FlowReplicateResponse = {
   errors: unknown[];
 };
 type FlowCreateResponse = {
-  flow: FlowSummary & { endpoint_uri?: string };
+  flow: FlowSummary;
+  publicKeyUpload: unknown | null;
   createResponse: unknown;
   setJsonResponse: unknown;
 };
@@ -770,7 +773,9 @@ export default function CreateTemplatesApp() {
   const [newFlowName, setNewFlowName] = useState("");
   const [newFlowIsApi, setNewFlowIsApi] = useState(false);
   const [newFlowEndpointUri, setNewFlowEndpointUri] = useState("");
+  const [newFlowBusinessPublicKey, setNewFlowBusinessPublicKey] = useState("");
   const [newFlowJson, setNewFlowJson] = useState("");
+  const [replicateFlowBusinessPublicKey, setReplicateFlowBusinessPublicKey] = useState("");
   const [editFlowJson, setEditFlowJson] = useState("");
   const [editFlowPublishAfterSave, setEditFlowPublishAfterSave] = useState(false);
   const [bulkFlowPreflight, setBulkFlowPreflight] = useState<FlowBulkUpdateResponse | null>(null);
@@ -967,6 +972,9 @@ export default function CreateTemplatesApp() {
   const selectedFlows = useMemo(
     () => flowSearchResult.flows.filter((f) => selectedFlowIds.has(flowKey(f))),
     [flowSearchResult.flows, selectedFlowIds],
+  );
+  const selectedFlowsIncludeApi = selectedFlows.some(
+    (flow) => flow.isFlowApi || Boolean(flow.endpoint_uri),
   );
   const allVisibleFlowsSelected =
     filteredFlows.length > 0 && filteredFlows.every((f) => selectedFlowIds.has(flowKey(f)));
@@ -1643,6 +1651,7 @@ export default function CreateTemplatesApp() {
     });
     setFlowSearchResult(data);
     setSelectedFlowIds(data.flows.length === 1 ? new Set([flowKey(data.flows[0])]) : new Set());
+    setReplicateFlowBusinessPublicKey("");
     return data;
   }
 
@@ -2140,6 +2149,10 @@ export default function CreateTemplatesApp() {
       setError("Informe o endpoint_uri para Flow API.");
       return;
     }
+    if (newFlowIsApi && !newFlowBusinessPublicKey.trim()) {
+      setError("Informe a business_public_key para Flow API.");
+      return;
+    }
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(newFlowJson);
@@ -2155,12 +2168,14 @@ export default function CreateTemplatesApp() {
         name: normalizedName,
         isFlowApi: newFlowIsApi,
         endpointUri: newFlowEndpointUri.trim(),
+        ...(newFlowIsApi ? { businessPublicKey: newFlowBusinessPublicKey.trim() } : {}),
         flowJson: parsedJson,
       });
       setIsCreateFlowModalOpen(false);
       setNewFlowName("");
       setNewFlowIsApi(false);
       setNewFlowEndpointUri("");
+      setNewFlowBusinessPublicKey("");
       setNewFlowJson("");
       setFlowFilter(data.flow.name);
       await loadFlowsFromSource(sourceKey);
@@ -2190,6 +2205,10 @@ export default function CreateTemplatesApp() {
       setError("Selecione pelo menos um flow.");
       return;
     }
+    if (selectedFlowsIncludeApi && !replicateFlowBusinessPublicKey.trim()) {
+      setError("Informe a business_public_key para replicar Flow API.");
+      return;
+    }
     if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino.");
       openTargetsModal();
@@ -2203,6 +2222,9 @@ export default function CreateTemplatesApp() {
         sourceRouterKey: sourceKey,
         targetRouterKeys: targets,
         flows: selectedFlows,
+        ...(selectedFlowsIncludeApi
+          ? { businessPublicKey: replicateFlowBusinessPublicKey.trim() }
+          : {}),
         ...DEFAULT_FLOW_OPTIONS,
       });
       setOperationResult({
@@ -2783,6 +2805,7 @@ export default function CreateTemplatesApp() {
     setFlowSearchResult(emptyFlowSearch);
     setSelectedFlowIds(new Set());
     setFlowFilter("");
+    setReplicateFlowBusinessPublicKey("");
   }
   function clearResults() {
     clearTemplateAndFlowResults();
@@ -3446,6 +3469,24 @@ export default function CreateTemplatesApp() {
                 Replicar
               </button>
             </form>
+
+            {selectedFlowsIncludeApi && (
+              <label
+                className="blip-native-field flow-public-key-field"
+                htmlFor="replicateFlowBusinessPublicKey"
+              >
+                business_public_key para Flow API
+                <textarea
+                  id="replicateFlowBusinessPublicKey"
+                  value={replicateFlowBusinessPublicKey}
+                  onChange={(e) => setReplicateFlowBusinessPublicKey(e.target.value)}
+                  rows={6}
+                  required
+                  spellCheck={false}
+                  placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
+                />
+              </label>
+            )}
 
             <div className="ember-table-wrap template-table-wrap">
               <table className="ember-table flow-table">
@@ -4468,21 +4509,48 @@ export default function CreateTemplatesApp() {
                   <input
                     type="checkbox"
                     checked={newFlowIsApi}
-                    onChange={(e) => setNewFlowIsApi(e.target.checked)}
+                    onChange={(e) => {
+                      const isFlowApi = e.target.checked;
+                      setNewFlowIsApi(isFlowApi);
+                      if (!isFlowApi) {
+                        setNewFlowEndpointUri("");
+                        setNewFlowBusinessPublicKey("");
+                      }
+                    }}
                   />
                   É Flow API
                 </label>
 
-                <label className="blip-native-field" htmlFor="newFlowEndpointUri">
-                  endpoint_uri
-                  <input
-                    id="newFlowEndpointUri"
-                    value={newFlowEndpointUri}
-                    onChange={(e) => setNewFlowEndpointUri(e.target.value)}
-                    disabled={!newFlowIsApi}
-                    placeholder="https://..."
-                  />
-                </label>
+                {newFlowIsApi && (
+                  <>
+                    <label className="blip-native-field" htmlFor="newFlowEndpointUri">
+                      endpoint_uri
+                      <input
+                        id="newFlowEndpointUri"
+                        value={newFlowEndpointUri}
+                        onChange={(e) => setNewFlowEndpointUri(e.target.value)}
+                        required
+                        placeholder="https://..."
+                      />
+                    </label>
+
+                    <label
+                      className="blip-native-field public-key-field"
+                      htmlFor="newFlowBusinessPublicKey"
+                    >
+                      business_public_key
+                      <textarea
+                        id="newFlowBusinessPublicKey"
+                        value={newFlowBusinessPublicKey}
+                        onChange={(e) => setNewFlowBusinessPublicKey(e.target.value)}
+                        rows={6}
+                        required
+                        spellCheck={false}
+                        placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
+                      />
+                    </label>
+                  </>
+                )}
 
                 <label className="blip-native-field json-field" htmlFor="newFlowJson">
                   JSON completo
