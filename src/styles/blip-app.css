@@ -1180,6 +1180,125 @@
   color: var(--blip-content-soft);
   background: var(--blip-surface-1);
 }
+.router-directory-panel {
+  display: grid;
+  gap: 18px;
+}
+.router-directory-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 520px) auto;
+  align-items: end;
+  gap: 12px;
+}
+.router-directory-count {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 0 12px;
+  color: var(--blip-content-soft);
+  background: var(--blip-surface-1);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.router-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.router-directory-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius);
+  padding: 14px;
+  background: var(--blip-surface-0);
+  box-shadow: var(--blip-shadow-1);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+.router-directory-card:hover {
+  border-color: var(--blip-border-strong);
+  box-shadow: var(--blip-shadow-2);
+  transform: translateY(-2px);
+}
+.router-directory-card-main {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--blip-content-soft);
+  text-decoration: none;
+}
+.router-directory-card-main:hover {
+  color: var(--blip-primary);
+}
+.router-directory-card-main:focus-visible {
+  border-radius: var(--blip-radius-sm);
+  outline: none;
+  box-shadow: var(--blip-ring);
+}
+.router-directory-card-main.disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.router-directory-avatar {
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--blip-content-soft);
+  background: var(--blip-surface-1);
+  font-size: 18px;
+  font-weight: 800;
+}
+.router-directory-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.router-directory-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.router-directory-copy strong,
+.router-directory-copy span,
+.router-directory-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.router-directory-copy strong {
+  color: var(--blip-content);
+  font-size: 14px;
+}
+.router-directory-copy span,
+.router-directory-copy small {
+  color: var(--blip-content-soft);
+  font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+}
+.router-directory-copy small {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.router-directory-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .create-flow-modal {
   width: min(860px, 100%);
@@ -1506,6 +1625,7 @@
   .plugin-editor-form,
   .plugin-toolbar,
   .router-picker-toolbar,
+  .router-directory-toolbar,
   .compare-form {
     grid-template-columns: 1fr;
   }
