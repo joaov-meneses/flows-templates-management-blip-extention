@@ -7,10 +7,13 @@ import {
   Clipboard,
   CopyPlus,
   Eye,
+  ExternalLink,
   FileJson,
+  KeyRound,
   LoaderCircle,
   MessageSquareText,
   Moon,
+  Network,
   Pencil,
   Plus,
   Search,
@@ -31,7 +34,7 @@ import {
 } from "../lib/blipProxy";
 import "../styles/blip-app.css";
 
-type ActiveView = "templates" | "flows" | "devs";
+type ActiveView = "routers" | "templates" | "flows" | "devs";
 type DevsTab = "commands" | "plugins";
 type RouterModal = "source" | "targets" | null;
 type SortDirection = "asc" | "desc";
@@ -520,6 +523,14 @@ function buildRouterKey(shortName: string, accessKey: string) {
   const decodedAccessKey = decodeBase64(accessKey);
   return `Key ${encodeBase64(`${shortName}:${decodedAccessKey}`)}`;
 }
+function buildRouterUrl(application: Pick<PortalApplicationAccount, "shortName" | "tenantId">) {
+  const tenantId = application.tenantId?.trim().toLowerCase();
+  const shortName = application.shortName.trim();
+
+  if (!tenantId || !shortName || !/^[a-z0-9-]+$/.test(tenantId)) return "";
+
+  return `https://${tenantId}.blip.ai/application/detail/${encodeURIComponent(shortName)}/home`;
+}
 async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
   const response = await fetch(path, {
     method: "POST",
@@ -767,7 +778,9 @@ export default function CreateTemplatesApp() {
   const [routerApplications, setRouterApplications] = useState<PortalApplicationAccount[]>([]);
   const [routerApplicationsError, setRouterApplicationsError] = useState("");
   const [routerApplicationSearch, setRouterApplicationSearch] = useState("");
+  const [routerDirectorySearch, setRouterDirectorySearch] = useState("");
   const [isLoadingRouterApplications, setIsLoadingRouterApplications] = useState(false);
+  const [routerKeyActionId, setRouterKeyActionId] = useState("");
   const [currentApplicationRouter, setCurrentApplicationRouter] =
     useState<CurrentApplicationRouter | null>(null);
   const [newFlowName, setNewFlowName] = useState("");
@@ -1010,6 +1023,18 @@ export default function CreateTemplatesApp() {
     );
   }, [routerApplicationSearch, routerApplications]);
 
+  const filteredDirectoryRouterApplications = useMemo(() => {
+    const q = routerDirectorySearch.trim().toLowerCase();
+    if (!q) return routerApplications;
+
+    return routerApplications.filter(
+      (application) =>
+        application.name.toLowerCase().includes(q) ||
+        application.shortName.toLowerCase().includes(q) ||
+        application.tenantId?.toLowerCase().includes(q),
+    );
+  }, [routerApplications, routerDirectorySearch]);
+
   const sourceRouterApplication = useMemo(() => {
     const selectedShortName = sourceRouterShortName.trim();
     if (!selectedShortName) return null;
@@ -1037,29 +1062,35 @@ export default function CreateTemplatesApp() {
   const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
   const headerCopy =
-    visibleActiveView === "templates"
+    visibleActiveView === "routers"
       ? {
-          kicker: "WhatsApp Templates",
-          title: "Templates",
-          description: "Replicação de templates entre routers BLiP",
+          kicker: "Routers BLiP",
+          title: "Routers",
+          description: "Routers aos quais você tem acesso no Portal BLiP",
         }
-      : visibleActiveView === "flows"
+      : visibleActiveView === "templates"
         ? {
-            kicker: "WhatsApp Flows",
-            title: "Flows",
-            description: "Consulta, visualização e cópia de flows entre routers BLiP",
+            kicker: "WhatsApp Templates",
+            title: "Templates",
+            description: "Replicação de templates entre routers BLiP",
           }
-        : devsTab === "plugins"
+        : visibleActiveView === "flows"
           ? {
-              kicker: "Plugins Manager",
-              title: "Devs",
-              description: "Gerenciamento e cópia de plugins entre routers BLiP",
+              kicker: "WhatsApp Flows",
+              title: "Flows",
+              description: "Consulta, visualização e cópia de flows entre routers BLiP",
             }
-          : {
-              kicker: "Command Lab",
-              title: "Devs",
-              description: "Testes de commands no iframe do Portal BLiP",
-            };
+          : devsTab === "plugins"
+            ? {
+                kicker: "Plugins Manager",
+                title: "Devs",
+                description: "Gerenciamento e cópia de plugins entre routers BLiP",
+              }
+            : {
+                kicker: "Command Lab",
+                title: "Devs",
+                description: "Testes de commands no iframe do Portal BLiP",
+              };
 
   async function loadRouterApplications() {
     if (!isEmbedded) return;
@@ -1093,6 +1124,48 @@ export default function CreateTemplatesApp() {
       setRouterApplicationsError(message);
     } finally {
       setIsLoadingRouterApplications(false);
+    }
+  }
+
+  function openRoutersView() {
+    setActiveView("routers");
+    setError("");
+    setCopyNotice("");
+    void loadRouterApplications();
+  }
+
+  async function handleCopyRouterId(application: PortalApplicationAccount) {
+    setError("");
+
+    try {
+      await copyText(application.shortName);
+      setCopyNotice(`ID de "${application.name}" copiado.`);
+      window.setTimeout(() => setCopyNotice(""), 2400);
+    } catch (caughtError) {
+      setCopyNotice("");
+      setError(getErrorMessage(caughtError, "Erro ao copiar o ID do router."));
+    }
+  }
+
+  async function handleCopyRouterKey(application: PortalApplicationAccount) {
+    setError("");
+    setCopyNotice("");
+    setRouterKeyActionId(application.shortName);
+
+    try {
+      const key =
+        currentApplicationRouter?.shortName === application.shortName &&
+        currentApplicationRouter.accessKey
+          ? buildRouterKey(application.shortName, currentApplicationRouter.accessKey)
+          : (await loadRouterKey(application.shortName)).key;
+
+      await copyText(key);
+      setCopyNotice(`Key de "${application.name}" copiada.`);
+      window.setTimeout(() => setCopyNotice(""), 2400);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Erro ao gerar a key do router."));
+    } finally {
+      setRouterKeyActionId("");
     }
   }
 
@@ -3028,6 +3101,14 @@ export default function CreateTemplatesApp() {
         </div>
         <nav className="ember-side-nav">
           <button
+            className={visibleActiveView === "routers" ? "active" : ""}
+            type="button"
+            onClick={openRoutersView}
+          >
+            <Network size={18} aria-hidden="true" />
+            Routers
+          </button>
+          <button
             className={visibleActiveView === "templates" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("templates")}
@@ -3124,7 +3205,18 @@ export default function CreateTemplatesApp() {
           </div>
         </header>
 
-        {visibleActiveView === "templates" ? (
+        {visibleActiveView === "routers" ? (
+          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
+            <div className="ember-stat-card">
+              <span>Routers disponíveis</span>
+              <strong>{routerApplications.length}</strong>
+            </div>
+            <div className="ember-stat-card">
+              <span>Exibidos</span>
+              <strong>{filteredDirectoryRouterApplications.length}</strong>
+            </div>
+          </section>
+        ) : visibleActiveView === "templates" ? (
           <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
             <div className="ember-stat-card">
               <span>Encontrados</span>
@@ -3209,6 +3301,13 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
+        {visibleActiveView === "routers" && copyNotice && (
+          <div className="ember-alert success" role="status" aria-live="polite">
+            <Clipboard size={18} aria-hidden="true" />
+            <span>{copyNotice}</span>
+          </div>
+        )}
+
         {pageOperationResult && (
           <div
             className={`ember-alert ${pageOperationResult.status === "warning" ? "warning" : "success"}`}
@@ -3224,7 +3323,141 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
-        {visibleActiveView === "templates" ? (
+        {visibleActiveView === "routers" ? (
+          <section className="ember-panel results-panel router-directory-panel">
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Routers</h2>
+                <p>
+                  Consulte os routers master em que você tem permissão e copie os dados de acesso
+                  quando necessário.
+                </p>
+              </div>
+              <button
+                className="blip-button secondary"
+                type="button"
+                onClick={() => void loadRouterApplications()}
+                disabled={isLoadingRouterApplications || !isEmbedded}
+              >
+                {isLoadingRouterApplications ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Search size={18} aria-hidden="true" />
+                )}
+                Atualizar
+              </button>
+            </div>
+
+            {!isEmbedded ? (
+              <div className="router-picker-empty">
+                <span>
+                  Abra esta extensão dentro do Portal BLiP para listar os routers disponíveis.
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="router-directory-toolbar">
+                  <label className="blip-native-field" htmlFor="routerDirectorySearch">
+                    Buscar router
+                    <input
+                      id="routerDirectorySearch"
+                      value={routerDirectorySearch}
+                      onChange={(event) => setRouterDirectorySearch(event.target.value)}
+                      placeholder="Nome, ID ou tenant"
+                    />
+                  </label>
+                  <span className="router-directory-count">
+                    {filteredDirectoryRouterApplications.length} router
+                    {filteredDirectoryRouterApplications.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                {routerApplicationsError && (
+                  <div className="ember-alert danger" role="alert">
+                    <AlertCircle size={18} aria-hidden="true" />
+                    <span>{routerApplicationsError}</span>
+                  </div>
+                )}
+
+                {isLoadingRouterApplications ? (
+                  <div className="router-picker-empty">
+                    <LoaderCircle className="spin" size={20} aria-hidden="true" />
+                    <span>Carregando routers...</span>
+                  </div>
+                ) : filteredDirectoryRouterApplications.length === 0 ? (
+                  <div className="router-picker-empty">
+                    <span>Nenhum router disponível</span>
+                  </div>
+                ) : (
+                  <div className="router-directory-grid">
+                    {filteredDirectoryRouterApplications.map((application) => {
+                      const routerUrl = buildRouterUrl(application);
+                      const isCopyingKey = routerKeyActionId === application.shortName;
+
+                      return (
+                        <article key={application.shortName} className="router-directory-card">
+                          <a
+                            className={`router-directory-card-main ${routerUrl ? "" : "disabled"}`}
+                            href={routerUrl || undefined}
+                            target={routerUrl ? "_blank" : undefined}
+                            rel={routerUrl ? "noreferrer" : undefined}
+                            aria-disabled={!routerUrl || undefined}
+                            title={
+                              routerUrl
+                                ? `Abrir ${application.name} no Portal BLiP`
+                                : "Tenant não disponível para abrir este router."
+                            }
+                          >
+                            <span className="router-directory-avatar">
+                              {application.imageUri ? (
+                                <img
+                                  src={application.imageUri}
+                                  alt={`Imagem do router ${application.name}`}
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span>{application.name.slice(0, 1).toUpperCase()}</span>
+                              )}
+                            </span>
+                            <span className="router-directory-copy">
+                              <strong>{application.name}</strong>
+                              <span>{application.shortName}</span>
+                              {application.tenantId && <small>{application.tenantId}</small>}
+                            </span>
+                            <ExternalLink size={18} aria-hidden="true" />
+                          </a>
+                          <div className="router-directory-card-actions">
+                            <button
+                              className="table-action-button"
+                              type="button"
+                              onClick={() => void handleCopyRouterId(application)}
+                            >
+                              <Clipboard size={16} aria-hidden="true" />
+                              Copiar ID
+                            </button>
+                            <button
+                              className="table-action-button"
+                              type="button"
+                              onClick={() => void handleCopyRouterKey(application)}
+                              disabled={Boolean(routerKeyActionId)}
+                            >
+                              {isCopyingKey ? (
+                                <LoaderCircle className="spin" size={16} aria-hidden="true" />
+                              ) : (
+                                <KeyRound size={16} aria-hidden="true" />
+                              )}
+                              Copiar key
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        ) : visibleActiveView === "templates" ? (
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>
