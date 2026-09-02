@@ -115,7 +115,7 @@
 /* ---------- Buttons ---------- */
 .blip-submit-button,
 .blip-button {
-  min-height: 40px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -327,7 +327,7 @@
 }
 .ember-side-nav button {
   position: relative;
-  min-height: 42px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -390,9 +390,9 @@
 }
 
 .theme-toggle-button {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -416,8 +416,8 @@
   box-shadow: var(--blip-ring);
 }
 .header-icon-button {
-  width: 40px;
-  flex: 0 0 40px;
+  width: 44px;
+  flex: 0 0 44px;
   padding: 0;
 }
 
@@ -564,7 +564,6 @@
   margin-bottom: 18px;
 }
 .ember-stat-card {
-  position: relative;
   min-height: 108px;
   display: grid;
   align-content: space-between;
@@ -573,18 +572,9 @@
   padding: 16px;
   background: var(--blip-surface-0);
   box-shadow: var(--blip-shadow-1);
-  overflow: hidden;
   transition:
     transform 160ms ease,
     box-shadow 160ms ease;
-}
-.ember-stat-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  background: var(--blip-gradient-primary);
-  opacity: 0.85;
 }
 .ember-stat-card:hover {
   transform: translateY(-2px);
@@ -901,7 +891,7 @@
   gap: 6px;
 }
 .table-action-button {
-  min-height: 30px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -923,7 +913,7 @@
   border-color: rgba(30, 107, 241, 0.4);
 }
 .table-action-button.icon-only {
-  width: 32px;
+  width: 36px;
   padding: 0;
 }
 .table-action-button.publish {
@@ -1030,6 +1020,9 @@
   background: var(--blip-surface-0);
   box-shadow: var(--blip-shadow-2);
   animation: ember-pop 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ember-modal:focus {
+  outline: none;
 }
 @keyframes ember-pop {
   from {
@@ -1430,11 +1423,14 @@
   background: var(--blip-surface-2);
 }
 .template-delete-progress-track span {
+  width: 100%;
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--blip-danger);
-  transition: width 180ms ease;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 180ms ease;
 }
 .status-spinner {
   margin-right: 4px;
@@ -1608,7 +1604,7 @@
   }
   .ember-header .header-icon-button {
     align-self: flex-end;
-    width: 40px;
+    width: 44px;
   }
   .ember-header .router-summary .router-summary-action {
     width: auto;
@@ -1632,5 +1628,22 @@
   .dev-command-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+  .table-action-button {
+    min-height: 44px;
+  }
+  .table-action-button.icon-only {
+    width: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ember-shell *,
+  .ember-shell *::before,
+  .ember-shell *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
   }
 }

@@ -735,6 +735,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
+  const modalOpenerRef = useRef<HTMLElement | null>(null);
+  const previousActiveModalRef = useRef<string | null>(null);
   const didLoadCurrentApplicationRef = useRef(false);
   const didVerifyDevAccessRef = useRef(false);
   const [isDarkTheme, setIsDarkTheme] = useState(true);
@@ -841,6 +843,19 @@ export default function CreateTemplatesApp() {
     visibleActiveView !== "devs" && operationResult?.view === visibleActiveView
       ? operationResult
       : null;
+  const activeModalId = routerModal
+    ? "router"
+    : isBulkFlowMappingModalOpen
+      ? "bulk-flow-mapping"
+      : isEditFlowModalOpen
+        ? "edit-flow"
+        : isCreateFlowModalOpen
+          ? "create-flow"
+          : isTemplateDeleteModalOpen
+            ? "template-delete"
+            : isTemplateCompareModalOpen
+              ? "template-compare"
+              : null;
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -1071,30 +1086,25 @@ export default function CreateTemplatesApp() {
   const headerCopy =
     visibleActiveView === "routers"
       ? {
-          kicker: "Routers BLiP",
           title: "Routers",
           description: "Routers aos quais você tem acesso no Portal BLiP",
         }
       : visibleActiveView === "templates"
         ? {
-            kicker: "WhatsApp Templates",
             title: "Templates",
             description: "Replicação de templates entre routers BLiP",
           }
         : visibleActiveView === "flows"
           ? {
-              kicker: "WhatsApp Flows",
               title: "Flows",
               description: "Consulta, visualização e cópia de flows entre routers BLiP",
             }
           : devsTab === "plugins"
             ? {
-                kicker: "Plugins Manager",
                 title: "Devs",
                 description: "Gerenciamento e cópia de plugins entre routers BLiP",
               }
             : {
-                kicker: "Command Lab",
                 title: "Devs",
                 description: "Testes de commands no iframe do Portal BLiP",
               };
@@ -2914,6 +2924,103 @@ export default function CreateTemplatesApp() {
   function closeRouterModal() {
     setRouterModal(null);
   }
+
+  function closeActiveModal() {
+    switch (activeModalId) {
+      case "router":
+        closeRouterModal();
+        return;
+      case "bulk-flow-mapping":
+        closeBulkFlowMappingModal();
+        return;
+      case "edit-flow":
+        closeEditFlowModal();
+        return;
+      case "create-flow":
+        if (!isCreatingFlow) setIsCreateFlowModalOpen(false);
+        return;
+      case "template-delete":
+        closeTemplateDeleteModal();
+        return;
+      case "template-compare":
+        setIsTemplateCompareModalOpen(false);
+        return;
+      default:
+        return;
+    }
+  }
+
+  useEffect(() => {
+    if (!activeModalId) {
+      previousActiveModalRef.current = null;
+      modalOpenerRef.current?.focus({ preventScroll: true });
+      modalOpenerRef.current = null;
+      return;
+    }
+
+    if (!previousActiveModalRef.current) {
+      modalOpenerRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    previousActiveModalRef.current = activeModalId;
+
+    const frameId = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-modal-id="${activeModalId}"]`)?.focus({
+        preventScroll: true,
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeModalId]);
+
+  useEffect(() => {
+    if (!activeModalId) return;
+
+    function getFocusableElements(modal: HTMLElement) {
+      return Array.from(
+        modal.querySelectorAll<HTMLElement>(
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("aria-hidden"));
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const modal = document.querySelector<HTMLElement>(`[data-modal-id="${activeModalId}"]`);
+      if (!modal) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeActiveModal();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusableElements = getFocusableElements(modal);
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements.at(-1);
+
+      if (!firstElement || !lastElement) {
+        event.preventDefault();
+        modal.focus({ preventScroll: true });
+        return;
+      }
+
+      if (
+        event.shiftKey &&
+        (document.activeElement === firstElement || document.activeElement === modal)
+      ) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeModalId, isCreatingFlow, isDeletingTemplates, isBulkUpdatingFlows, isUpdatingFlow]);
   function saveSourceRouter() {
     const selectedShortName = draftSourceRouterKey.trim();
 
@@ -3111,6 +3218,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "routers" ? "active" : ""}
             type="button"
             onClick={openRoutersView}
+            aria-current={visibleActiveView === "routers" ? "page" : undefined}
           >
             <Network size={18} aria-hidden="true" />
             Routers
@@ -3119,6 +3227,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "templates" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("templates")}
+            aria-current={visibleActiveView === "templates" ? "page" : undefined}
           >
             <MessageSquareText size={18} aria-hidden="true" />
             Templates
@@ -3127,6 +3236,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "flows" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("flows")}
+            aria-current={visibleActiveView === "flows" ? "page" : undefined}
           >
             <FileJson size={18} aria-hidden="true" />
             Flows
@@ -3136,6 +3246,7 @@ export default function CreateTemplatesApp() {
               className={visibleActiveView === "devs" ? "active" : ""}
               type="button"
               onClick={() => setActiveView("devs")}
+              aria-current={visibleActiveView === "devs" ? "page" : undefined}
             >
               <Terminal size={18} aria-hidden="true" />
               Devs
@@ -3148,7 +3259,6 @@ export default function CreateTemplatesApp() {
         <header className="ember-header">
           <div className="ember-header-copy">
             <div>
-              <span className="ember-kicker">{headerCopy.kicker}</span>
               <h1>{headerCopy.title}</h1>
               <p>{headerCopy.description}</p>
             </div>
@@ -4293,6 +4403,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="compare-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="template-compare"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
@@ -4474,6 +4586,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="template-delete-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="template-delete"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
@@ -4518,7 +4632,7 @@ export default function CreateTemplatesApp() {
                     </span>
                   </div>
                   <div className="template-delete-progress-track" aria-hidden="true">
-                    <span style={{ width: `${templateDeleteProgressPercent}%` }} />
+                    <span style={{ transform: `scaleX(${templateDeleteProgressPercent / 100})` }} />
                   </div>
                 </div>
 
@@ -4711,6 +4825,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="create-flow-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="create-flow"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
@@ -4837,6 +4953,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="edit-flow-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="edit-flow"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
@@ -4944,6 +5062,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="bulk-flow-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="bulk-flow-mapping"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
@@ -5121,6 +5241,8 @@ export default function CreateTemplatesApp() {
               aria-labelledby="router-modal-title"
               role="dialog"
               aria-modal="true"
+              data-modal-id="router"
+              tabIndex={-1}
             >
               <div className="ember-modal-header">
                 <div>
