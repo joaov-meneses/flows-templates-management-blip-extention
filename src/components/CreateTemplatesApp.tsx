@@ -1857,6 +1857,21 @@ export default function CreateTemplatesApp() {
     };
   }
 
+  function getFlowMetadataUpdates(
+    editedMetadata: NonNullable<ReturnType<typeof getEditedFlowMetadata>>,
+  ) {
+    if (!editingFlow || !editedMetadata.metadataChanged) return undefined;
+
+    return [
+      {
+        sourceFlowId: editingFlow.id,
+        name: editedMetadata.name,
+        endpointUri: editedMetadata.endpointUri,
+        isFlowApi: editedMetadata.isFlowApi,
+      },
+    ];
+  }
+
   async function handleSaveEditedFlow() {
     if (!editingFlow) return;
 
@@ -2062,14 +2077,13 @@ export default function CreateTemplatesApp() {
 
     try {
       const targets = await ensureTargetRouterKeys();
+      const metadataUpdates = getFlowMetadataUpdates(editedMetadata);
       const preflight = await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
         targetRouterKeys: targets,
-        flows: [editingFlow],
+        flows: [{ id: editingFlow.id, name: editingFlow.name }],
         flowJson: parsedJson,
         publishAfterUpdate: editFlowPublishAfterSave,
-        metadataUpdates: editedMetadata.metadataChanged
-          ? [{ sourceFlowId: editingFlow.id, ...editedMetadata }]
-          : [],
+        ...(metadataUpdates ? { metadataUpdates } : {}),
         ...DEFAULT_FLOW_OPTIONS,
         dryRun: true,
       });
@@ -2108,14 +2122,13 @@ export default function CreateTemplatesApp() {
       const targets = await ensureTargetRouterKeys();
       const publishAfterUpdate = editFlowPublishAfterSave;
       const targetFlowOverrides = buildBulkFlowOverrides();
+      const metadataUpdates = getFlowMetadataUpdates(editedMetadata);
       const requestBody = {
         targetRouterKeys: targets,
-        flows: [editingFlow],
+        flows: [{ id: editingFlow.id, name: editingFlow.name }],
         flowJson: parsedJson,
         publishAfterUpdate,
-        metadataUpdates: editedMetadata.metadataChanged
-          ? [{ sourceFlowId: editingFlow.id, ...editedMetadata }]
-          : [],
+        ...(metadataUpdates ? { metadataUpdates } : {}),
         targetFlowOverrides,
         ...DEFAULT_FLOW_OPTIONS,
       };
