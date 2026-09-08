@@ -452,6 +452,38 @@ function buildNewFlowResource({ name, isFlowApi, endpointUri }) {
   return resource;
 }
 
+async function updateFlowMetadata(params) {
+  const { sourceRouterKey, flowId, name, isFlowApi = false, endpointUri = "" } = params || {};
+  validateSourceRouterKey(sourceRouterKey);
+
+  if (!flowId) {
+    throw new InputError("flowId precisa ser informado.");
+  }
+
+  const normalizedIsFlowApi = Boolean(isFlowApi);
+  const resource = buildNewFlowResource({
+    name,
+    isFlowApi: normalizedIsFlowApi,
+    endpointUri,
+  });
+  const setMetadataResponse = await sendBlipCommand(
+    sourceRouterKey,
+    buildCommand("set", `/whatsapp-flows/${encodeURIComponent(String(flowId))}`, resource),
+    { commandUrl: HTTP_MSGING_COMMANDS_URL },
+  );
+
+  return {
+    flow: {
+      id: String(flowId),
+      name: resource.name,
+      categories: resource.categories,
+      endpoint_uri: resource.endpoint_uri,
+      isFlowApi: normalizedIsFlowApi,
+    },
+    setMetadataResponse,
+  };
+}
+
 async function createFlow(params) {
   const {
     sourceRouterKey,
@@ -646,6 +678,41 @@ async function inspectFlowsOnTargetRouters({
   return results;
 }
 
+function normalizeFlowMetadataUpdates(metadataUpdates, selectedFlows) {
+  if (metadataUpdates == null) {
+    return new Map();
+  }
+
+  if (!Array.isArray(metadataUpdates)) {
+    throw new InputError("metadataUpdates precisa ser um array.");
+  }
+
+  const selectedFlowIds = new Set(selectedFlows.map((flow) => flow.id));
+  const updatesBySourceFlowId = new Map();
+
+  for (const update of metadataUpdates) {
+    if (!update || typeof update !== "object") {
+      throw new InputError("Cada atualização de metadados precisa ser um objeto.");
+    }
+
+    const sourceFlowId = String(update.sourceFlowId || "").trim();
+    if (!sourceFlowId || !selectedFlowIds.has(sourceFlowId)) {
+      throw new InputError(
+        "sourceFlowId da atualização de metadados precisa referenciar um flow selecionado.",
+      );
+    }
+
+    updatesBySourceFlowId.set(sourceFlowId, {
+      sourceFlowId,
+      name: update.name,
+      isFlowApi: Boolean(update.isFlowApi),
+      endpointUri: update.endpointUri,
+    });
+  }
+
+  return updatesBySourceFlowId;
+}
+
 function stripTargetRouterKey(match) {
   const { targetRouterKey, ...publicMatch } = match;
   return publicMatch;
@@ -662,6 +729,7 @@ async function bulkUpdateFlowJson(params) {
   validateTargetRouterKeys(targetRouterKeys);
 
   const selectedFlows = normalizeProvidedFlowsByName(params?.flows);
+  const metadataUpdates = normalizeFlowMetadataUpdates(params?.metadataUpdates, selectedFlows);
   const targetFlowOverrides = normalizeTargetFlowOverrides(
     params?.targetFlowOverrides,
     selectedFlows,
@@ -681,7 +749,18 @@ async function bulkUpdateFlowJson(params) {
 
   if (!dryRun && inspection.matches.length > 0) {
     await runInBatches(inspection.matches, batchSize, async (match) => {
+      let step = "update_metadata";
       try {
+        const metadataUpdate = metadataUpdates.get(match.sourceFlowId);
+        const metadataResponse = metadataUpdate
+          ? await updateFlowMetadata({
+              sourceRouterKey: match.targetRouterKey,
+              flowId: match.flowId,
+              ...metadataUpdate,
+            })
+          : null;
+
+        step = "update_flow_json";
         const setJsonResponse = await sendBlipCommand(
           match.targetRouterKey,
           buildCommand(
@@ -690,6 +769,7 @@ async function bulkUpdateFlowJson(params) {
             normalizedFlowJson,
           ),
         );
+        step = "publish_flow";
         const publishResponse = publishAfterUpdate
           ? await sendBlipCommand(
               match.targetRouterKey,
@@ -708,6 +788,7 @@ async function bulkUpdateFlowJson(params) {
           flowName: match.flowName,
           previousStatus: match.status,
           nextStatus: publishAfterUpdate ? "PUBLISHED" : "DRAFT",
+          metadataResponse,
           setJsonResponse,
           publishResponse,
         };
@@ -716,7 +797,7 @@ async function bulkUpdateFlowJson(params) {
         return updateResult;
       } catch (error) {
         const errorInfo = {
-          step: publishAfterUpdate ? "update_and_publish_flow" : "update_flow",
+          step,
           targetIndex: match.targetIndex,
           flowId: match.flowId,
           flowName: match.flowName,
@@ -999,6 +1080,7 @@ module.exports = {
   getFlowPreview,
   getFlowJson,
   createFlow,
+  updateFlowMetadata,
   updateFlowJson,
   bulkUpdateFlowJson,
   publishFlow,

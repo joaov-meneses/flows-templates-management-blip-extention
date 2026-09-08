@@ -17,6 +17,7 @@ const {
   getFlowPreview,
   getFlowJson,
   createFlow,
+  updateFlowMetadata,
   updateFlowJson,
   bulkUpdateFlowJson,
   publishFlow,
@@ -120,6 +121,15 @@ app.post("/api/flows/json", async (req, res, next) => {
 app.post("/api/flows/create", async (req, res, next) => {
   try {
     const result = await createFlow(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/flows/update-metadata", async (req, res, next) => {
+  try {
+    const result = await updateFlowMetadata(req.body);
     res.json(result);
   } catch (error) {
     next(error);

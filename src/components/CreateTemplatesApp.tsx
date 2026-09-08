@@ -223,6 +223,10 @@ type FlowUpdateJsonResponse = {
   flow: FlowSummary;
   setJsonResponse: unknown;
 };
+type FlowUpdateMetadataResponse = {
+  flow: FlowSummary;
+  setMetadataResponse: unknown;
+};
 type FlowPublishResponse = { flowId: string; publishResponse: unknown };
 type FlowDeprecateResponse = { flowId: string; deprecateResponse: unknown };
 type FlowBulkUpdateMatch = {
@@ -798,6 +802,8 @@ export default function CreateTemplatesApp() {
   const [newFlowBusinessPublicKey, setNewFlowBusinessPublicKey] = useState("");
   const [newFlowJson, setNewFlowJson] = useState("");
   const [replicateFlowBusinessPublicKey, setReplicateFlowBusinessPublicKey] = useState("");
+  const [editFlowName, setEditFlowName] = useState("");
+  const [editFlowEndpointUri, setEditFlowEndpointUri] = useState("");
   const [editFlowJson, setEditFlowJson] = useState("");
   const [editFlowPublishAfterSave, setEditFlowPublishAfterSave] = useState(false);
   const [bulkFlowPreflight, setBulkFlowPreflight] = useState<FlowBulkUpdateResponse | null>(null);
@@ -1785,6 +1791,8 @@ export default function CreateTemplatesApp() {
     setError("");
     setCopyNotice("");
     setEditingFlow(flow);
+    setEditFlowName(flow.name);
+    setEditFlowEndpointUri(flow.endpoint_uri || "");
     setEditFlowJson("");
     setEditFlowPublishAfterSave(false);
     setIsEditFlowModalOpen(true);
@@ -1812,6 +1820,8 @@ export default function CreateTemplatesApp() {
 
     setIsEditFlowModalOpen(false);
     setEditingFlow(null);
+    setEditFlowName("");
+    setEditFlowEndpointUri("");
     setEditFlowJson("");
     setEditFlowPublishAfterSave(false);
     setIsBulkFlowMappingModalOpen(false);
@@ -1821,10 +1831,39 @@ export default function CreateTemplatesApp() {
     setError("");
   }
 
+  function getEditedFlowMetadata() {
+    if (!editingFlow) return null;
+
+    const name = editFlowName.trim();
+    const endpointUri = editFlowEndpointUri.trim();
+    const isFlowApi = Boolean(editingFlow.isFlowApi || editingFlow.endpoint_uri);
+
+    if (!name) {
+      setError("Informe o nome do flow.");
+      return null;
+    }
+
+    if (isFlowApi && !endpointUri) {
+      setError("Informe o endpoint da API do flow.");
+      return null;
+    }
+
+    return {
+      name,
+      endpointUri,
+      isFlowApi,
+      metadataChanged:
+        name !== editingFlow.name.trim() || endpointUri !== (editingFlow.endpoint_uri || "").trim(),
+    };
+  }
+
   async function handleSaveEditedFlow() {
     if (!editingFlow) return;
 
     setError("");
+
+    const editedMetadata = getEditedFlowMetadata();
+    if (!editedMetadata) return;
 
     let parsedJson: unknown;
     try {
@@ -1856,6 +1895,15 @@ export default function CreateTemplatesApp() {
     setFlowActionId(`update:${editingFlow.id}`);
     try {
       const sourceKey = await ensureSourceRouterKey();
+      const metadataData = editedMetadata.metadataChanged
+        ? await postJson<FlowUpdateMetadataResponse>("/api/flows/update-metadata", {
+            sourceRouterKey: sourceKey,
+            flowId: editingFlow.id,
+            name: editedMetadata.name,
+            isFlowApi: editedMetadata.isFlowApi,
+            endpointUri: editedMetadata.endpointUri,
+          })
+        : null;
       const data = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
         sourceRouterKey: sourceKey,
         flowId: editingFlow.id,
@@ -1868,25 +1916,30 @@ export default function CreateTemplatesApp() {
           })
         : null;
       const nextStatus = publishAfterUpdate ? "PUBLISHED" : "DRAFT";
+      const nextFlow = {
+        ...editingFlow,
+        name: editedMetadata.name,
+        endpoint_uri: editedMetadata.isFlowApi ? editedMetadata.endpointUri : undefined,
+        isFlowApi: editedMetadata.isFlowApi,
+        status: nextStatus,
+      };
 
       if (publishAfterUpdate) {
         await loadFlowsFromSource(sourceKey);
       } else {
         setFlowSearchResult((current) => ({
           ...current,
-          flows: current.flows.map((flow) =>
-            flow.id === editingFlow.id ? { ...flow, status: nextStatus } : flow,
-          ),
+          flows: current.flows.map((flow) => (flow.id === editingFlow.id ? nextFlow : flow)),
         }));
       }
       setOperationResult({
         summary: publishAfterUpdate
-          ? `Flow "${editingFlow.name}" atualizado e publicado.`
+          ? `Flow "${editedMetadata.name}" atualizado e publicado.`
           : isPublishedFlow(editingFlow)
-            ? `Flow "${editingFlow.name}" atualizado e retornou para draft.`
-            : `Flow "${editingFlow.name}" atualizado em draft.`,
-        payload: { update: data, publish: publishData },
-        previewFlow: { ...editingFlow, status: nextStatus },
+            ? `Flow "${editedMetadata.name}" atualizado e retornou para draft.`
+            : `Flow "${editedMetadata.name}" atualizado em draft.`,
+        payload: { metadata: metadataData, update: data, publish: publishData },
+        previewFlow: nextFlow,
         status: "success",
         view: "flows",
       });
@@ -1988,6 +2041,9 @@ export default function CreateTemplatesApp() {
     setError("");
     setOperationResult(null);
 
+    const editedMetadata = getEditedFlowMetadata();
+    if (!editedMetadata) return;
+
     if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino.");
       return;
@@ -2011,6 +2067,9 @@ export default function CreateTemplatesApp() {
         flows: [editingFlow],
         flowJson: parsedJson,
         publishAfterUpdate: editFlowPublishAfterSave,
+        metadataUpdates: editedMetadata.metadataChanged
+          ? [{ sourceFlowId: editingFlow.id, ...editedMetadata }]
+          : [],
         ...DEFAULT_FLOW_OPTIONS,
         dryRun: true,
       });
@@ -2030,6 +2089,9 @@ export default function CreateTemplatesApp() {
     if (!editingFlow || !bulkFlowPreflight) return;
 
     setError("");
+
+    const editedMetadata = getEditedFlowMetadata();
+    if (!editedMetadata) return;
 
     let parsedJson: unknown;
     try {
@@ -2051,6 +2113,9 @@ export default function CreateTemplatesApp() {
         flows: [editingFlow],
         flowJson: parsedJson,
         publishAfterUpdate,
+        metadataUpdates: editedMetadata.metadataChanged
+          ? [{ sourceFlowId: editingFlow.id, ...editedMetadata }]
+          : [],
         targetFlowOverrides,
         ...DEFAULT_FLOW_OPTIONS,
       };
@@ -2067,28 +2132,56 @@ export default function CreateTemplatesApp() {
 
       const sourceKey = await ensureSourceRouterKey();
       const sourceResult: {
+        metadata: FlowUpdateMetadataResponse | null;
         update: FlowUpdateJsonResponse | null;
         publish: FlowPublishResponse | null;
         errors: FlowBulkUpdateError[];
       } = {
+        metadata: null,
         update: null,
         publish: null,
         errors: [],
       };
 
-      try {
-        sourceResult.update = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
-          sourceRouterKey: sourceKey,
-          flowId: editingFlow.id,
-          flowJson: parsedJson,
-        });
-      } catch (caughtError) {
-        sourceResult.errors.push({
-          step: "update_source_flow",
-          flowId: editingFlow.id,
-          flowName: editingFlow.name,
-          message: getErrorMessage(caughtError, "Erro ao atualizar flow de origem."),
-        });
+      let sourceMetadataSucceeded = true;
+      if (editedMetadata.metadataChanged) {
+        try {
+          sourceResult.metadata = await postJson<FlowUpdateMetadataResponse>(
+            "/api/flows/update-metadata",
+            {
+              sourceRouterKey: sourceKey,
+              flowId: editingFlow.id,
+              name: editedMetadata.name,
+              isFlowApi: editedMetadata.isFlowApi,
+              endpointUri: editedMetadata.endpointUri,
+            },
+          );
+        } catch (caughtError) {
+          sourceMetadataSucceeded = false;
+          sourceResult.errors.push({
+            step: "update_source_flow_metadata",
+            flowId: editingFlow.id,
+            flowName: editingFlow.name,
+            message: getErrorMessage(caughtError, "Erro ao atualizar nome ou endpoint do flow."),
+          });
+        }
+      }
+
+      if (sourceMetadataSucceeded) {
+        try {
+          sourceResult.update = await postJson<FlowUpdateJsonResponse>("/api/flows/update-json", {
+            sourceRouterKey: sourceKey,
+            flowId: editingFlow.id,
+            flowJson: parsedJson,
+          });
+        } catch (caughtError) {
+          sourceResult.errors.push({
+            step: "update_source_flow",
+            flowId: editingFlow.id,
+            flowName: editingFlow.name,
+            message: getErrorMessage(caughtError, "Erro ao atualizar flow de origem."),
+          });
+        }
       }
 
       if (publishAfterUpdate && sourceResult.update) {
@@ -2124,6 +2217,13 @@ export default function CreateTemplatesApp() {
         : sourceResult.update
           ? "DRAFT"
           : editingFlow.status;
+      const nextFlow = {
+        ...editingFlow,
+        name: editedMetadata.name,
+        endpoint_uri: editedMetadata.isFlowApi ? editedMetadata.endpointUri : undefined,
+        isFlowApi: editedMetadata.isFlowApi,
+        status: nextStatus,
+      };
       const summary = buildBulkFlowUpdateSummary(
         data,
         sourceResult.errors.length,
@@ -2135,9 +2235,7 @@ export default function CreateTemplatesApp() {
       } else if (sourceResult.update) {
         setFlowSearchResult((current) => ({
           ...current,
-          flows: current.flows.map((flow) =>
-            flow.id === editingFlow.id ? { ...flow, status: nextStatus } : flow,
-          ),
+          flows: current.flows.map((flow) => (flow.id === editingFlow.id ? nextFlow : flow)),
         }));
       }
       setOperationResult({
@@ -2146,7 +2244,7 @@ export default function CreateTemplatesApp() {
           source: sourceResult,
           targets: data,
         },
-        previewFlow: { ...editingFlow, status: nextStatus },
+        previewFlow: nextFlow,
         status: getOperationStatus(
           sourceResult.errors.length + data.totals.errors + data.totals.missing,
         ),
@@ -4978,6 +5076,32 @@ export default function CreateTemplatesApp() {
                     <AlertCircle size={18} aria-hidden="true" />
                     <span>{error}</span>
                   </div>
+                )}
+
+                <label className="blip-native-field" htmlFor="editFlowName">
+                  Nome do flow
+                  <input
+                    id="editFlowName"
+                    value={editFlowName}
+                    onChange={(event) => setEditFlowName(event.target.value)}
+                    disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
+                    required
+                  />
+                </label>
+
+                {(editingFlow.isFlowApi || Boolean(editingFlow.endpoint_uri)) && (
+                  <label className="blip-native-field" htmlFor="editFlowEndpointUri">
+                    Endpoint da API
+                    <input
+                      id="editFlowEndpointUri"
+                      type="url"
+                      value={editFlowEndpointUri}
+                      onChange={(event) => setEditFlowEndpointUri(event.target.value)}
+                      disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
+                      required
+                      placeholder="https://..."
+                    />
+                  </label>
                 )}
 
                 <label className="blip-native-field json-field" htmlFor="editFlowJson">
