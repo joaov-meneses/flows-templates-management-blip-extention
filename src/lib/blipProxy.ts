@@ -46,7 +46,10 @@ function canUseIframeProxy() {
 async function getIframeMessageProxy() {
   if (!canUseIframeProxy()) return null;
 
-  proxyModulePromise ??= import("iframe-message-proxy");
+  proxyModulePromise ??= import("iframe-message-proxy").catch((error) => {
+    proxyModulePromise = null;
+    throw error;
+  });
   const { IframeMessageProxy } = await proxyModulePromise;
 
   if (!started) {
@@ -119,13 +122,17 @@ export async function sendPortalMessage(
 }
 
 export function notifyPortalMessage(action: string, content: unknown) {
-  void getIframeMessageProxy().then((iframeMessageProxy) => {
-    iframeMessageProxy?.sendMessage({
-      action,
-      content,
-      fireAndForget: true,
+  void getIframeMessageProxy()
+    .then((iframeMessageProxy) => {
+      iframeMessageProxy?.sendMessage({
+        action,
+        content,
+        fireAndForget: true,
+      });
+    })
+    .catch(() => {
+      // Best-effort layout notification. Interactive requests report connection failures.
     });
-  });
 }
 
 export function getAccount() {

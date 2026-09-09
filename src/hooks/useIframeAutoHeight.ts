@@ -25,7 +25,9 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
 
   useEffect(() => {
     if (!isInsideIframe) return;
-    void startIframeMessageProxy();
+    void startIframeMessageProxy().catch(() => {
+      // The application owns the visible startup error and retry action.
+    });
   }, [isInsideIframe]);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
 
     function requestHeightChange(force = false) {
       animationFrameId = null;
-
+      if (!shellElement) return;
       const height = getRequestedIframeHeight(shellElement);
       if (!force && height === lastRequestedHeight) return;
 
@@ -59,7 +61,9 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
     );
 
     const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleHeightChange);
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => scheduleHeightChange());
     const mutationObserver =
       typeof MutationObserver === "undefined"
         ? null
@@ -70,14 +74,15 @@ export function useIframeAutoHeight(shellRef: RefObject<HTMLElement | null>) {
       attributeFilter: ["class"],
       attributes: true,
     });
-    window.addEventListener("resize", scheduleHeightChange);
+    const onResize = () => scheduleHeightChange();
+    window.addEventListener("resize", onResize);
 
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       retryTimeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
-      window.removeEventListener("resize", scheduleHeightChange);
+      window.removeEventListener("resize", onResize);
     };
   }, [isInsideIframe, shellRef]);
 

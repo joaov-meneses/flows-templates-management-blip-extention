@@ -8,6 +8,8 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { Button } from "../components/ui/Button";
+import { themeBootstrap } from "../lib/theme";
 
 import appCss from "../styles.css?url";
 
@@ -16,10 +18,10 @@ function NotFoundComponent() {
     <main className="root-message-page">
       <section className="root-message-panel">
         <h1>404</h1>
-        <h2>Pagina nao encontrada</h2>
-        <p>A pagina que voce esta procurando nao existe ou foi movida.</p>
+        <h2>Página não encontrada</h2>
+        <p>O endereço não existe ou foi movido. Volte para acessar seus templates e flows.</p>
         <div className="root-message-actions">
-          <Link to="/" className="root-message-button primary">
+          <Link to="/" className="blip-button primary">
             Voltar
           </Link>
         </div>
@@ -35,21 +37,22 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <main className="root-message-page">
       <section className="root-message-panel">
-        <h1>Esta pagina nao carregou</h1>
-        <p>Algo deu errado. Voce pode tentar recarregar ou voltar para a pagina inicial.</p>
+        <h1>Não foi possível abrir a extensão</h1>
+        <p>
+          A página não terminou de carregar. Tente novamente ou recarregue a extensão para
+          restabelecer a conexão.
+        </p>
         <div className="root-message-actions">
-          <button
-            onClick={() => {
-              router.invalidate();
+          <Button
+            onClick={async () => {
+              await router.invalidate();
               reset();
             }}
-            className="root-message-button primary"
+            variant="primary"
           >
             Tentar novamente
-          </button>
-          <a href="/" className="root-message-button secondary">
-            Voltar
-          </a>
+          </Button>
+          <Button onClick={() => window.location.reload()}>Recarregar extensão</Button>
         </div>
       </section>
     </main>
@@ -89,8 +92,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
         <HeadContent />
       </head>
       <body>

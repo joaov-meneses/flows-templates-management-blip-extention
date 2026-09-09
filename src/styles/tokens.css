@@ -1,0 +1,74 @@
+:root {
+  /* paleta original BLiP — mantida */
+  --blip-brand: #0096fa;
+  --blip-primary: #1e6bf1;
+  --blip-primary-dark: #125ad5;
+  --blip-content: #0f1a2e;
+  --blip-content-soft: #4b5b73;
+  --blip-content-ghost: #617189;
+  --blip-surface-0: #ffffff;
+  --blip-surface-1: #f4f7fb;
+  --blip-surface-2: #e6ecf4;
+  --blip-border-soft: rgba(15, 26, 46, 0.06);
+  --blip-border: rgba(15, 26, 46, 0.12);
+  --blip-border-strong: rgba(15, 26, 46, 0.2);
+  --blip-success: #007a42;
+  --blip-warning: #815c00;
+  --blip-danger: #a80b0b;
+  --blip-danger-bg: #fabebe;
+  --blip-summary-bg: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
+  --blip-table-head-bg: linear-gradient(180deg, #f7f9fd 0%, #eef2f9 100%);
+  --blip-row-hover: rgba(30, 107, 241, 0.04);
+  --blip-row-selected: rgba(30, 107, 241, 0.09);
+  --blip-theme-button-bg: rgba(30, 107, 241, 0.08);
+  --blip-theme-button-hover: rgba(30, 107, 241, 0.14);
+
+  /* sombras mais suaves e modernas */
+  --blip-shadow-1: 0 1px 2px rgba(15, 26, 46, 0.04), 0 2px 8px -2px rgba(15, 26, 46, 0.08);
+  --blip-shadow-2: 0 8px 24px -6px rgba(15, 26, 46, 0.16), 0 2px 6px -1px rgba(15, 26, 46, 0.08);
+  --blip-shadow-brand: 0 6px 18px -6px rgba(30, 107, 241, 0.5);
+  --blip-ring: 0 0 0 3px rgba(30, 107, 241, 0.18);
+
+  --blip-radius-sm: 8px;
+  --blip-radius: 12px;
+  --blip-radius-lg: 16px;
+
+  --blip-gradient-primary: linear-gradient(135deg, #1e6bf1 0%, #0096fa 100%);
+  --blip-gradient-surface: linear-gradient(180deg, #f7f9fd 0%, #eef2f9 100%);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --blip-brand: #30b6ff;
+  --blip-primary: #5fc2ff;
+  --blip-primary-dark: #30a2ed;
+  --blip-content: #edf3f8;
+  --blip-content-soft: #a8b4c4;
+  --blip-content-ghost: #9caabd;
+  --blip-surface-0: #181a1f;
+  --blip-surface-1: #20242b;
+  --blip-surface-2: #2b313b;
+  --blip-border-soft: rgba(235, 243, 252, 0.08);
+  --blip-border: rgba(235, 243, 252, 0.14);
+  --blip-border-strong: rgba(235, 243, 252, 0.24);
+  --blip-success: #61d89f;
+  --blip-warning: #f2c95f;
+  --blip-danger: #ff8b91;
+  --blip-danger-bg: #4a2329;
+  --blip-summary-bg: linear-gradient(180deg, #20242b 0%, #191c22 100%);
+  --blip-table-head-bg: linear-gradient(180deg, #21262e 0%, #1b1f26 100%);
+  --blip-row-hover: rgba(95, 194, 255, 0.08);
+  --blip-row-selected: rgba(95, 194, 255, 0.13);
+  --blip-theme-button-bg: rgba(95, 194, 255, 0.1);
+  --blip-theme-button-hover: rgba(95, 194, 255, 0.18);
+  --blip-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22), 0 12px 28px -18px rgba(0, 0, 0, 0.7);
+  --blip-shadow-2: 0 18px 42px -24px rgba(0, 0, 0, 0.78), 0 4px 10px -4px rgba(0, 0, 0, 0.6);
+  --blip-shadow-brand: 0 8px 22px -10px rgba(95, 194, 255, 0.55);
+  --blip-ring: 0 0 0 3px rgba(95, 194, 255, 0.22);
+  --blip-gradient-primary: linear-gradient(135deg, #30a2ed 0%, #39d1c2 100%);
+  --blip-gradient-surface: linear-gradient(180deg, #111317 0%, #171a20 100%);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}

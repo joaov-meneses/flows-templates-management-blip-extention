@@ -32,325 +32,69 @@ import {
   sendBlipCommand,
   showBlipAlert,
 } from "../lib/blipProxy";
-import "../styles/blip-app.css";
+import { useModalFocus } from "../hooks/useModalFocus";
+import { useTheme } from "../hooks/useTheme";
+import { Button } from "./ui/Button";
+import { ActionsMenu } from "./ui/ActionsMenu";
+import { Feedback } from "./ui/Feedback";
+import { StatusBadge } from "./ui/StatusBadge";
+import { SelectionBar } from "./ui/SelectionBar";
+import { TemplateTable } from "./TemplateTable";
+import { FlowTable } from "./FlowTable";
+import { postJson } from "../lib/api";
 
-type ActiveView = "routers" | "templates" | "flows" | "devs";
-type DevsTab = "commands" | "plugins";
-type RouterModal = "source" | "targets" | null;
-type SortDirection = "asc" | "desc";
-type CommandDestination = "BlipService" | "MessagingHubService";
-type CommandMethod = (typeof COMMAND_METHODS)[keyof typeof COMMAND_METHODS];
-type DevCommandType = "" | "text/plain" | "application/json";
-type DevCommandContentType = Exclude<DevCommandType, "">;
-type PluginCopyMode = "add" | "replace";
-
-type DevCommand = {
-  method: CommandMethod;
-  to: string;
-  uri: string;
-  id: string;
-  type?: DevCommandContentType;
-  resource?: unknown;
-};
-
-type Template = {
-  name: string;
-  language: string;
-  category: string;
-  status?: string;
-  components: unknown;
-};
-
-type SearchResponse = {
-  search: { templateName: string; onlyApproved: boolean };
-  total: number;
-  templates: Template[];
-};
-
-type TemplateReplicateResponse = {
-  totals: {
-    foundTemplates: number;
-    targetRouters: number;
-    createJobs: number;
-    uploadedAttachments: number;
-    created: number;
-    errors: number;
-  };
-  foundTemplates: unknown[];
-  created: unknown[];
-  errors: unknown[];
-};
-
-type TemplateCompareResponse = {
-  filters: { category: string; status: string };
-  totals: {
-    routers: number;
-    sourceRouterIncluded: boolean;
-    commonTemplates: number;
-    templatesByRouter: Array<{
-      routerIndex: number;
-      role?: string;
-      totalTemplates: number;
-      totalFilteredTemplates: number;
-    }>;
-  };
-  commonTemplates: Array<{
-    name: string;
-    language: string;
-    category?: string;
-    status?: string;
-    routers: Array<{
-      routerIndex: number;
-      role?: string;
-      name: string;
-      language: string;
-      category?: string;
-      status?: string;
-    }>;
-  }>;
-};
-type TemplateDeleteMode = "source" | "bulk";
-type TemplateDeleteItem = {
-  name: string;
-  languages: string[];
-  category?: string;
-  status?: string;
-};
-type TemplateDeleteTargetRouter = {
-  targetIndex: number;
-  totalTemplates: number;
-  matched: number;
-  missing: number;
-};
-type TemplateDeleteMatch = {
-  targetIndex: number;
-  sourceTemplateName: string;
-  templateName: string;
-  languages: string[];
-  category?: string;
-  status?: string;
-};
-type TemplateDeleteMissing = {
-  targetIndex: number;
-  sourceTemplateName: string;
-  templateName: string;
-};
-type TemplateDeleteError = {
-  step: string;
-  targetIndex?: number;
-  sourceTemplateName?: string;
-  templateName?: string;
-  message: string;
-};
-type TemplateDeleteResponse = {
-  status: "success";
-  templateName: string;
-  targetIndex?: number;
-  response: unknown;
-};
-type TemplateBulkDeleteResponse = {
-  options: {
-    continueOnError: boolean;
-    batchSize: number;
-    dryRun: boolean;
-  };
-  totals: {
-    selectedTemplates: number;
-    targetRouters: number;
-    matched: number;
-    missing: number;
-    deleted: number;
-    errors: number;
-  };
-  targetRouters: TemplateDeleteTargetRouter[];
-  matches: TemplateDeleteMatch[];
-  missing: TemplateDeleteMissing[];
-  deleted: TemplateDeleteResponse[];
-  errors: TemplateDeleteError[];
-};
-type TemplateDeleteProgress = {
-  total: number;
-  processed: number;
-  removed: number;
-  failed: number;
-};
-type TemplateDeleteJobState = {
-  status: "pending" | "running" | "success" | "error";
-  message?: string;
-};
-type TemplateDeleteJob = {
-  key: string;
-  routerKey: string;
-  routerLabel: string;
-  targetIndex?: number;
-  templateName: string;
-};
-
-type FlowSummary = {
-  id: string;
-  name: string;
-  status?: string;
-  categories?: string[];
-  validation_errors?: unknown[];
-  endpoint_uri?: string;
-  isFlowApi?: boolean;
-};
-
-type FlowSearchResponse = { total: number; flows: FlowSummary[] };
-type FlowPreviewResponse = { flow: unknown; previewUrl: string; expiresAt?: string };
-type FlowJsonResponse = { flowId: string; downloadUrl: string; json: unknown };
-type FlowReplicateResponse = {
-  totals: {
-    foundFlows: number;
-    publicKeyUploads: number;
-    loadedFlows: number;
-    targetRouters: number;
-    createJobs: number;
-    copied: number;
-    errors: number;
-  };
-  foundFlows: FlowSummary[];
-  copied: unknown[];
-  errors: unknown[];
-};
-type FlowCreateResponse = {
-  flow: FlowSummary;
-  publicKeyUpload: unknown | null;
-  createResponse: unknown;
-  setJsonResponse: unknown;
-};
-type FlowUpdateJsonResponse = {
-  flow: FlowSummary;
-  setJsonResponse: unknown;
-};
-type FlowUpdateMetadataResponse = {
-  flow: FlowSummary;
-  setMetadataResponse: unknown;
-};
-type FlowPublishResponse = { flowId: string; publishResponse: unknown };
-type FlowDeprecateResponse = { flowId: string; deprecateResponse: unknown };
-type FlowBulkUpdateMatch = {
-  targetIndex: number;
-  sourceFlowId: string;
-  sourceFlowName: string;
-  flowId: string;
-  flowName: string;
-  status?: string;
-  matchType?: "name" | "selected";
-};
-type FlowBulkUpdateMissing = {
-  targetIndex: number;
-  sourceFlowId: string;
-  sourceFlowName: string;
-  flowName: string;
-};
-type FlowBulkUpdateError = {
-  step: string;
-  targetIndex?: number;
-  flowId?: string;
-  flowName?: string;
-  message: string;
-};
-type FlowBulkUpdateOverride = {
-  targetIndex: number;
-  sourceFlowId: string;
-  flowId: string;
-};
-type FlowBulkUpdateResponse = {
-  options: {
-    continueOnError: boolean;
-    batchSize: number;
-    dryRun: boolean;
-    publishAfterUpdate: boolean;
-  };
-  totals: {
-    selectedFlows: number;
-    targetRouters: number;
-    matched: number;
-    missing: number;
-    updated: number;
-    published: number;
-    errors: number;
-  };
-  targetRouters: Array<{
-    targetIndex: number;
-    totalFlows: number;
-    matched: number;
-    missing: number;
-    availableFlows: FlowSummary[];
-  }>;
-  matches: FlowBulkUpdateMatch[];
-  missing: FlowBulkUpdateMissing[];
-  updated: unknown[];
-  errors: FlowBulkUpdateError[];
-};
-type PluginSummary = {
-  id: string;
-  name: string;
-  url: string;
-};
-type PluginSearchResponse = {
-  total: number;
-  plugins: PluginSummary[];
-  response?: unknown;
-};
-type PluginSaveResponse = {
-  total: number;
-  plugins: PluginSummary[];
-  response: unknown;
-};
-type PluginConflict = {
-  targetIndex: number;
-  pluginId: string;
-  pluginName: string;
-  existingId: string;
-  existingName: string;
-};
-type PluginConflictsResponse = {
-  totals: {
-    targetRouters: number;
-    conflicts: number;
-  };
-  conflicts: PluginConflict[];
-};
-type PluginReplicateResponse = {
-  totals: {
-    plugins: number;
-    targetRouters: number;
-    copied: number;
-    errors: number;
-  };
-  copied: unknown[];
-  errors: unknown[];
-};
-type OperationResult = {
-  summary: string;
-  payload: unknown;
-  previewFlow?: FlowSummary;
-  status?: "success" | "warning";
-  view?: ActiveView;
-};
-type PortalApplicationAccount = {
-  shortName: string;
-  name: string;
-  imageUri?: string;
-  template?: string;
-  hasPermission?: boolean;
-  tenantId?: string;
-  emailOwner?: string;
-};
-type ResolvedRouterKey = {
-  shortName: string;
-  key: string;
-  keyPreview: string;
-};
-type CurrentApplicationRouter = {
-  shortName: string;
-  name?: string;
-  imageUri?: string;
-  accessKey?: string;
-};
-
+import type {
+  ActiveView,
+  DevsTab,
+  RouterModal,
+  SortDirection,
+  CommandDestination,
+  CommandMethod,
+  DevCommandType,
+  DevCommandContentType,
+  PluginCopyMode,
+  DevCommand,
+  Template,
+  SearchResponse,
+  TemplateReplicateResponse,
+  TemplateCompareResponse,
+  TemplateDeleteMode,
+  TemplateDeleteItem,
+  TemplateDeleteTargetRouter,
+  TemplateDeleteMatch,
+  TemplateDeleteMissing,
+  TemplateDeleteError,
+  TemplateDeleteResponse,
+  TemplateBulkDeleteResponse,
+  TemplateDeleteProgress,
+  TemplateDeleteJobState,
+  TemplateDeleteJob,
+  FlowSummary,
+  FlowSearchResponse,
+  FlowPreviewResponse,
+  FlowJsonResponse,
+  FlowReplicateResponse,
+  FlowCreateResponse,
+  FlowUpdateJsonResponse,
+  FlowUpdateMetadataResponse,
+  FlowPublishResponse,
+  FlowDeprecateResponse,
+  FlowBulkUpdateMatch,
+  FlowBulkUpdateMissing,
+  FlowBulkUpdateError,
+  FlowBulkUpdateOverride,
+  FlowBulkUpdateResponse,
+  PluginSummary,
+  PluginSearchResponse,
+  PluginSaveResponse,
+  PluginConflict,
+  PluginConflictsResponse,
+  PluginReplicateResponse,
+  OperationResult,
+  PortalApplicationAccount,
+  ResolvedRouterKey,
+  CurrentApplicationRouter,
+} from "../types/templates";
 const DEFAULT_TEMPLATE_OPTIONS = {
   dryRun: false,
   continueOnError: true,
@@ -359,7 +103,6 @@ const DEFAULT_TEMPLATE_OPTIONS = {
 };
 const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
 const DEFAULT_PLUGIN_OPTIONS = { continueOnError: true, batchSize: 15 };
-const THEME_STORAGE_KEY = "create-templates-theme";
 const PORTAL_COMMAND_DESTINATION = "BlipService";
 const COMMAND_DESTINATIONS: CommandDestination[] = ["BlipService", "MessagingHubService"];
 const DEV_COMMAND_METHODS = Object.values(COMMAND_METHODS) as CommandMethod[];
@@ -534,16 +277,6 @@ function buildRouterUrl(application: Pick<PortalApplicationAccount, "shortName" 
   if (!tenantId || !shortName || !/^[a-z0-9-]+$/.test(tenantId)) return "";
 
   return `https://${tenantId}.blip.ai/application/detail/${encodeURIComponent(shortName)}/home`;
-}
-async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.error?.message || `Erro HTTP ${response.status}`);
-  return data as TResponse;
 }
 async function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -739,11 +472,11 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
-  const modalOpenerRef = useRef<HTMLElement | null>(null);
-  const previousActiveModalRef = useRef<string | null>(null);
-  const didLoadCurrentApplicationRef = useRef(false);
-  const didVerifyDevAccessRef = useRef(false);
-  const [isDarkTheme, setIsDarkTheme] = useState(true);
+  const { isDarkTheme, toggleTheme } = useTheme();
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [flowsLoaded, setFlowsLoaded] = useState(false);
+  const [startupError, setStartupError] = useState("");
+  const [startupAttempt, setStartupAttempt] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>("templates");
   const [devsTab, setDevsTab] = useState<DevsTab>("commands");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
@@ -864,20 +597,8 @@ export default function CreateTemplatesApp() {
               : null;
 
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (savedTheme === "light") {
-      setIsDarkTheme(false);
-    }
-  }, []);
+    if (!isEmbedded) return;
 
-  useEffect(() => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, isDarkTheme ? "dark" : "light");
-  }, [isDarkTheme]);
-
-  useEffect(() => {
-    if (!isEmbedded || didVerifyDevAccessRef.current) return;
-
-    didVerifyDevAccessRef.current = true;
     let cancelled = false;
 
     async function verifyDevAccess() {
@@ -905,13 +626,13 @@ export default function CreateTemplatesApp() {
   }, [activeView, canAccessDevs]);
 
   useEffect(() => {
-    if (!isEmbedded || didLoadCurrentApplicationRef.current) return;
+    if (!isEmbedded) return;
 
-    didLoadCurrentApplicationRef.current = true;
     let cancelled = false;
 
     async function loadCurrentApplication() {
       setIsLoadingCurrentApplication(true);
+      setStartupError("");
 
       try {
         const response = await getCurrentApplication();
@@ -919,6 +640,10 @@ export default function CreateTemplatesApp() {
 
         const router = extractCurrentApplicationRouter(response);
 
+        if (!router?.shortName)
+          throw new Error(
+            "O Portal não informou o router atual. Selecione a origem para continuar.",
+          );
         setCurrentApplicationRouter(router);
         if (router?.shortName) {
           setSourceRouterShortName((current) => current || router.shortName);
@@ -937,6 +662,9 @@ export default function CreateTemplatesApp() {
         const message =
           caughtError instanceof Error ? caughtError.message : "Erro ao executar getApplication.";
 
+        setStartupError(
+          "Não foi possível conectar ao router atual. Tente novamente ou selecione a origem manualmente.",
+        );
         setOperationResult({
           summary: "Falha ao carregar getApplication.",
           payload: {
@@ -954,7 +682,7 @@ export default function CreateTemplatesApp() {
     return () => {
       cancelled = true;
     };
-  }, [isEmbedded]);
+  }, [isEmbedded, startupAttempt]);
 
   const targetCount = isEmbedded
     ? removeRouterSelection(targetRouterShortNames, sourceRouterShortName).length
@@ -1137,7 +865,7 @@ export default function CreateTemplatesApp() {
 
       setRouterApplications(applications);
       if (applications.length === 0) {
-        setRouterApplicationsError("Nenhum router master com permissão encontrado.");
+        setRouterApplicationsError("");
       }
     } catch (caughtError) {
       const message =
@@ -1325,12 +1053,11 @@ export default function CreateTemplatesApp() {
         onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved,
       });
       setTemplateSearchResult(data);
+      setTemplatesLoaded(true);
       setSelectedTemplateKeys(
         data.templates.length === 1 ? new Set([templateKey(data.templates[0])]) : new Set(),
       );
     } catch (e) {
-      setTemplateSearchResult(emptyTemplateSearch);
-      setSelectedTemplateKeys(new Set());
       setError(e instanceof Error ? e.message : "Erro ao buscar templates.");
     } finally {
       setIsSearchingTemplates(false);
@@ -1486,7 +1213,7 @@ export default function CreateTemplatesApp() {
     return [...buildSourceTemplateDeleteJobs(), ...targetJobs];
   }
 
-  function buildTemplateDeleteJobs() {
+  function buildTemplateDeleteJobs(): TemplateDeleteJob[] {
     return templateDeleteMode === "source"
       ? buildSourceTemplateDeleteJobs()
       : buildBulkTemplateDeleteJobs();
@@ -1732,8 +1459,6 @@ export default function CreateTemplatesApp() {
     try {
       await loadFlowsFromSource();
     } catch (e) {
-      setFlowSearchResult(emptyFlowSearch);
-      setSelectedFlowIds(new Set());
       setError(e instanceof Error ? e.message : "Erro ao carregar flows.");
     } finally {
       setIsLoadingFlows(false);
@@ -1746,6 +1471,7 @@ export default function CreateTemplatesApp() {
       sourceRouterKey: resolvedSourceKey,
     });
     setFlowSearchResult(data);
+    setFlowsLoaded(true);
     setSelectedFlowIds(data.flows.length === 1 ? new Set([flowKey(data.flows[0])]) : new Set());
     setReplicateFlowBusinessPublicKey("");
     return data;
@@ -3001,6 +2727,8 @@ export default function CreateTemplatesApp() {
     resetPluginDraft();
   }
   function clearTemplateAndFlowResults() {
+    setTemplatesLoaded(false);
+    setFlowsLoaded(false);
     setTemplateSearchResult(emptyTemplateSearch);
     setSelectedTemplateKeys(new Set());
     setFlowSearchResult(emptyFlowSearch);
@@ -3061,82 +2789,13 @@ export default function CreateTemplatesApp() {
     }
   }
 
-  useEffect(() => {
-    if (!activeModalId) {
-      previousActiveModalRef.current = null;
-      modalOpenerRef.current?.focus({ preventScroll: true });
-      modalOpenerRef.current = null;
-      return;
-    }
-
-    if (!previousActiveModalRef.current) {
-      modalOpenerRef.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    previousActiveModalRef.current = activeModalId;
-
-    const frameId = window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>(`[data-modal-id="${activeModalId}"]`)?.focus({
-        preventScroll: true,
-      });
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [activeModalId]);
-
-  useEffect(() => {
-    if (!activeModalId) return;
-
-    function getFocusableElements(modal: HTMLElement) {
-      return Array.from(
-        modal.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((element) => !element.hasAttribute("aria-hidden"));
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      const modal = document.querySelector<HTMLElement>(`[data-modal-id="${activeModalId}"]`);
-      if (!modal) return;
-
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeActiveModal();
-        return;
-      }
-
-      if (event.key !== "Tab") return;
-
-      const focusableElements = getFocusableElements(modal);
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements.at(-1);
-
-      if (!firstElement || !lastElement) {
-        event.preventDefault();
-        modal.focus({ preventScroll: true });
-        return;
-      }
-
-      if (
-        event.shiftKey &&
-        (document.activeElement === firstElement || document.activeElement === modal)
-      ) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeModalId, isCreatingFlow, isDeletingTemplates, isBulkUpdatingFlows, isUpdatingFlow]);
+  useModalFocus(activeModalId, closeActiveModal);
   function saveSourceRouter() {
     const selectedShortName = draftSourceRouterKey.trim();
 
     setError("");
     setRouterApplicationsError("");
+    if (selectedShortName) setStartupError("");
 
     if (!isEmbedded) {
       const sourceChanged = selectedShortName !== sourceRouterKey.trim();
@@ -3209,8 +2868,8 @@ export default function CreateTemplatesApp() {
               placeholder="Nome ou shortname"
             />
           </label>
-          <button
-            className="blip-button secondary"
+          <Button
+            variant="secondary"
             type="button"
             onClick={() => void loadRouterApplications()}
             disabled={isLoadingRouterApplications}
@@ -3221,7 +2880,7 @@ export default function CreateTemplatesApp() {
               <Search size={18} aria-hidden="true" />
             )}
             Atualizar
-          </button>
+          </Button>
         </div>
 
         <div className="router-picker-meta">
@@ -3234,10 +2893,19 @@ export default function CreateTemplatesApp() {
         </div>
 
         {routerApplicationsError && (
-          <div className="ember-alert danger modal-alert" role="alert">
-            <AlertCircle size={18} aria-hidden="true" />
-            <span>{routerApplicationsError}</span>
-          </div>
+          <Feedback
+            title="Não foi possível carregar os routers"
+            action={
+              <Button
+                onClick={() => void loadRouterApplications()}
+                loading={isLoadingRouterApplications}
+              >
+                Tentar novamente
+              </Button>
+            }
+          >
+            {routerApplicationsError}
+          </Feedback>
         )}
 
         {isLoadingRouterApplications ? (
@@ -3310,11 +2978,7 @@ export default function CreateTemplatesApp() {
     );
   }
 
-  const shellClassName = [
-    "ember-shell",
-    isDarkTheme ? "theme-dark" : "theme-light",
-    isEmbedded ? "ember-shell--embedded" : "",
-  ]
+  const shellClassName = ["ember-shell", isEmbedded ? "ember-shell--embedded" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -3408,21 +3072,13 @@ export default function CreateTemplatesApp() {
                 </button>
               )}
             </div>
-            <button
-              className="blip-button secondary header-icon-button"
-              type="button"
-              aria-label="Limpar"
-              title="Limpar"
-              onClick={clearResults}
-            >
-              <Trash2 size={18} aria-hidden="true" />
-            </button>
+
             <button
               className="theme-toggle-button"
               type="button"
               aria-label={isDarkTheme ? "Ativar modo claro" : "Ativar modo escuro"}
               title={isDarkTheme ? "Ativar modo claro" : "Ativar modo escuro"}
-              onClick={() => setIsDarkTheme((current) => !current)}
+              onClick={toggleTheme}
             >
               {isDarkTheme ? (
                 <Sun size={18} aria-hidden="true" />
@@ -3433,107 +3089,39 @@ export default function CreateTemplatesApp() {
           </div>
         </header>
 
-        {visibleActiveView === "routers" ? (
-          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
-            <div className="ember-stat-card">
-              <span>Routers disponíveis</span>
-              <strong>{routerApplications.length}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Exibidos</span>
-              <strong>{filteredDirectoryRouterApplications.length}</strong>
-            </div>
-          </section>
-        ) : visibleActiveView === "templates" ? (
-          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
-            <div className="ember-stat-card">
-              <span>Encontrados</span>
-              <strong>{templateSearchResult.total}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Selecionados</span>
-              <strong>{selectedTemplates.length}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Destinos</span>
-              <strong>{targetCount}</strong>
-            </div>
-          </section>
-        ) : visibleActiveView === "flows" ? (
-          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
-            <div className="ember-stat-card">
-              <span>Carregados</span>
-              <strong>{flowSearchResult.total}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Filtrados</span>
-              <strong>{filteredFlows.length}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Selecionados</span>
-              <strong>{selectedFlows.length}</strong>
-            </div>
-            <div className="ember-stat-card">
-              <span>Destinos</span>
-              <strong>{targetCount}</strong>
-            </div>
-          </section>
-        ) : (
-          <section className="ember-stat-grid template-stat-grid" aria-label="Resumo">
-            {devsTab === "plugins" ? (
+        {isLoadingCurrentApplication && (
+          <Feedback tone="info" title="Conectando ao Portal Blip">
+            Carregando o router de origem…
+          </Feedback>
+        )}
+        {startupError && (
+          <Feedback
+            title="A conexão com o Portal não foi concluída"
+            action={
               <>
-                <div className="ember-stat-card">
-                  <span>Plugins</span>
-                  <strong>{pluginSearchResult.total}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Selecionados</span>
-                  <strong>{selectedPlugins.length}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Destinos</span>
-                  <strong>{targetCount}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Modo</span>
-                  <strong>{pluginCopyMode === "add" ? "Adicionar" : "Substituir"}</strong>
-                </div>
+                <Button onClick={() => setStartupAttempt((attempt) => attempt + 1)}>
+                  Tentar novamente
+                </Button>
+                <Button variant="ghost" onClick={openSourceModal}>
+                  Selecionar origem
+                </Button>
               </>
-            ) : (
-              <>
-                <div className="ember-stat-card">
-                  <span>Destino</span>
-                  <strong>{devCommandDestination}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Método</span>
-                  <strong>{devCommandMethod.toUpperCase()}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Iframe</span>
-                  <strong>{isEmbedded ? "Ativo" : "Fora"}</strong>
-                </div>
-                <div className="ember-stat-card">
-                  <span>Type</span>
-                  <strong>{devCommandType ? getDevCommandTypeLabel(devCommandType) : "Sem"}</strong>
-                </div>
-              </>
-            )}
-          </section>
+            }
+          >
+            {startupError}
+          </Feedback>
         )}
 
-        {error && (
-          <div className="ember-alert danger" role="alert">
-            <AlertCircle size={18} aria-hidden="true" />
-            <span>{error}</span>
-          </div>
+        {error && !activeModalId && (
+          <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+            {error}
+          </Feedback>
         )}
 
         {visibleActiveView === "routers" && copyNotice && (
-          <div className="ember-alert success" role="status" aria-live="polite">
-            <Clipboard size={18} aria-hidden="true" />
-            <span>{copyNotice}</span>
-          </div>
+          <Feedback tone="success" onDismiss={() => setCopyNotice("")}>
+            {copyNotice}
+          </Feedback>
         )}
 
         {pageOperationResult && (
@@ -3561,8 +3149,8 @@ export default function CreateTemplatesApp() {
                   quando necessário.
                 </p>
               </div>
-              <button
-                className="blip-button secondary"
+              <Button
+                variant="secondary"
                 type="button"
                 onClick={() => void loadRouterApplications()}
                 disabled={isLoadingRouterApplications || !isEmbedded}
@@ -3573,7 +3161,7 @@ export default function CreateTemplatesApp() {
                   <Search size={18} aria-hidden="true" />
                 )}
                 Atualizar
-              </button>
+              </Button>
             </div>
 
             {!isEmbedded ? (
@@ -3601,10 +3189,19 @@ export default function CreateTemplatesApp() {
                 </div>
 
                 {routerApplicationsError && (
-                  <div className="ember-alert danger" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{routerApplicationsError}</span>
-                  </div>
+                  <Feedback
+                    title="Não foi possível carregar os routers"
+                    action={
+                      <Button
+                        onClick={() => void loadRouterApplications()}
+                        loading={isLoadingRouterApplications}
+                      >
+                        Tentar novamente
+                      </Button>
+                    }
+                  >
+                    {routerApplicationsError}
+                  </Feedback>
                 )}
 
                 {isLoadingRouterApplications ? (
@@ -3655,16 +3252,18 @@ export default function CreateTemplatesApp() {
                             <ExternalLink size={18} aria-hidden="true" />
                           </a>
                           <div className="router-directory-card-actions">
-                            <button
-                              className="table-action-button"
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               type="button"
                               onClick={() => void handleCopyRouterId(application)}
                             >
                               <Clipboard size={16} aria-hidden="true" />
                               Copiar ID
-                            </button>
-                            <button
-                              className="table-action-button"
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               type="button"
                               onClick={() => void handleCopyRouterKey(application)}
                               disabled={Boolean(routerKeyActionId)}
@@ -3675,7 +3274,7 @@ export default function CreateTemplatesApp() {
                                 <KeyRound size={16} aria-hidden="true" />
                               )}
                               Copiar key
-                            </button>
+                            </Button>
                           </div>
                         </article>
                       );
@@ -3695,8 +3294,8 @@ export default function CreateTemplatesApp() {
                   {targetCount} destinos
                 </p>
               </div>
-              <button
-                className="blip-button secondary"
+              <Button
+                variant="secondary"
                 type="button"
                 onClick={toggleAllTemplates}
                 disabled={templateSearchResult.templates.length === 0}
@@ -3707,7 +3306,7 @@ export default function CreateTemplatesApp() {
                   <Square size={18} aria-hidden="true" />
                 )}
                 Selecionar
-              </button>
+              </Button>
             </div>
 
             <form className="template-filter-row" onSubmit={handleSearchTemplates}>
@@ -3716,141 +3315,71 @@ export default function CreateTemplatesApp() {
                 <input
                   id="templateName"
                   value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  placeholder="Vazio busca sem filtro"
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="Buscar todos ou filtrar por nome"
                 />
               </label>
-              <button
-                className="blip-submit-button secondary"
-                type="submit"
-                disabled={isSearchingTemplates}
-              >
-                {isSearchingTemplates ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <Search size={18} aria-hidden="true" />
-                )}
-                Buscar
-              </button>
-              <button
-                className="blip-button secondary"
-                type="button"
-                onClick={() => {
-                  setError("");
-                  setCopyNotice("");
-                  setTemplateCompareResult(null);
-                  setIsTemplateCompareModalOpen(true);
-                }}
-              >
-                <Search size={18} aria-hidden="true" />
-                Comparar routers
-              </button>
-              <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
-                <Plus size={18} aria-hidden="true" />
-                {targetCount
-                  ? `Editar routers de destino (${targetCount})`
-                  : "Adicionar routers de destino"}
-              </button>
-              <button
-                className="blip-button secondary danger"
-                type="button"
-                onClick={handleOpenSourceTemplateDeleteModal}
-                disabled={
-                  isInspectingTemplateDeletion ||
-                  isDeletingTemplates ||
-                  selectedTemplates.length === 0
-                }
-              >
-                {isInspectingTemplateDeletion && templateDeleteMode === "source" ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <Trash2 size={18} aria-hidden="true" />
-                )}
-                Deletar
-              </button>
-              <button
-                className="blip-button secondary danger"
-                type="button"
-                onClick={handleOpenBulkTemplateDeleteModal}
-                disabled={
-                  isInspectingTemplateDeletion ||
-                  isDeletingTemplates ||
-                  selectedTemplates.length === 0
-                }
-              >
-                {isInspectingTemplateDeletion && templateDeleteMode === "bulk" ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <Trash2 size={18} aria-hidden="true" />
-                )}
-                Deletar em massa
-              </button>
-              <button
-                className="blip-submit-button primary"
-                type="button"
-                onClick={handleReplicateTemplates}
-                disabled={
-                  isReplicatingTemplates || isDeletingTemplates || selectedTemplates.length === 0
-                }
-              >
-                {isReplicatingTemplates ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <CopyPlus size={18} aria-hidden="true" />
-                )}
-                Replicar
-              </button>
+              <Button type="submit" loading={isSearchingTemplates}>
+                {!isSearchingTemplates && <Search size={18} aria-hidden="true" />}Buscar
+              </Button>
+              <ActionsMenu
+                actions={[
+                  {
+                    label: "Comparar routers",
+                    icon: <Search size={16} />,
+                    onSelect: () => {
+                      setError("");
+                      setCopyNotice("");
+                      setTemplateCompareResult(null);
+                      setIsTemplateCompareModalOpen(true);
+                    },
+                  },
+                  {
+                    label: targetCount ? `Editar destinos (${targetCount})` : "Configurar destinos",
+                    icon: <Network size={16} />,
+                    onSelect: openTargetsModal,
+                  },
+                  { label: "Limpar resultados", icon: <X size={16} />, onSelect: clearResults },
+                ]}
+              />
             </form>
-
-            <div className="ember-table-wrap template-table-wrap">
-              <table className="ember-table">
-                <thead>
-                  <tr>
-                    <th className="select-column">Sel.</th>
-                    <th>Nome</th>
-                    <th>Idioma</th>
-                    <th>Categoria</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {templateSearchResult.templates.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="empty-cell">
-                        Nenhum template carregado
-                      </td>
-                    </tr>
-                  ) : (
-                    templateSearchResult.templates.map((template) => {
-                      const key = templateKey(template);
-                      const checked = selectedTemplateKeys.has(key);
-                      return (
-                        <tr key={key} className={checked ? "selected" : ""}>
-                          <td className="select-column">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleTemplate(key)}
-                              aria-label={`Selecionar ${template.name}`}
-                            />
-                          </td>
-                          <td className="template-name">{template.name}</td>
-                          <td>{template.language}</td>
-                          <td>{template.category}</td>
-                          <td>
-                            <span
-                              className={`ember-status ${String(template.status || "").toLowerCase()}`}
-                            >
-                              {template.status || "N/D"}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <SelectionBar
+              count={selectedTemplates.length}
+              targets={targetCount}
+              loading={isReplicatingTemplates}
+              disabled={isDeletingTemplates || isInspectingTemplateDeletion || isSearchingTemplates}
+              onTargets={openTargetsModal}
+              onReplicate={handleReplicateTemplates}
+              onClear={() => setSelectedTemplateKeys(new Set())}
+            >
+              <ActionsMenu
+                label="Ações em lote"
+                disabled={
+                  isInspectingTemplateDeletion || isDeletingTemplates || isReplicatingTemplates
+                }
+                actions={[
+                  {
+                    label: "Deletar na origem",
+                    icon: <Trash2 size={16} />,
+                    danger: true,
+                    onSelect: handleOpenSourceTemplateDeleteModal,
+                  },
+                  {
+                    label: "Deletar em massa",
+                    icon: <Trash2 size={16} />,
+                    danger: true,
+                    onSelect: handleOpenBulkTemplateDeleteModal,
+                  },
+                ]}
+              />
+            </SelectionBar>
+            <TemplateTable
+              templates={templateSearchResult.templates}
+              selected={selectedTemplateKeys}
+              loading={isSearchingTemplates}
+              loaded={templatesLoaded}
+              onToggle={toggleTemplate}
+            />
           </section>
         ) : visibleActiveView === "flows" ? (
           <section className="ember-panel results-panel">
@@ -3862,8 +3391,8 @@ export default function CreateTemplatesApp() {
                   {selectedFlows.length} selecionados
                 </p>
               </div>
-              <button
-                className="blip-button secondary"
+              <Button
+                variant="secondary"
                 type="button"
                 onClick={toggleVisibleFlows}
                 disabled={filteredFlows.length === 0}
@@ -3874,7 +3403,7 @@ export default function CreateTemplatesApp() {
                   <Square size={18} aria-hidden="true" />
                 )}
                 Selecionar
-              </button>
+              </Button>
             </div>
 
             <form className="template-filter-row flow-filter-row" onSubmit={handleLoadFlows}>
@@ -3883,53 +3412,42 @@ export default function CreateTemplatesApp() {
                 <input
                   id="flowFilter"
                   value={flowFilter}
-                  onChange={(e) => setFlowFilter(e.target.value)}
+                  onChange={(event) => setFlowFilter(event.target.value)}
                   placeholder="Digite nome ou ID"
                 />
               </label>
-              <button
-                className="blip-submit-button secondary"
-                type="submit"
-                disabled={isLoadingFlows}
-              >
-                {isLoadingFlows ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <Search size={18} aria-hidden="true" />
-                )}
-                Buscar
-              </button>
-              <button
-                className="blip-button secondary"
-                type="button"
+              <Button type="submit" loading={isLoadingFlows}>
+                {!isLoadingFlows && <Search size={18} aria-hidden="true" />}Buscar
+              </Button>
+              <Button
                 onClick={() => {
                   setError("");
                   setIsCreateFlowModalOpen(true);
                 }}
               >
                 <Plus size={18} aria-hidden="true" />
-                Criar flow agora
-              </button>
-              <button className="blip-button secondary" type="button" onClick={openTargetsModal}>
-                <Plus size={18} aria-hidden="true" />
-                {targetCount
-                  ? `Editar routers de destino (${targetCount})`
-                  : "Adicionar routers de destino"}
-              </button>
-              <button
-                className="blip-submit-button primary"
-                type="button"
-                onClick={handleReplicateFlows}
-                disabled={isReplicatingFlows || selectedFlows.length === 0}
-              >
-                {isReplicatingFlows ? (
-                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <CopyPlus size={18} aria-hidden="true" />
-                )}
-                Replicar
-              </button>
+                Criar flow
+              </Button>
+              <ActionsMenu
+                actions={[
+                  {
+                    label: targetCount ? `Editar destinos (${targetCount})` : "Configurar destinos",
+                    icon: <Network size={16} />,
+                    onSelect: openTargetsModal,
+                  },
+                  { label: "Limpar resultados", icon: <X size={16} />, onSelect: clearResults },
+                ]}
+              />
             </form>
+            <SelectionBar
+              count={selectedFlows.length}
+              targets={targetCount}
+              loading={isReplicatingFlows}
+              disabled={isLoadingFlows}
+              onTargets={openTargetsModal}
+              onReplicate={handleReplicateFlows}
+              onClear={() => setSelectedFlowIds(new Set())}
+            />
 
             {selectedFlowsIncludeApi && (
               <label
@@ -3949,134 +3467,20 @@ export default function CreateTemplatesApp() {
               </label>
             )}
 
-            <div className="ember-table-wrap template-table-wrap">
-              <table className="ember-table flow-table">
-                <thead>
-                  <tr>
-                    <th className="select-column">Sel.</th>
-                    <th>Nome</th>
-                    <th>ID</th>
-                    <th>Categorias</th>
-                    <th>Status</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredFlows.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="empty-cell">
-                        Nenhum flow carregado
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredFlows.map((flow) => {
-                      const key = flowKey(flow);
-                      const checked = selectedFlowIds.has(key);
-                      return (
-                        <tr key={key} className={checked ? "selected" : ""}>
-                          <td className="select-column">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleFlow(key)}
-                              aria-label={`Selecionar ${flow.name}`}
-                            />
-                          </td>
-                          <td className="template-name">{flow.name}</td>
-                          <td className="mono-cell">{flow.id}</td>
-                          <td>{flow.categories?.join(", ") || "-"}</td>
-                          <td>
-                            <span
-                              className={`ember-status ${String(flow.status || "").toLowerCase()}`}
-                            >
-                              {flow.status || "N/D"}
-                            </span>
-                          </td>
-                          <td>
-                            <div className="table-actions">
-                              <button
-                                className="table-action-button"
-                                type="button"
-                                onClick={() => handlePreviewFlow(flow)}
-                                disabled={flowActionId === `preview:${flow.id}`}
-                              >
-                                {flowActionId === `preview:${flow.id}` ? (
-                                  <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                ) : (
-                                  <Eye size={16} aria-hidden="true" />
-                                )}
-                                Visualizar
-                              </button>
-                              <button
-                                className="table-action-button"
-                                type="button"
-                                onClick={() => handleCopyFlowJson(flow)}
-                                disabled={flowActionId === `json:${flow.id}`}
-                              >
-                                {flowActionId === `json:${flow.id}` ? (
-                                  <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                ) : (
-                                  <Clipboard size={16} aria-hidden="true" />
-                                )}
-                                Copiar JSON
-                              </button>
-                              <button
-                                className="table-action-button icon-only"
-                                type="button"
-                                aria-label={`Editar ${flow.name}`}
-                                title="Editar"
-                                onClick={() => void handleOpenEditFlow(flow)}
-                                disabled={
-                                  flowActionId === `edit:${flow.id}` ||
-                                  flowActionId === `update:${flow.id}`
-                                }
-                              >
-                                {flowActionId === `edit:${flow.id}` ||
-                                flowActionId === `update:${flow.id}` ? (
-                                  <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                ) : (
-                                  <Pencil size={16} aria-hidden="true" />
-                                )}
-                              </button>
-                              {String(flow.status || "").toUpperCase() === "DRAFT" && (
-                                <button
-                                  className="table-action-button publish"
-                                  type="button"
-                                  onClick={() => handlePublishFlow(flow)}
-                                  disabled={flowActionId === `publish:${flow.id}`}
-                                >
-                                  {flowActionId === `publish:${flow.id}` ? (
-                                    <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                  ) : (
-                                    <Send size={16} aria-hidden="true" />
-                                  )}
-                                  Publicar
-                                </button>
-                              )}
-                              {!isDeprecatedFlow(flow) && (
-                                <button
-                                  className="table-action-button danger"
-                                  type="button"
-                                  onClick={() => handleDeprecateFlow(flow)}
-                                  disabled={flowActionId === `deprecate:${flow.id}`}
-                                >
-                                  {flowActionId === `deprecate:${flow.id}` ? (
-                                    <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                  ) : (
-                                    <Trash2 size={16} aria-hidden="true" />
-                                  )}
-                                  Desativar
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <FlowTable
+              flows={filteredFlows}
+              selected={selectedFlowIds}
+              loading={isLoadingFlows}
+              loaded={flowsLoaded}
+              filtered={!!flowFilter.trim()}
+              actionId={flowActionId}
+              onToggle={toggleFlow}
+              onPreview={handlePreviewFlow}
+              onCopy={handleCopyFlowJson}
+              onEdit={handleOpenEditFlow}
+              onPublish={handlePublishFlow}
+              onDeprecate={handleDeprecateFlow}
+            />
           </section>
         ) : (
           <section className="ember-panel results-panel devs-panel">
@@ -4201,16 +3605,16 @@ export default function CreateTemplatesApp() {
                     </label>
                   )}
                   <div className="dev-command-actions">
-                    <button
-                      className="blip-button secondary"
+                    <Button
+                      variant="secondary"
                       type="button"
                       onClick={() => setDevCommandUri(DEFAULT_DEV_COMMAND_URI)}
                     >
                       <Clipboard size={18} aria-hidden="true" />
                       Padrão
-                    </button>
-                    <button
-                      className="blip-button secondary"
+                    </Button>
+                    <Button
+                      variant="secondary"
                       type="button"
                       onClick={() => void handleGetCurrentApplication()}
                       disabled={isLoadingCurrentApplication || !isEmbedded}
@@ -4221,9 +3625,9 @@ export default function CreateTemplatesApp() {
                         <FileJson size={18} aria-hidden="true" />
                       )}
                       Get application
-                    </button>
-                    <button
-                      className="blip-submit-button primary"
+                    </Button>
+                    <Button
+                      variant="primary"
                       type="submit"
                       disabled={isRunningDevCommand || !isEmbedded}
                     >
@@ -4233,7 +3637,7 @@ export default function CreateTemplatesApp() {
                         <Send size={18} aria-hidden="true" />
                       )}
                       Executar
-                    </button>
+                    </Button>
                   </div>
                 </form>
               </>
@@ -4247,8 +3651,8 @@ export default function CreateTemplatesApp() {
                       {selectedPlugins.length} selecionados
                     </p>
                   </div>
-                  <button
-                    className="blip-button secondary"
+                  <Button
+                    variant="secondary"
                     type="button"
                     onClick={toggleVisiblePlugins}
                     disabled={filteredPlugins.length === 0}
@@ -4259,7 +3663,7 @@ export default function CreateTemplatesApp() {
                       <Square size={18} aria-hidden="true" />
                     )}
                     Selecionar
-                  </button>
+                  </Button>
                 </div>
 
                 <form className="plugin-editor-form" onSubmit={handleSavePlugin}>
@@ -4273,15 +3677,15 @@ export default function CreateTemplatesApp() {
                       disabled={Boolean(editingPluginId)}
                     />
                   </label>
-                  <button
-                    className="blip-button secondary"
+                  <Button
+                    variant="secondary"
                     type="button"
                     onClick={() => setPluginDraftId(createCommandId())}
                     disabled={Boolean(editingPluginId)}
                   >
                     <Plus size={18} aria-hidden="true" />
                     Gerar ID
-                  </button>
+                  </Button>
                   <label className="blip-native-field" htmlFor="pluginDraftName">
                     Nome
                     <input
@@ -4301,18 +3705,18 @@ export default function CreateTemplatesApp() {
                     />
                   </label>
                   {editingPluginId && (
-                    <button
-                      className="blip-button secondary"
+                    <Button
+                      variant="secondary"
                       type="button"
                       onClick={resetPluginDraft}
                       disabled={isSavingPlugin}
                     >
                       <X size={18} aria-hidden="true" />
                       Cancelar
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    className="blip-submit-button primary"
+                  <Button
+                    variant="primary"
                     type="submit"
                     disabled={isSavingPlugin || !pluginsLoaded}
                   >
@@ -4322,7 +3726,7 @@ export default function CreateTemplatesApp() {
                       <Plus size={18} aria-hidden="true" />
                     )}
                     {editingPluginId ? "Salvar edição" : "Adicionar"}
-                  </button>
+                  </Button>
                 </form>
 
                 <form className="plugin-toolbar" onSubmit={handleLoadPlugins}>
@@ -4346,20 +3750,16 @@ export default function CreateTemplatesApp() {
                       <option value="replace">Substituir lista do destino</option>
                     </select>
                   </label>
-                  <button
-                    className="blip-submit-button secondary"
-                    type="submit"
-                    disabled={isLoadingPlugins}
-                  >
+                  <Button variant="secondary" type="submit" disabled={isLoadingPlugins}>
                     {isLoadingPlugins ? (
                       <LoaderCircle className="spin" size={18} aria-hidden="true" />
                     ) : (
                       <Search size={18} aria-hidden="true" />
                     )}
                     Buscar
-                  </button>
-                  <button
-                    className="blip-button secondary danger"
+                  </Button>
+                  <Button
+                    variant="danger"
                     type="button"
                     onClick={() => void handleDeleteSelectedPlugins()}
                     disabled={isSavingPlugin || selectedPlugins.length === 0}
@@ -4370,19 +3770,15 @@ export default function CreateTemplatesApp() {
                       <Trash2 size={18} aria-hidden="true" />
                     )}
                     Remover selecionados
-                  </button>
-                  <button
-                    className="blip-button secondary"
-                    type="button"
-                    onClick={openTargetsModal}
-                  >
+                  </Button>
+                  <Button variant="secondary" type="button" onClick={openTargetsModal}>
                     <Plus size={18} aria-hidden="true" />
                     {targetCount
                       ? `Editar routers de destino (${targetCount})`
                       : "Adicionar routers de destino"}
-                  </button>
-                  <button
-                    className="blip-submit-button primary"
+                  </Button>
+                  <Button
+                    variant="primary"
                     type="button"
                     onClick={handleReplicatePlugins}
                     disabled={isCopyingPlugins || selectedPlugins.length === 0}
@@ -4393,7 +3789,7 @@ export default function CreateTemplatesApp() {
                       <CopyPlus size={18} aria-hidden="true" />
                     )}
                     Copiar
-                  </button>
+                  </Button>
                 </form>
 
                 <div className="ember-table-wrap template-table-wrap">
@@ -4438,8 +3834,10 @@ export default function CreateTemplatesApp() {
                               </td>
                               <td>
                                 <div className="table-actions">
-                                  <button
-                                    className="table-action-button icon-only"
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="icon-only"
                                     type="button"
                                     aria-label={`Editar ${plugin.name}`}
                                     title="Editar"
@@ -4451,9 +3849,11 @@ export default function CreateTemplatesApp() {
                                     ) : (
                                       <Pencil size={16} aria-hidden="true" />
                                     )}
-                                  </button>
-                                  <button
-                                    className="table-action-button icon-only danger"
+                                  </Button>
+                                  <Button
+                                    variant="danger"
+                                    size="sm"
+                                    className="icon-only"
                                     type="button"
                                     aria-label={`Remover ${plugin.name}`}
                                     title="Remover"
@@ -4465,7 +3865,7 @@ export default function CreateTemplatesApp() {
                                     ) : (
                                       <Trash2 size={16} aria-hidden="true" />
                                     )}
-                                  </button>
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
@@ -4489,14 +3889,14 @@ export default function CreateTemplatesApp() {
               </div>
               <div className="output-actions">
                 {operationResult?.previewFlow && (
-                  <button
-                    className="blip-button secondary"
+                  <Button
+                    variant="secondary"
                     type="button"
                     onClick={() => handlePreviewFlow(operationResult.previewFlow!)}
                   >
                     <Eye size={18} aria-hidden="true" />
                     Visualizar
-                  </button>
+                  </Button>
                 )}
                 <FileJson size={18} aria-hidden="true" />
               </div>
@@ -4525,28 +3925,27 @@ export default function CreateTemplatesApp() {
                     presentes em todos eles.
                   </p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={() => setIsTemplateCompareModalOpen(false)}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <form className="compare-form" onSubmit={handleCompareTemplates}>
                 {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
+                  <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+                    {error}
+                  </Feedback>
                 )}
                 {copyNotice && (
-                  <div className="ember-alert success modal-alert" role="status">
-                    <Clipboard size={18} aria-hidden="true" />
-                    <span>{copyNotice}</span>
-                  </div>
+                  <Feedback tone="success" onDismiss={() => setCopyNotice("")}>
+                    {copyNotice}
+                  </Feedback>
                 )}
 
                 <label className="blip-native-field" htmlFor="compareCategory">
@@ -4579,26 +3978,18 @@ export default function CreateTemplatesApp() {
                 </label>
 
                 <div className="compare-actions">
-                  <button
-                    className="blip-button secondary"
-                    type="button"
-                    onClick={openTargetsModal}
-                  >
+                  <Button variant="secondary" type="button" onClick={openTargetsModal}>
                     <Plus size={18} aria-hidden="true" />
                     {targetCount ? `Destinos (${targetCount})` : "Adicionar destinos"}
-                  </button>
-                  <button
-                    className="blip-submit-button primary"
-                    type="submit"
-                    disabled={isComparingTemplates}
-                  >
+                  </Button>
+                  <Button variant="primary" type="submit" disabled={isComparingTemplates}>
                     {isComparingTemplates ? (
                       <LoaderCircle className="spin" size={18} aria-hidden="true" />
                     ) : (
                       <Search size={18} aria-hidden="true" />
                     )}
                     Comparar
-                  </button>
+                  </Button>
                 </div>
               </form>
 
@@ -4612,8 +4003,8 @@ export default function CreateTemplatesApp() {
                       <strong>
                         {templateCompareResult.totals.commonTemplates} templates em comum
                       </strong>
-                      <button
-                        className="blip-button secondary"
+                      <Button
+                        variant="secondary"
                         type="button"
                         onClick={() =>
                           handleCopyJson(
@@ -4625,7 +4016,7 @@ export default function CreateTemplatesApp() {
                       >
                         <Clipboard size={18} aria-hidden="true" />
                         Copiar lista
-                      </button>
+                      </Button>
                     </div>
                   </>
                 ) : (
@@ -4673,11 +4064,7 @@ export default function CreateTemplatesApp() {
                           <td>{template.language}</td>
                           <td>{template.category || "-"}</td>
                           <td>
-                            <span
-                              className={`ember-status ${String(template.status || "").toLowerCase()}`}
-                            >
-                              {template.status || "N/D"}
-                            </span>
+                            <StatusBadge status={template.status} />
                           </td>
                           <td>{template.routers.length}</td>
                         </tr>
@@ -4711,23 +4098,23 @@ export default function CreateTemplatesApp() {
                       : `${templateDeleteItems.length} na origem, ${templateDeletePreflight?.totals.targetRouters ?? 0} destinos, ${templateDeletePreflight?.totals.matched ?? 0} encontrados, ${templateDeletePreflight?.totals.missing ?? 0} sem match`}
                   </p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={() => closeTemplateDeleteModal()}
                   disabled={isDeletingTemplates}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <div className="ember-modal-body">
                 {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
+                  <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+                    {error}
+                  </Feedback>
                 )}
 
                 <div className="template-delete-progress" aria-live="polite">
@@ -4899,16 +4286,16 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-footer">
-                <button
-                  className="blip-button secondary"
+                <Button
+                  variant="secondary"
                   type="button"
                   onClick={() => closeTemplateDeleteModal()}
                   disabled={isDeletingTemplates}
                 >
                   Fechar
-                </button>
-                <button
-                  className="blip-button secondary danger"
+                </Button>
+                <Button
+                  variant="danger"
                   type="button"
                   onClick={handleConfirmTemplateDelete}
                   disabled={
@@ -4923,7 +4310,7 @@ export default function CreateTemplatesApp() {
                     <Trash2 size={18} aria-hidden="true" />
                   )}
                   Deletar
-                </button>
+                </Button>
               </div>
             </section>
           </div>
@@ -4944,22 +4331,22 @@ export default function CreateTemplatesApp() {
                   <h2 id="create-flow-modal-title">Criar flow agora</h2>
                   <p>Cria o flow no router de origem e envia o JSON completo sem publicar.</p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={() => setIsCreateFlowModalOpen(false)}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <div className="ember-modal-body">
                 {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
+                  <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+                    {error}
+                  </Feedback>
                 )}
 
                 <label className="blip-native-field" htmlFor="newFlowName">
@@ -5032,15 +4419,15 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-footer">
-                <button
-                  className="blip-button secondary"
+                <Button
+                  variant="secondary"
                   type="button"
                   onClick={() => setIsCreateFlowModalOpen(false)}
                 >
                   Cancelar
-                </button>
-                <button
-                  className="blip-submit-button primary"
+                </Button>
+                <Button
+                  variant="primary"
                   type="button"
                   onClick={handleCreateFlow}
                   disabled={isCreatingFlow}
@@ -5051,7 +4438,7 @@ export default function CreateTemplatesApp() {
                     <Plus size={18} aria-hidden="true" />
                   )}
                   Criar flow
-                </button>
+                </Button>
               </div>
             </section>
           </div>
@@ -5072,23 +4459,23 @@ export default function CreateTemplatesApp() {
                   <h2 id="edit-flow-modal-title">Editar flow</h2>
                   <p>{editingFlow.name}</p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={() => closeEditFlowModal()}
                   disabled={isUpdatingFlow || isBulkUpdatingFlows}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <div className="ember-modal-body">
                 {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
+                  <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+                    {error}
+                  </Feedback>
                 )}
 
                 <label className="blip-native-field" htmlFor="editFlowName">
@@ -5146,17 +4533,17 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-footer">
-                <button
-                  className="blip-button secondary"
+                <Button
+                  variant="secondary"
                   type="button"
                   onClick={() => closeEditFlowModal()}
                   disabled={isUpdatingFlow || isBulkUpdatingFlows}
                 >
                   Cancelar
-                </button>
+                </Button>
                 <div className="flow-edit-footer-actions">
-                  <button
-                    className="blip-button secondary"
+                  <Button
+                    variant="secondary"
                     type="button"
                     onClick={handleOpenBulkFlowMappingModal}
                     disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
@@ -5170,9 +4557,9 @@ export default function CreateTemplatesApp() {
                       <FileJson size={18} aria-hidden="true" />
                     )}
                     Alterar em massa
-                  </button>
-                  <button
-                    className="blip-submit-button primary"
+                  </Button>
+                  <Button
+                    variant="primary"
                     type="button"
                     onClick={handleSaveEditedFlow}
                     disabled={isLoadingEditFlowJson || isUpdatingFlow || isBulkUpdatingFlows}
@@ -5185,7 +4572,7 @@ export default function CreateTemplatesApp() {
                       <Pencil size={18} aria-hidden="true" />
                     )}
                     {editFlowPublishAfterSave ? "Salvar e publicar" : "Salvar"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </section>
@@ -5211,23 +4598,23 @@ export default function CreateTemplatesApp() {
                     {bulkFlowPreflight.totals.missing} sem match por nome
                   </p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={() => closeBulkFlowMappingModal()}
                   disabled={isBulkUpdatingFlows}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <div className="ember-modal-body">
                 {error && (
-                  <div className="ember-alert danger modal-alert" role="alert">
-                    <AlertCircle size={18} aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
+                  <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
+                    {error}
+                  </Feedback>
                 )}
 
                 <div className="ember-table-wrap bulk-flow-table-wrap">
@@ -5343,16 +4730,16 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-footer">
-                <button
-                  className="blip-button secondary"
+                <Button
+                  variant="secondary"
                   type="button"
                   onClick={() => closeBulkFlowMappingModal()}
                   disabled={isBulkUpdatingFlows}
                 >
                   Voltar
-                </button>
-                <button
-                  className="blip-submit-button primary"
+                </Button>
+                <Button
+                  variant="primary"
                   type="button"
                   onClick={handleConfirmBulkFlowMapping}
                   disabled={isBulkUpdatingFlows}
@@ -5365,7 +4752,7 @@ export default function CreateTemplatesApp() {
                     <FileJson size={18} aria-hidden="true" />
                   )}
                   {editFlowPublishAfterSave ? "Alterar e publicar" : "Alterar"}
-                </button>
+                </Button>
               </div>
             </section>
           </div>
@@ -5394,17 +4781,19 @@ export default function CreateTemplatesApp() {
                         : "Informe uma ou mais keys de destino, uma por linha."}
                   </p>
                 </div>
-                <button
-                  className="blip-button secondary icon-only"
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
                   type="button"
                   onClick={closeRouterModal}
                 >
                   <X size={18} aria-hidden="true" />
-                  <span>Fechar</span>
-                </button>
+                </Button>
               </div>
 
               <div className="ember-modal-body">
+                {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
                 {isEmbedded ? (
                   renderRouterApplicationPicker()
                 ) : routerModal === "source" ? (
@@ -5433,16 +4822,16 @@ export default function CreateTemplatesApp() {
               </div>
 
               <div className="ember-modal-footer">
-                <button className="blip-button secondary" type="button" onClick={closeRouterModal}>
+                <Button variant="secondary" type="button" onClick={closeRouterModal}>
                   Cancelar
-                </button>
-                <button
-                  className="blip-submit-button primary"
+                </Button>
+                <Button
+                  variant="primary"
                   type="button"
                   onClick={routerModal === "source" ? saveSourceRouter : saveTargetRouters}
                 >
                   Salvar
-                </button>
+                </Button>
               </div>
             </section>
           </div>

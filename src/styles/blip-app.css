@@ -6,43 +6,6 @@
 }
 
 .ember-shell {
-  /* paleta original BLiP — mantida */
-  --blip-brand: #0096fa;
-  --blip-primary: #1e6bf1;
-  --blip-primary-dark: #125ad5;
-  --blip-content: #0f1a2e;
-  --blip-content-soft: #4b5b73;
-  --blip-content-ghost: #8a98ad;
-  --blip-surface-0: #ffffff;
-  --blip-surface-1: #f4f7fb;
-  --blip-surface-2: #e6ecf4;
-  --blip-border-soft: rgba(15, 26, 46, 0.06);
-  --blip-border: rgba(15, 26, 46, 0.12);
-  --blip-border-strong: rgba(15, 26, 46, 0.2);
-  --blip-success: #007a42;
-  --blip-warning: #9f7200;
-  --blip-danger: #a80b0b;
-  --blip-danger-bg: #fabebe;
-  --blip-summary-bg: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
-  --blip-table-head-bg: linear-gradient(180deg, #f7f9fd 0%, #eef2f9 100%);
-  --blip-row-hover: rgba(30, 107, 241, 0.04);
-  --blip-row-selected: rgba(30, 107, 241, 0.09);
-  --blip-theme-button-bg: rgba(30, 107, 241, 0.08);
-  --blip-theme-button-hover: rgba(30, 107, 241, 0.14);
-
-  /* sombras mais suaves e modernas */
-  --blip-shadow-1: 0 1px 2px rgba(15, 26, 46, 0.04), 0 2px 8px -2px rgba(15, 26, 46, 0.08);
-  --blip-shadow-2: 0 8px 24px -6px rgba(15, 26, 46, 0.16), 0 2px 6px -1px rgba(15, 26, 46, 0.08);
-  --blip-shadow-brand: 0 6px 18px -6px rgba(30, 107, 241, 0.5);
-  --blip-ring: 0 0 0 3px rgba(30, 107, 241, 0.18);
-
-  --blip-radius-sm: 8px;
-  --blip-radius: 12px;
-  --blip-radius-lg: 16px;
-
-  --blip-gradient-primary: linear-gradient(135deg, #1e6bf1 0%, #0096fa 100%);
-  --blip-gradient-surface: linear-gradient(180deg, #f7f9fd 0%, #eef2f9 100%);
-
   color: var(--blip-content);
   background: var(--blip-gradient-surface);
   font-family: "Nunito Sans", "Inter", "Segoe UI", Tahoma, Helvetica, Arial, sans-serif;
@@ -60,123 +23,6 @@
 
 .ember-shell.ember-shell--embedded {
   min-height: 900px;
-}
-
-.ember-shell.theme-dark {
-  color-scheme: dark;
-  --blip-brand: #30b6ff;
-  --blip-primary: #5fc2ff;
-  --blip-primary-dark: #30a2ed;
-  --blip-content: #edf3f8;
-  --blip-content-soft: #a8b4c4;
-  --blip-content-ghost: #758397;
-  --blip-surface-0: #181a1f;
-  --blip-surface-1: #20242b;
-  --blip-surface-2: #2b313b;
-  --blip-border-soft: rgba(235, 243, 252, 0.08);
-  --blip-border: rgba(235, 243, 252, 0.14);
-  --blip-border-strong: rgba(235, 243, 252, 0.24);
-  --blip-success: #61d89f;
-  --blip-warning: #f2c95f;
-  --blip-danger: #ff8b91;
-  --blip-danger-bg: #4a2329;
-  --blip-summary-bg: linear-gradient(180deg, #20242b 0%, #191c22 100%);
-  --blip-table-head-bg: linear-gradient(180deg, #21262e 0%, #1b1f26 100%);
-  --blip-row-hover: rgba(95, 194, 255, 0.08);
-  --blip-row-selected: rgba(95, 194, 255, 0.13);
-  --blip-theme-button-bg: rgba(95, 194, 255, 0.1);
-  --blip-theme-button-hover: rgba(95, 194, 255, 0.18);
-  --blip-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22), 0 12px 28px -18px rgba(0, 0, 0, 0.7);
-  --blip-shadow-2: 0 18px 42px -24px rgba(0, 0, 0, 0.78), 0 4px 10px -4px rgba(0, 0, 0, 0.6);
-  --blip-shadow-brand: 0 8px 22px -10px rgba(95, 194, 255, 0.55);
-  --blip-ring: 0 0 0 3px rgba(95, 194, 255, 0.22);
-  --blip-gradient-primary: linear-gradient(135deg, #30a2ed 0%, #39d1c2 100%);
-  --blip-gradient-surface: linear-gradient(180deg, #111317 0%, #171a20 100%);
-}
-
-.ember-shell.theme-light {
-  color-scheme: light;
-}
-
-.ember-shell button,
-.ember-shell input,
-.ember-shell textarea,
-.ember-shell select {
-  font: inherit;
-}
-.ember-shell button {
-  cursor: pointer;
-}
-.ember-shell button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* ---------- Buttons ---------- */
-.blip-submit-button,
-.blip-button {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid transparent;
-  border-radius: var(--blip-radius-sm);
-  padding: 0 16px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
-}
-
-.blip-submit-button.primary,
-.blip-button.primary {
-  color: var(--blip-surface-0);
-  background: var(--blip-gradient-primary);
-  box-shadow: var(--blip-shadow-brand);
-}
-.blip-submit-button.primary:hover:not(:disabled),
-.blip-button.primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #125ad5 0%, #0084e0 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px -6px rgba(30, 107, 241, 0.55);
-}
-.blip-submit-button.primary:active:not(:disabled),
-.blip-button.primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.blip-submit-button.secondary,
-.blip-button.secondary {
-  color: var(--blip-primary);
-  border-color: rgba(30, 107, 241, 0.22);
-  background: rgba(30, 107, 241, 0.06);
-}
-.blip-submit-button.secondary:hover:not(:disabled),
-.blip-button.secondary:hover:not(:disabled) {
-  background: rgba(30, 107, 241, 0.12);
-  border-color: rgba(30, 107, 241, 0.34);
-}
-.blip-button.secondary.danger {
-  color: var(--blip-danger);
-  border-color: rgba(220, 53, 69, 0.24);
-  background: rgba(250, 190, 190, 0.18);
-}
-.blip-button.secondary.danger:hover:not(:disabled) {
-  background: rgba(250, 190, 190, 0.34);
-  border-color: rgba(220, 53, 69, 0.36);
-}
-
-.blip-submit-button:focus-visible,
-.blip-button:focus-visible {
-  outline: none;
-  box-shadow: var(--blip-ring);
 }
 
 /* ---------- Fields ---------- */
@@ -599,34 +445,6 @@
   white-space: nowrap;
 }
 
-/* ---------- Alerts ---------- */
-.ember-alert {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 16px;
-  border-radius: var(--blip-radius-sm);
-  padding: 12px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
-}
-.ember-alert.danger {
-  color: var(--blip-danger);
-  border: 1px solid rgba(168, 11, 11, 0.22);
-  background: linear-gradient(180deg, rgba(250, 190, 190, 0.34), rgba(250, 190, 190, 0.18));
-}
-.ember-alert.success {
-  color: var(--blip-success);
-  border: 1px solid rgba(0, 122, 66, 0.22);
-  background: linear-gradient(180deg, rgba(132, 235, 188, 0.28), rgba(132, 235, 188, 0.14));
-}
-.ember-alert.warning {
-  color: var(--blip-warning);
-  border: 1px solid rgba(159, 114, 0, 0.28);
-  background: linear-gradient(180deg, rgba(253, 233, 155, 0.34), rgba(253, 233, 155, 0.16));
-}
-
 /* ---------- Panels ---------- */
 .ember-grid {
   display: grid;
@@ -883,84 +701,6 @@
   font-family: "JetBrains Mono", "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
   font-size: 12px;
   color: var(--blip-content-soft);
-}
-
-.table-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.table-action-button {
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid rgba(30, 107, 241, 0.22);
-  border-radius: 7px;
-  padding: 0 10px;
-  color: var(--blip-primary);
-  background: rgba(30, 107, 241, 0.05);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease;
-}
-.table-action-button:hover:not(:disabled) {
-  background: rgba(30, 107, 241, 0.12);
-  border-color: rgba(30, 107, 241, 0.4);
-}
-.table-action-button.icon-only {
-  width: 36px;
-  padding: 0;
-}
-.table-action-button.publish {
-  color: var(--blip-success);
-  border-color: rgba(0, 122, 66, 0.24);
-  background: rgba(132, 235, 188, 0.22);
-}
-.table-action-button.publish:hover:not(:disabled) {
-  background: rgba(132, 235, 188, 0.42);
-}
-.table-action-button.danger {
-  color: var(--blip-danger);
-  border-color: rgba(220, 53, 69, 0.24);
-  background: rgba(250, 190, 190, 0.18);
-}
-.table-action-button.danger:hover:not(:disabled) {
-  background: rgba(250, 190, 190, 0.34);
-}
-
-.ember-status {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 4px 10px;
-  color: var(--blip-content-soft);
-  background: var(--blip-surface-2);
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.ember-status.approved,
-.ember-status.published {
-  color: var(--blip-success);
-  background: rgba(132, 235, 188, 0.45);
-}
-.ember-status.rejected,
-.ember-status.failed,
-.ember-status.deprecated,
-.ember-status.disabled {
-  color: var(--blip-danger);
-  background: rgba(250, 190, 190, 0.56);
-}
-.ember-status.pending,
-.ember-status.draft {
-  color: var(--blip-warning);
-  background: rgba(253, 233, 155, 0.6);
 }
 
 .empty-cell {
@@ -1628,12 +1368,6 @@
   .dev-command-actions {
     align-items: stretch;
     flex-direction: column;
-  }
-  .table-action-button {
-    min-height: 44px;
-  }
-  .table-action-button.icon-only {
-    width: 44px;
   }
 }
 

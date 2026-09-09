@@ -1,80 +1,92 @@
+@import "./styles/tokens.css";
+@import "./styles/blip-app.css";
+@import "./styles/ui.css";
+
+* {
+  box-sizing: border-box;
+}
 html {
   color-scheme: light;
+  background: var(--blip-surface-1);
+  color: var(--blip-content);
 }
-
 body {
   margin: 0;
-  font-family:
-    "Nunito Sans",
-    Inter,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: "Nunito Sans", "Segoe UI", system-ui, sans-serif;
 }
-
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+::selection {
+  background: var(--blip-primary);
+  color: var(--blip-surface-0);
+}
+:focus-visible {
+  outline: 2px solid var(--blip-primary);
+  outline-offset: 3px;
+}
+input,
+textarea {
+  caret-color: var(--blip-primary);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .root-message-page {
-  min-height: 100vh;
+  min-height: 100svh;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: #f7f8fb;
-  color: #1f2937;
+  background: var(--blip-surface-1);
 }
-
 .root-message-panel {
-  width: min(100%, 420px);
-  text-align: center;
+  width: min(100%, 480px);
+  overflow-wrap: anywhere;
 }
-
 .root-message-panel h1 {
   margin: 0;
-  font-size: 48px;
-  line-height: 1;
+  font-size: 1.75rem;
+  line-height: 1.25;
+  text-wrap: balance;
 }
-
 .root-message-panel h2 {
-  margin: 16px 0 0;
-  font-size: 22px;
-  line-height: 1.2;
+  font-size: 1.25rem;
 }
-
 .root-message-panel p {
-  margin: 12px 0 0;
-  color: #5b6675;
-  line-height: 1.5;
+  margin-top: 16px;
+  color: var(--blip-content-soft);
+  line-height: 1.65;
 }
-
 .root-message-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+  gap: 10px;
   margin-top: 24px;
 }
-
-.root-message-button {
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 16px;
-  color: inherit;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.root-message-button.primary {
-  background: #660099;
-  color: #fff;
-}
-
-.root-message-button.secondary {
-  background: #fff;
-  border-color: #d8dee9;
+@media (max-width: 480px) {
+  .root-message-actions > * {
+    width: 100%;
+  }
 }

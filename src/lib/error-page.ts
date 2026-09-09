@@ -1,30 +1,28 @@
+import { themeBootstrap } from "./theme";
+import errorStyles from "../styles.css?inline";
+
+// Shared theme and styles remain available even when SSR fails.
 export function renderErrorPage(): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <title>This page didn't load</title>
+    <title>Não foi possível abrir a extensão — Blip</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      body { font: 15px/1.5 system-ui, -apple-system, sans-serif; background: #fafafa; color: #111; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 1.5rem; }
-      .card { max-width: 28rem; width: 100%; text-align: center; padding: 2rem; }
-      h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-      p { color: #4b5563; margin: 0 0 1.5rem; }
-      .actions { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
-      a, button { padding: 0.5rem 1rem; border-radius: 0.375rem; font: inherit; cursor: pointer; text-decoration: none; border: 1px solid transparent; }
-      .primary { background: #111; color: #fff; }
-      .secondary { background: #fff; color: #111; border-color: #d1d5db; }
-    </style>
+    <script>${themeBootstrap}</script>
+    <style>${errorStyles}</style>
   </head>
   <body>
-    <div class="card">
-      <h1>This page didn't load</h1>
-      <p>Something went wrong on our end. You can try refreshing or head back home.</p>
-      <div class="actions">
-        <button class="primary" onclick="location.reload()">Try again</button>
-        <a class="secondary" href="/">Go home</a>
-      </div>
-    </div>
+    <main class="root-message-page">
+      <section class="root-message-panel" role="alert">
+        <h1>Não foi possível abrir a extensão</h1>
+        <p>A página não terminou de carregar. Verifique sua conexão e tente novamente. Se o problema continuar, abra a extensão novamente pelo Portal Blip.</p>
+        <div class="root-message-actions">
+          <button class="blip-button primary" onclick="location.reload()">Tentar novamente</button>
+          <a class="blip-button secondary" href="/">Voltar ao início</a>
+        </div>
+      </section>
+    </main>
   </body>
 </html>`;
 }
