@@ -1,6 +1,6 @@
 import type { COMMAND_METHODS } from "../lib/blipActions";
 
-export type ActiveView = "routers" | "templates" | "flows" | "devs";
+export type ActiveView = "routers" | "templates" | "flows" | "bots" | "devs";
 export type DevsTab = "commands" | "plugins";
 export type RouterModal = "source" | "targets" | null;
 export type SortDirection = "asc" | "desc";
@@ -288,6 +288,33 @@ export type PluginReplicateResponse = {
   };
   copied: unknown[];
   errors: unknown[];
+};
+export type BotCloneOptions = {
+  flow: boolean;
+  queues: boolean;
+  attendanceRules: boolean;
+  attendants: boolean;
+  quickReplies: boolean;
+  tags: boolean;
+  configVariables: boolean;
+  priorityRules: boolean;
+};
+export type BotCloneStepStatus = "success" | "partial" | "error";
+export type BotCloneStep = {
+  key: keyof BotCloneOptions;
+  label: string;
+  status: BotCloneStepStatus;
+  detail?: Record<string, unknown>;
+  message?: string;
+};
+export type BotCloneResponse = {
+  totals: {
+    requested: number;
+    succeeded: number;
+    partial: number;
+    failed: number;
+  };
+  steps: BotCloneStep[];
 };
 export type OperationResult = {
   summary: string;
