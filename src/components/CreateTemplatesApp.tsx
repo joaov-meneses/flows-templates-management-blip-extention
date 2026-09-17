@@ -3,12 +3,14 @@ import {
   AlertCircle,
   ArrowDownAZ,
   ArrowDownZA,
+  Bot,
   CheckSquare,
   Clipboard,
   CopyPlus,
   Eye,
   ExternalLink,
   FileJson,
+  Headset,
   KeyRound,
   LoaderCircle,
   MessageSquareText,
@@ -18,10 +20,14 @@ import {
   Plus,
   Search,
   Send,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
   Square,
   Sun,
   Terminal,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { useIframeAutoHeight } from "../hooks/useIframeAutoHeight";
@@ -90,6 +96,9 @@ import type {
   PluginConflict,
   PluginConflictsResponse,
   PluginReplicateResponse,
+  BotCloneOptions,
+  BotCloneResponse,
+  BotCloneStep,
   OperationResult,
   PortalApplicationAccount,
   ResolvedRouterKey,
@@ -103,6 +112,56 @@ const DEFAULT_TEMPLATE_OPTIONS = {
 };
 const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
 const DEFAULT_PLUGIN_OPTIONS = { continueOnError: true, batchSize: 15 };
+const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
+  flow: false,
+  queues: false,
+  attendanceRules: false,
+  attendants: false,
+  quickReplies: false,
+  tags: false,
+  configVariables: false,
+  priorityRules: false,
+};
+const BOT_CLONE_OPTION_GROUPS: Array<{
+  group: string;
+  icon: typeof Workflow;
+  fields: Array<{ key: keyof BotCloneOptions; label: string }>;
+}> = [
+  {
+    group: "Builder",
+    icon: Workflow,
+    fields: [
+      { key: "flow", label: "Fluxo" },
+      { key: "configVariables", label: "Variáveis de configuração" },
+    ],
+  },
+  {
+    group: "Desk",
+    icon: Headset,
+    fields: [
+      { key: "queues", label: "Filas" },
+      { key: "attendanceRules", label: "Regras de atendimento" },
+      { key: "priorityRules", label: "Regras de priorização" },
+      { key: "attendants", label: "Atendentes" },
+      { key: "quickReplies", label: "Respostas prontas" },
+      { key: "tags", label: "Tags" },
+    ],
+  },
+];
+const BOT_CLONE_OPTION_KEYS = BOT_CLONE_OPTION_GROUPS.flatMap((group) =>
+  group.fields.map((field) => field.key),
+);
+// Regras de atendimento e de priorização espelham o destino: itens que só
+// existem lá são removidos. Isso justifica pedir confirmação antes de rodar.
+const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
+  "attendanceRules",
+  "priorityRules",
+];
+type BotIdentityLookup = {
+  status: "idle" | "loading" | "success" | "error";
+  identity: string;
+};
+const IDLE_BOT_IDENTITY: BotIdentityLookup = { status: "idle", identity: "" };
 const PORTAL_COMMAND_DESTINATION = "BlipService";
 const COMMAND_DESTINATIONS: CommandDestination[] = ["BlipService", "MessagingHubService"];
 const DEV_COMMAND_METHODS = Object.values(COMMAND_METHODS) as CommandMethod[];
@@ -469,6 +528,71 @@ function getOperationStatus(errorCount: number) {
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
+function describeBotCloneStep(step: BotCloneStep) {
+  if (step.status === "error") return step.message || "Falha ao clonar.";
+
+  const detail = step.detail || {};
+  const errorCount = Array.isArray(detail.errors) ? detail.errors.length : 0;
+  const errorSuffix = errorCount > 0 ? `, ${errorCount} erro(s)` : "";
+
+  if (detail.empty) return "Nada para clonar (vazio na origem).";
+
+  switch (step.key) {
+    case "tags":
+      return `${Number(detail.tags) || 0} tag(s) clonada(s).`;
+    case "queues":
+      return `${Number(detail.created) || 0} criada(s), ${Number(detail.existing) || 0} já existente(s)${errorSuffix}.`;
+    case "attendants":
+      return `${Number(detail.cloned) || 0}/${Number(detail.total) || 0} atendente(s) clonado(s)${errorSuffix}.`;
+    case "quickReplies":
+      return `${Number(detail.cloned) || 0}/${Number(detail.total) || 0} categoria(s) clonada(s)${errorSuffix}.`;
+    case "attendanceRules":
+      return (
+        `${Number(detail.created) || 0} criada(s), ${Number(detail.updated) || 0} atualizada(s), ` +
+        `${Number(detail.unchanged) || 0} inalterada(s), ${Number(detail.removed) || 0} removida(s)${errorSuffix}.`
+      );
+    case "priorityRules":
+      return (
+        `${Number(detail.queuesCreated) || 0} fila(s) criada(s), ${Number(detail.created) || 0} criada(s), ` +
+        `${Number(detail.updated) || 0} atualizada(s), ${Number(detail.unchanged) || 0} inalterada(s), ` +
+        `${Number(detail.removed) || 0} removida(s)${errorSuffix}.`
+      );
+    default:
+      return "Concluído com sucesso.";
+  }
+}
+async function lookupBotIdentity(routerKey: string) {
+  const data = await postJson<{ identity: string }>("/api/bots/identity", { routerKey });
+  return data.identity || "";
+}
+function BotIdentityHint({ lookup }: { lookup: BotIdentityLookup }) {
+  if (lookup.status === "idle") return null;
+
+  if (lookup.status === "loading") {
+    return (
+      <p className="bot-identity-hint bot-identity-hint-loading">
+        <LoaderCircle className="spin" size={13} aria-hidden="true" />
+        Verificando...
+      </p>
+    );
+  }
+
+  if (lookup.status === "success") {
+    return (
+      <p className="bot-identity-hint bot-identity-hint-success">
+        <ShieldCheck size={13} aria-hidden="true" />
+        Id: <strong>{lookup.identity}</strong>
+      </p>
+    );
+  }
+
+  return (
+    <p className="bot-identity-hint bot-identity-hint-error">
+      <ShieldAlert size={13} aria-hidden="true" />
+      Não foi possível verificar essa key.
+    </p>
+  );
+}
 
 export default function CreateTemplatesApp() {
   const shellRef = useRef<HTMLElement | null>(null);
@@ -565,6 +689,17 @@ export default function CreateTemplatesApp() {
   const [isSavingPlugin, setIsSavingPlugin] = useState(false);
   const [isCopyingPlugins, setIsCopyingPlugins] = useState(false);
   const [pluginActionId, setPluginActionId] = useState("");
+  const [botSourceRouterKey, setBotSourceRouterKey] = useState("");
+  const [botTargetRouterKey, setBotTargetRouterKey] = useState("");
+  const [botSourceIdentity, setBotSourceIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
+  const [botTargetIdentity, setBotTargetIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
+  const [botSourceKeyInvalid, setBotSourceKeyInvalid] = useState(false);
+  const [botTargetKeyInvalid, setBotTargetKeyInvalid] = useState(false);
+  const [botCloneOptions, setBotCloneOptions] =
+    useState<BotCloneOptions>(DEFAULT_BOT_CLONE_OPTIONS);
+  const [isCloningBot, setIsCloningBot] = useState(false);
+  const [botCloneResult, setBotCloneResult] = useState<BotCloneResponse | null>(null);
+  const [visibleBotStepCount, setVisibleBotStepCount] = useState(0);
   const [devCommandDestination, setDevCommandDestination] =
     useState<CommandDestination>("BlipService");
   const [devCommandMethod, setDevCommandMethod] = useState<CommandMethod>(COMMAND_METHODS.GET);
@@ -833,15 +968,21 @@ export default function CreateTemplatesApp() {
               title: "Flows",
               description: "Consulta, visualização e cópia de flows entre routers BLiP",
             }
-          : devsTab === "plugins"
+          : visibleActiveView === "bots"
             ? {
-                title: "Devs",
-                description: "Gerenciamento e cópia de plugins entre routers BLiP",
+                title: "Bots",
+                description:
+                  "Clonagem de fluxo, filas, regras, atendentes, tags, respostas prontas e variáveis entre bots",
               }
-            : {
-                title: "Devs",
-                description: "Testes de commands no iframe do Portal BLiP",
-              };
+            : devsTab === "plugins"
+              ? {
+                  title: "Devs",
+                  description: "Gerenciamento e cópia de plugins entre routers BLiP",
+                }
+              : {
+                  title: "Devs",
+                  description: "Testes de commands no iframe do Portal BLiP",
+                };
 
   async function loadRouterApplications() {
     if (!isEmbedded) return;
@@ -2536,6 +2677,148 @@ export default function CreateTemplatesApp() {
     }
   }
 
+  useEffect(() => {
+    const routerKey = botSourceRouterKey.trim();
+    if (!routerKey) {
+      setBotSourceIdentity(IDLE_BOT_IDENTITY);
+      return;
+    }
+
+    let cancelled = false;
+    setBotSourceIdentity({ status: "loading", identity: "" });
+    const timeoutId = window.setTimeout(() => {
+      lookupBotIdentity(routerKey)
+        .then((identity) => {
+          if (cancelled) return;
+          setBotSourceIdentity(
+            identity ? { status: "success", identity } : { status: "error", identity: "" },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setBotSourceIdentity({ status: "error", identity: "" });
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [botSourceRouterKey]);
+
+  useEffect(() => {
+    const routerKey = botTargetRouterKey.trim();
+    if (!routerKey) {
+      setBotTargetIdentity(IDLE_BOT_IDENTITY);
+      return;
+    }
+
+    let cancelled = false;
+    setBotTargetIdentity({ status: "loading", identity: "" });
+    const timeoutId = window.setTimeout(() => {
+      lookupBotIdentity(routerKey)
+        .then((identity) => {
+          if (cancelled) return;
+          setBotTargetIdentity(
+            identity ? { status: "success", identity } : { status: "error", identity: "" },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setBotTargetIdentity({ status: "error", identity: "" });
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [botTargetRouterKey]);
+
+  useEffect(() => {
+    if (!botCloneResult || botCloneResult.steps.length === 0) {
+      setVisibleBotStepCount(0);
+      return;
+    }
+
+    setVisibleBotStepCount(1);
+    if (botCloneResult.steps.length <= 1) return;
+
+    let shown = 1;
+    const intervalId = window.setInterval(() => {
+      shown += 1;
+      setVisibleBotStepCount(shown);
+      if (shown >= botCloneResult.steps.length) {
+        window.clearInterval(intervalId);
+      }
+    }, 500);
+
+    return () => window.clearInterval(intervalId);
+  }, [botCloneResult]);
+
+  async function handleCloneBot(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setOperationResult(null);
+    setBotCloneResult(null);
+
+    const sourceKey = botSourceRouterKey.trim();
+    const targetKey = botTargetRouterKey.trim();
+
+    setBotSourceKeyInvalid(!sourceKey);
+    setBotTargetKeyInvalid(!targetKey);
+
+    if (!sourceKey) {
+      setError("Informe a bot key de origem.");
+      return;
+    }
+
+    if (!targetKey) {
+      setError("Informe a bot key de destino.");
+      return;
+    }
+
+    const selectedKeys = BOT_CLONE_OPTION_KEYS.filter((key) => botCloneOptions[key]);
+
+    if (selectedKeys.length === 0) {
+      setError("Selecione pelo menos um item para clonar.");
+      return;
+    }
+
+    const hasDestructiveStep = selectedKeys.some((key) => BOT_CLONE_DESTRUCTIVE_KEYS.includes(key));
+
+    if (hasDestructiveStep) {
+      const confirmed = await confirmFlowAction(
+        "Confirmar clonagem de bot",
+        "Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só no bot de destino serão <b>removidos</b>. Deseja continuar?",
+        "Clonar mesmo assim",
+      );
+
+      if (!confirmed) return;
+    }
+
+    setIsCloningBot(true);
+    try {
+      const data = await postJson<BotCloneResponse>("/api/bots/clone", {
+        sourceRouterKey: sourceKey,
+        targetRouterKey: targetKey,
+        options: botCloneOptions,
+      });
+
+      setBotCloneResult(data);
+      setOperationResult({
+        summary: `Clonagem concluída: ${data.totals.succeeded}/${data.totals.requested} etapa(s) ok${
+          data.totals.failed ? `, ${data.totals.failed} com erro` : ""
+        }.`,
+        payload: data,
+        status: data.totals.failed > 0 ? "warning" : "success",
+        view: "bots",
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao clonar bot.");
+    } finally {
+      setIsCloningBot(false);
+    }
+  }
+
   async function handleRunDevCommand(event: FormEvent) {
     event.preventDefault();
     const to = devCommandTo.trim();
@@ -3016,6 +3299,15 @@ export default function CreateTemplatesApp() {
             <FileJson size={18} aria-hidden="true" />
             Flows
           </button>
+          <button
+            className={visibleActiveView === "bots" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("bots")}
+            aria-current={visibleActiveView === "bots" ? "page" : undefined}
+          >
+            <Bot size={18} aria-hidden="true" />
+            Bots
+          </button>
           {canAccessDevs && (
             <button
               className={visibleActiveView === "devs" ? "active" : ""}
@@ -3039,39 +3331,41 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            <div className="router-summary">
-              <span className="router-summary-label">Router de origem</span>
-              <div className="router-summary-main">
-                {hasSourceRouterSelection() && (
-                  <span className="router-summary-avatar" aria-hidden="true">
-                    {sourceRouterApplication?.imageUri ? (
-                      <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
-                    ) : (
-                      <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
-                    )}
+            {visibleActiveView !== "bots" && (
+              <div className="router-summary">
+                <span className="router-summary-label">Router de origem</span>
+                <div className="router-summary-main">
+                  {hasSourceRouterSelection() && (
+                    <span className="router-summary-avatar" aria-hidden="true">
+                      {sourceRouterApplication?.imageUri ? (
+                        <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
+                      ) : (
+                        <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
+                      )}
+                    </span>
+                  )}
+                  <span className="router-summary-copy">
+                    <strong>{sourceRouterDisplayName}</strong>
+                    <span>{sourceRouterDisplayId}</span>
                   </span>
+                </div>
+                {hasSourceRouterSelection() ? (
+                  <button
+                    className="router-summary-action icon-action"
+                    type="button"
+                    aria-label="Editar router de origem"
+                    title="Editar router de origem"
+                    onClick={openSourceModal}
+                  >
+                    <Pencil size={14} aria-hidden="true" />
+                  </button>
+                ) : (
+                  <button className="router-summary-action" type="button" onClick={openSourceModal}>
+                    Selecionar
+                  </button>
                 )}
-                <span className="router-summary-copy">
-                  <strong>{sourceRouterDisplayName}</strong>
-                  <span>{sourceRouterDisplayId}</span>
-                </span>
               </div>
-              {hasSourceRouterSelection() ? (
-                <button
-                  className="router-summary-action icon-action"
-                  type="button"
-                  aria-label="Editar router de origem"
-                  title="Editar router de origem"
-                  onClick={openSourceModal}
-                >
-                  <Pencil size={14} aria-hidden="true" />
-                </button>
-              ) : (
-                <button className="router-summary-action" type="button" onClick={openSourceModal}>
-                  Selecionar
-                </button>
-              )}
-            </div>
+            )}
 
             <button
               className="theme-toggle-button"
@@ -3481,6 +3775,161 @@ export default function CreateTemplatesApp() {
               onPublish={handlePublishFlow}
               onDeprecate={handleDeprecateFlow}
             />
+          </section>
+        ) : visibleActiveView === "bots" ? (
+          <section className="ember-panel results-panel">
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Clonar Bot</h2>
+                <p>
+                  Copia configuração de um bot BLiP para outro, usando a bot key de cada um — não
+                  precisa estar na sua lista de routers do Portal.
+                </p>
+              </div>
+            </div>
+
+            <form className="bot-clone-form" onSubmit={handleCloneBot}>
+              <div className="bot-clone-routers">
+                <div className="bot-clone-router-field">
+                  <label className="blip-native-field" htmlFor="botSourceRouterKey">
+                    Bot Key de Origem
+                    <input
+                      id="botSourceRouterKey"
+                      value={botSourceRouterKey}
+                      onChange={(event) => {
+                        setBotSourceRouterKey(event.target.value);
+                        if (botSourceKeyInvalid) {
+                          setBotSourceKeyInvalid(false);
+                          setError("");
+                        }
+                      }}
+                      placeholder="Key ..."
+                      aria-invalid={botSourceKeyInvalid || undefined}
+                      className={botSourceKeyInvalid ? "invalid" : undefined}
+                    />
+                  </label>
+                  <BotIdentityHint lookup={botSourceIdentity} />
+                </div>
+                <div className="bot-clone-router-field">
+                  <label className="blip-native-field" htmlFor="botTargetRouterKey">
+                    Bot Key de Destino
+                    <input
+                      id="botTargetRouterKey"
+                      value={botTargetRouterKey}
+                      onChange={(event) => {
+                        setBotTargetRouterKey(event.target.value);
+                        if (botTargetKeyInvalid) {
+                          setBotTargetKeyInvalid(false);
+                          setError("");
+                        }
+                      }}
+                      placeholder="Key ..."
+                      aria-invalid={botTargetKeyInvalid || undefined}
+                      className={botTargetKeyInvalid ? "invalid" : undefined}
+                    />
+                  </label>
+                  <BotIdentityHint lookup={botTargetIdentity} />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <div className="bot-clone-options-header">
+                  <h3>O que clonar?</h3>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
+                      setBotCloneOptions(
+                        Object.fromEntries(
+                          BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
+                        ) as BotCloneOptions,
+                      );
+                    }}
+                  >
+                    {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
+                      <>
+                        <Square size={16} aria-hidden="true" />
+                        Limpar seleção
+                      </>
+                    ) : (
+                      <>
+                        <CheckSquare size={16} aria-hidden="true" />
+                        Selecionar tudo
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
+                  <div key={group} className="bot-clone-option-group">
+                    <span className="bot-clone-option-group-label">
+                      <GroupIcon size={14} aria-hidden="true" />
+                      {group}
+                    </span>
+                    <div className="action-grid bot-clone-options">
+                      {fields.map(({ key, label }) => (
+                        <label key={key} className="bot-clone-option">
+                          <input
+                            type="checkbox"
+                            checked={botCloneOptions[key]}
+                            onChange={(event) =>
+                              setBotCloneOptions((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                type="submit"
+                className="bot-clone-submit"
+                loading={
+                  isCloningBot ||
+                  (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
+                }
+              >
+                <CopyPlus size={18} aria-hidden="true" />
+                Clonar bot
+              </Button>
+            </form>
+
+            {botCloneResult && (
+              <div className="bot-clone-result-section">
+                <h3>Resultado</h3>
+                {visibleBotStepCount >= botCloneResult.steps.length &&
+                  botCloneResult.totals.failed === 0 && (
+                    <p className="bot-clone-all-clear">
+                      <Sparkles size={16} aria-hidden="true" />
+                      Tudo certo — nenhuma etapa com erro.
+                    </p>
+                  )}
+                <div className="bot-clone-results" aria-live="polite">
+                  {botCloneResult.steps.slice(0, visibleBotStepCount).map((step) => (
+                    <Feedback
+                      key={step.key}
+                      tone={
+                        step.status === "success"
+                          ? "success"
+                          : step.status === "partial"
+                            ? "warning"
+                            : "danger"
+                      }
+                      title={step.label}
+                    >
+                      {describeBotCloneStep(step)}
+                    </Feedback>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         ) : (
           <section className="ember-panel results-panel devs-panel">

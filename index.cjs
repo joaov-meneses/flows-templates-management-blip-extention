@@ -31,6 +31,11 @@ const {
   getPluginConflicts,
   replicatePlugins,
 } = require("./server/pluginService.cjs");
+const {
+  InputError: BotInputError,
+  cloneBot,
+  identifyBot,
+} = require("./server/botCloneService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -217,6 +222,24 @@ app.post("/api/plugins/replicate", async (req, res, next) => {
   }
 });
 
+app.post("/api/bots/clone", async (req, res, next) => {
+  try {
+    const result = await cloneBot(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/bots/identity", async (req, res, next) => {
+  try {
+    const result = await identifyBot(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 function getRequestOrigin(req) {
   const forwardedProtocol = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const protocol = forwardedProtocol || req.protocol || "http";
@@ -314,7 +337,8 @@ app.use((error, _req, res, _next) => {
   const statusCode =
     error instanceof InputError ||
     error instanceof FlowInputError ||
-    error instanceof PluginInputError
+    error instanceof PluginInputError ||
+    error instanceof BotInputError
       ? error.statusCode
       : error.statusCode || 500;
 
