@@ -556,6 +556,31 @@
 .bot-identity-hint strong {
   color: var(--blip-content);
 }
+.bot-identity-hint-error {
+  color: var(--blip-danger);
+}
+.bot-clone-router-field input.invalid {
+  border-color: var(--blip-danger);
+}
+.bot-clone-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.bot-clone-option-group {
+  margin-top: 10px;
+}
+.bot-clone-option-group-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--blip-content-soft);
+  margin-bottom: 6px;
+}
 .bot-clone-options {
   margin-top: 8px;
   gap: 10px 16px;

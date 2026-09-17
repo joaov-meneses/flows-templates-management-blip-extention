@@ -57,7 +57,16 @@ async function postCommand(routerKey, command) {
   }
 
   if (!response.ok) {
-    throw new Error(`Erro HTTP ${response.status}: ${JSON.stringify(responseBody, null, 2)}`);
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Bot key inválida ou sem permissão. Confira se copiou a key correta.");
+    }
+
+    const description = responseBody?.reason?.description || responseBody?.description;
+    throw new Error(
+      description
+        ? `A Blip recusou o comando: ${description}`
+        : `Erro HTTP ${response.status} ao falar com a Blip.`,
+    );
   }
 
   return responseBody;

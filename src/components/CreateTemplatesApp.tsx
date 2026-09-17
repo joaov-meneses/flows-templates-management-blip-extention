@@ -117,16 +117,43 @@ const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
   configVariables: false,
   priorityRules: false,
 };
-const BOT_CLONE_OPTION_FIELDS: Array<{ key: keyof BotCloneOptions; label: string }> = [
-  { key: "flow", label: "Fluxo" },
-  { key: "queues", label: "Filas" },
-  { key: "attendanceRules", label: "Regras de atendimento" },
-  { key: "attendants", label: "Atendentes" },
-  { key: "quickReplies", label: "Respostas prontas" },
-  { key: "tags", label: "Tags" },
-  { key: "configVariables", label: "Variáveis de configuração" },
-  { key: "priorityRules", label: "Regras de priorização" },
+const BOT_CLONE_OPTION_GROUPS: Array<{
+  group: string;
+  fields: Array<{ key: keyof BotCloneOptions; label: string }>;
+}> = [
+  {
+    group: "Builder",
+    fields: [
+      { key: "flow", label: "Fluxo" },
+      { key: "configVariables", label: "Variáveis de configuração" },
+    ],
+  },
+  {
+    group: "Desk",
+    fields: [
+      { key: "queues", label: "Filas" },
+      { key: "attendanceRules", label: "Regras de atendimento" },
+      { key: "priorityRules", label: "Regras de priorização" },
+      { key: "attendants", label: "Atendentes" },
+      { key: "quickReplies", label: "Respostas prontas" },
+      { key: "tags", label: "Tags" },
+    ],
+  },
 ];
+const BOT_CLONE_OPTION_KEYS = BOT_CLONE_OPTION_GROUPS.flatMap((group) =>
+  group.fields.map((field) => field.key),
+);
+// Regras de atendimento e de priorização espelham o destino: itens que só
+// existem lá são removidos. Isso justifica pedir confirmação antes de rodar.
+const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
+  "attendanceRules",
+  "priorityRules",
+];
+type BotIdentityLookup = {
+  status: "idle" | "loading" | "success" | "error";
+  identity: string;
+};
+const IDLE_BOT_IDENTITY: BotIdentityLookup = { status: "idle", identity: "" };
 const PORTAL_COMMAND_DESTINATION = "BlipService";
 const COMMAND_DESTINATIONS: CommandDestination[] = ["BlipService", "MessagingHubService"];
 const DEV_COMMAND_METHODS = Object.values(COMMAND_METHODS) as CommandMethod[];
@@ -527,12 +554,8 @@ function describeBotCloneStep(step: BotCloneStep) {
   }
 }
 async function lookupBotIdentity(routerKey: string) {
-  try {
-    const data = await postJson<{ identity: string }>("/api/bots/identity", { routerKey });
-    return data.identity || "";
-  } catch {
-    return "";
-  }
+  const data = await postJson<{ identity: string }>("/api/bots/identity", { routerKey });
+  return data.identity || "";
 }
 
 export default function CreateTemplatesApp() {
@@ -632,8 +655,10 @@ export default function CreateTemplatesApp() {
   const [pluginActionId, setPluginActionId] = useState("");
   const [botSourceRouterKey, setBotSourceRouterKey] = useState("");
   const [botTargetRouterKey, setBotTargetRouterKey] = useState("");
-  const [botSourceIdentity, setBotSourceIdentity] = useState("");
-  const [botTargetIdentity, setBotTargetIdentity] = useState("");
+  const [botSourceIdentity, setBotSourceIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
+  const [botTargetIdentity, setBotTargetIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
+  const [botSourceKeyInvalid, setBotSourceKeyInvalid] = useState(false);
+  const [botTargetKeyInvalid, setBotTargetKeyInvalid] = useState(false);
   const [botCloneOptions, setBotCloneOptions] =
     useState<BotCloneOptions>(DEFAULT_BOT_CLONE_OPTIONS);
   const [isCloningBot, setIsCloningBot] = useState(false);
@@ -2618,14 +2643,24 @@ export default function CreateTemplatesApp() {
 
   useEffect(() => {
     const routerKey = botSourceRouterKey.trim();
-    setBotSourceIdentity("");
-    if (!routerKey) return;
+    if (!routerKey) {
+      setBotSourceIdentity(IDLE_BOT_IDENTITY);
+      return;
+    }
 
     let cancelled = false;
+    setBotSourceIdentity({ status: "loading", identity: "" });
     const timeoutId = window.setTimeout(() => {
-      void lookupBotIdentity(routerKey).then((identity) => {
-        if (!cancelled) setBotSourceIdentity(identity);
-      });
+      lookupBotIdentity(routerKey)
+        .then((identity) => {
+          if (cancelled) return;
+          setBotSourceIdentity(
+            identity ? { status: "success", identity } : { status: "error", identity: "" },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setBotSourceIdentity({ status: "error", identity: "" });
+        });
     }, 300);
 
     return () => {
@@ -2636,14 +2671,24 @@ export default function CreateTemplatesApp() {
 
   useEffect(() => {
     const routerKey = botTargetRouterKey.trim();
-    setBotTargetIdentity("");
-    if (!routerKey) return;
+    if (!routerKey) {
+      setBotTargetIdentity(IDLE_BOT_IDENTITY);
+      return;
+    }
 
     let cancelled = false;
+    setBotTargetIdentity({ status: "loading", identity: "" });
     const timeoutId = window.setTimeout(() => {
-      void lookupBotIdentity(routerKey).then((identity) => {
-        if (!cancelled) setBotTargetIdentity(identity);
-      });
+      lookupBotIdentity(routerKey)
+        .then((identity) => {
+          if (cancelled) return;
+          setBotTargetIdentity(
+            identity ? { status: "success", identity } : { status: "error", identity: "" },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setBotTargetIdentity({ status: "error", identity: "" });
+        });
     }, 300);
 
     return () => {
@@ -2682,6 +2727,9 @@ export default function CreateTemplatesApp() {
     const sourceKey = botSourceRouterKey.trim();
     const targetKey = botTargetRouterKey.trim();
 
+    setBotSourceKeyInvalid(!sourceKey);
+    setBotTargetKeyInvalid(!targetKey);
+
     if (!sourceKey) {
       setError("Informe a bot key de origem.");
       return;
@@ -2692,9 +2740,23 @@ export default function CreateTemplatesApp() {
       return;
     }
 
-    if (Object.values(botCloneOptions).every((selected) => !selected)) {
+    const selectedKeys = BOT_CLONE_OPTION_KEYS.filter((key) => botCloneOptions[key]);
+
+    if (selectedKeys.length === 0) {
       setError("Selecione pelo menos um item para clonar.");
       return;
+    }
+
+    const hasDestructiveStep = selectedKeys.some((key) => BOT_CLONE_DESTRUCTIVE_KEYS.includes(key));
+
+    if (hasDestructiveStep) {
+      const confirmed = await confirmFlowAction(
+        "Confirmar clonagem de bot",
+        "Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só no bot de destino serão <b>removidos</b>. Deseja continuar?",
+        "Clonar mesmo assim",
+      );
+
+      if (!confirmed) return;
     }
 
     setIsCloningBot(true);
@@ -3684,9 +3746,8 @@ export default function CreateTemplatesApp() {
               <div>
                 <h2>Clonar Bot</h2>
                 <p>
-                  Copia fluxo, filas, regras, atendentes, tags, respostas prontas e variáveis de um
-                  builder para outro, usando a bot key de cada um — funciona mesmo que um dos dois
-                  não apareça na sua lista de routers do Portal.
+                  Copia configuração de um bot BLiP para outro, usando a bot key de cada um — não
+                  precisa estar na sua lista de routers do Portal.
                 </p>
               </div>
             </div>
@@ -3699,13 +3760,29 @@ export default function CreateTemplatesApp() {
                     <input
                       id="botSourceRouterKey"
                       value={botSourceRouterKey}
-                      onChange={(event) => setBotSourceRouterKey(event.target.value)}
+                      onChange={(event) => {
+                        setBotSourceRouterKey(event.target.value);
+                        if (botSourceKeyInvalid) {
+                          setBotSourceKeyInvalid(false);
+                          setError("");
+                        }
+                      }}
                       placeholder="Key ..."
+                      aria-invalid={botSourceKeyInvalid || undefined}
+                      className={botSourceKeyInvalid ? "invalid" : undefined}
                     />
                   </label>
-                  {botSourceIdentity && (
+                  {botSourceIdentity.status === "loading" && (
+                    <p className="bot-identity-hint">Verificando...</p>
+                  )}
+                  {botSourceIdentity.status === "success" && (
                     <p className="bot-identity-hint">
-                      Id: <strong>{botSourceIdentity}</strong>
+                      Id: <strong>{botSourceIdentity.identity}</strong>
+                    </p>
+                  )}
+                  {botSourceIdentity.status === "error" && (
+                    <p className="bot-identity-hint bot-identity-hint-error">
+                      Não foi possível verificar essa key.
                     </p>
                   )}
                 </div>
@@ -3715,47 +3792,101 @@ export default function CreateTemplatesApp() {
                     <input
                       id="botTargetRouterKey"
                       value={botTargetRouterKey}
-                      onChange={(event) => setBotTargetRouterKey(event.target.value)}
+                      onChange={(event) => {
+                        setBotTargetRouterKey(event.target.value);
+                        if (botTargetKeyInvalid) {
+                          setBotTargetKeyInvalid(false);
+                          setError("");
+                        }
+                      }}
                       placeholder="Key ..."
+                      aria-invalid={botTargetKeyInvalid || undefined}
+                      className={botTargetKeyInvalid ? "invalid" : undefined}
                     />
                   </label>
-                  {botTargetIdentity && (
+                  {botTargetIdentity.status === "loading" && (
+                    <p className="bot-identity-hint">Verificando...</p>
+                  )}
+                  {botTargetIdentity.status === "success" && (
                     <p className="bot-identity-hint">
-                      Id: <strong>{botTargetIdentity}</strong>
+                      Id: <strong>{botTargetIdentity.identity}</strong>
+                    </p>
+                  )}
+                  {botTargetIdentity.status === "error" && (
+                    <p className="bot-identity-hint bot-identity-hint-error">
+                      Não foi possível verificar essa key.
                     </p>
                   )}
                 </div>
               </div>
 
               <div className="form-group">
-                <h3>O que clonar?</h3>
-                <div className="action-grid bot-clone-options">
-                  {BOT_CLONE_OPTION_FIELDS.map(({ key, label }) => (
-                    <label key={key} className="bot-clone-option">
-                      <input
-                        type="checkbox"
-                        checked={botCloneOptions[key]}
-                        onChange={(event) =>
-                          setBotCloneOptions((current) => ({
-                            ...current,
-                            [key]: event.target.checked,
-                          }))
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
+                <div className="bot-clone-options-header">
+                  <h3>O que clonar?</h3>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
+                      setBotCloneOptions(
+                        Object.fromEntries(
+                          BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
+                        ) as BotCloneOptions,
+                      );
+                    }}
+                  >
+                    {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
+                      <>
+                        <Square size={16} aria-hidden="true" />
+                        Limpar seleção
+                      </>
+                    ) : (
+                      <>
+                        <CheckSquare size={16} aria-hidden="true" />
+                        Selecionar tudo
+                      </>
+                    )}
+                  </Button>
                 </div>
+                {BOT_CLONE_OPTION_GROUPS.map(({ group, fields }) => (
+                  <div key={group} className="bot-clone-option-group">
+                    <span className="bot-clone-option-group-label">{group}</span>
+                    <div className="action-grid bot-clone-options">
+                      {fields.map(({ key, label }) => (
+                        <label key={key} className="bot-clone-option">
+                          <input
+                            type="checkbox"
+                            checked={botCloneOptions[key]}
+                            onChange={(event) =>
+                              setBotCloneOptions((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <Button type="submit" loading={isCloningBot}>
+              <Button
+                type="submit"
+                loading={
+                  isCloningBot ||
+                  (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
+                }
+              >
                 <CopyPlus size={18} aria-hidden="true" />
                 Clonar bot
               </Button>
             </form>
 
             {botCloneResult && (
-              <div className="bot-clone-results">
+              <div className="bot-clone-results" aria-live="polite">
                 {botCloneResult.steps.slice(0, visibleBotStepCount).map((step) => (
                   <Feedback
                     key={step.key}
