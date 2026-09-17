@@ -10,6 +10,7 @@ import {
   Eye,
   ExternalLink,
   FileJson,
+  Headset,
   KeyRound,
   LoaderCircle,
   MessageSquareText,
@@ -19,10 +20,14 @@ import {
   Plus,
   Search,
   Send,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
   Square,
   Sun,
   Terminal,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { useIframeAutoHeight } from "../hooks/useIframeAutoHeight";
@@ -119,10 +124,12 @@ const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
 };
 const BOT_CLONE_OPTION_GROUPS: Array<{
   group: string;
+  icon: typeof Workflow;
   fields: Array<{ key: keyof BotCloneOptions; label: string }>;
 }> = [
   {
     group: "Builder",
+    icon: Workflow,
     fields: [
       { key: "flow", label: "Fluxo" },
       { key: "configVariables", label: "Variáveis de configuração" },
@@ -130,6 +137,7 @@ const BOT_CLONE_OPTION_GROUPS: Array<{
   },
   {
     group: "Desk",
+    icon: Headset,
     fields: [
       { key: "queues", label: "Filas" },
       { key: "attendanceRules", label: "Regras de atendimento" },
@@ -556,6 +564,34 @@ function describeBotCloneStep(step: BotCloneStep) {
 async function lookupBotIdentity(routerKey: string) {
   const data = await postJson<{ identity: string }>("/api/bots/identity", { routerKey });
   return data.identity || "";
+}
+function BotIdentityHint({ lookup }: { lookup: BotIdentityLookup }) {
+  if (lookup.status === "idle") return null;
+
+  if (lookup.status === "loading") {
+    return (
+      <p className="bot-identity-hint bot-identity-hint-loading">
+        <LoaderCircle className="spin" size={13} aria-hidden="true" />
+        Verificando...
+      </p>
+    );
+  }
+
+  if (lookup.status === "success") {
+    return (
+      <p className="bot-identity-hint bot-identity-hint-success">
+        <ShieldCheck size={13} aria-hidden="true" />
+        Id: <strong>{lookup.identity}</strong>
+      </p>
+    );
+  }
+
+  return (
+    <p className="bot-identity-hint bot-identity-hint-error">
+      <ShieldAlert size={13} aria-hidden="true" />
+      Não foi possível verificar essa key.
+    </p>
+  );
 }
 
 export default function CreateTemplatesApp() {
@@ -3772,19 +3808,7 @@ export default function CreateTemplatesApp() {
                       className={botSourceKeyInvalid ? "invalid" : undefined}
                     />
                   </label>
-                  {botSourceIdentity.status === "loading" && (
-                    <p className="bot-identity-hint">Verificando...</p>
-                  )}
-                  {botSourceIdentity.status === "success" && (
-                    <p className="bot-identity-hint">
-                      Id: <strong>{botSourceIdentity.identity}</strong>
-                    </p>
-                  )}
-                  {botSourceIdentity.status === "error" && (
-                    <p className="bot-identity-hint bot-identity-hint-error">
-                      Não foi possível verificar essa key.
-                    </p>
-                  )}
+                  <BotIdentityHint lookup={botSourceIdentity} />
                 </div>
                 <div className="bot-clone-router-field">
                   <label className="blip-native-field" htmlFor="botTargetRouterKey">
@@ -3804,19 +3828,7 @@ export default function CreateTemplatesApp() {
                       className={botTargetKeyInvalid ? "invalid" : undefined}
                     />
                   </label>
-                  {botTargetIdentity.status === "loading" && (
-                    <p className="bot-identity-hint">Verificando...</p>
-                  )}
-                  {botTargetIdentity.status === "success" && (
-                    <p className="bot-identity-hint">
-                      Id: <strong>{botTargetIdentity.identity}</strong>
-                    </p>
-                  )}
-                  {botTargetIdentity.status === "error" && (
-                    <p className="bot-identity-hint bot-identity-hint-error">
-                      Não foi possível verificar essa key.
-                    </p>
-                  )}
+                  <BotIdentityHint lookup={botTargetIdentity} />
                 </div>
               </div>
 
@@ -3849,9 +3861,12 @@ export default function CreateTemplatesApp() {
                     )}
                   </Button>
                 </div>
-                {BOT_CLONE_OPTION_GROUPS.map(({ group, fields }) => (
+                {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
                   <div key={group} className="bot-clone-option-group">
-                    <span className="bot-clone-option-group-label">{group}</span>
+                    <span className="bot-clone-option-group-label">
+                      <GroupIcon size={14} aria-hidden="true" />
+                      {group}
+                    </span>
                     <div className="action-grid bot-clone-options">
                       {fields.map(({ key, label }) => (
                         <label key={key} className="bot-clone-option">
@@ -3875,6 +3890,7 @@ export default function CreateTemplatesApp() {
 
               <Button
                 type="submit"
+                className="bot-clone-submit"
                 loading={
                   isCloningBot ||
                   (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
@@ -3886,22 +3902,32 @@ export default function CreateTemplatesApp() {
             </form>
 
             {botCloneResult && (
-              <div className="bot-clone-results" aria-live="polite">
-                {botCloneResult.steps.slice(0, visibleBotStepCount).map((step) => (
-                  <Feedback
-                    key={step.key}
-                    tone={
-                      step.status === "success"
-                        ? "success"
-                        : step.status === "partial"
-                          ? "warning"
-                          : "danger"
-                    }
-                    title={step.label}
-                  >
-                    {describeBotCloneStep(step)}
-                  </Feedback>
-                ))}
+              <div className="bot-clone-result-section">
+                <h3>Resultado</h3>
+                {visibleBotStepCount >= botCloneResult.steps.length &&
+                  botCloneResult.totals.failed === 0 && (
+                    <p className="bot-clone-all-clear">
+                      <Sparkles size={16} aria-hidden="true" />
+                      Tudo certo — nenhuma etapa com erro.
+                    </p>
+                  )}
+                <div className="bot-clone-results" aria-live="polite">
+                  {botCloneResult.steps.slice(0, visibleBotStepCount).map((step) => (
+                    <Feedback
+                      key={step.key}
+                      tone={
+                        step.status === "success"
+                          ? "success"
+                          : step.status === "partial"
+                            ? "warning"
+                            : "danger"
+                      }
+                      title={step.label}
+                    >
+                      {describeBotCloneStep(step)}
+                    </Feedback>
+                  ))}
+                </div>
               </div>
             )}
           </section>

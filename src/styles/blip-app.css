@@ -535,29 +535,59 @@
 }
 .bot-clone-form {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   max-width: 640px;
+}
+.bot-clone-submit {
+  margin-top: 8px;
+  width: fit-content;
 }
 .bot-clone-routers {
   display: grid;
   grid-template-columns: repeat(2, minmax(200px, 1fr));
-  gap: 8px;
+  gap: 12px;
   align-items: start;
 }
 .bot-clone-router-field {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 .bot-identity-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
   margin: 0;
-  font-size: 0.85rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--blip-content-soft);
+  animation: bot-identity-in 0.2s ease-out;
 }
 .bot-identity-hint strong {
-  color: var(--blip-content);
+  font-weight: 700;
+}
+.bot-identity-hint-success {
+  color: var(--blip-success);
+  background: color-mix(in srgb, var(--blip-success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--blip-success) 28%, transparent);
 }
 .bot-identity-hint-error {
   color: var(--blip-danger);
+  background: color-mix(in srgb, var(--blip-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--blip-danger) 28%, transparent);
+}
+@keyframes bot-identity-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .bot-clone-router-field input.invalid {
   border-color: var(--blip-danger);
@@ -567,22 +597,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .bot-clone-option-group {
-  margin-top: 10px;
+  margin-top: 14px;
 }
 .bot-clone-option-group-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--blip-content-soft);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .bot-clone-options {
-  margin-top: 8px;
+  margin-top: 0;
   gap: 10px 16px;
 }
 .bot-clone-option {
@@ -591,10 +623,24 @@
   gap: 8px;
   font-weight: 500;
 }
+.bot-clone-result-section {
+  margin-top: 28px;
+}
+.bot-clone-result-section h3 {
+  margin-bottom: 8px;
+}
+.bot-clone-all-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--blip-success);
+}
 .bot-clone-results {
   display: grid;
   gap: 8px;
-  margin-top: 16px;
 }
 .bot-clone-results .ember-alert {
   animation: bot-clone-step-in 0.25s ease-out;
