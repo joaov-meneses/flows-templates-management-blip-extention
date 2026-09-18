@@ -58,7 +58,7 @@ async function postCommand(routerKey, command) {
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error("Bot key inválida ou sem permissão. Confira se copiou a key correta.");
+      throw new Error("Builder key inválida ou sem permissão. Confira se copiou a key correta.");
     }
 
     const description = responseBody?.reason?.description || responseBody?.description;
@@ -434,7 +434,7 @@ async function deskGetAll(routerKey, uri) {
 async function getBotIdentity(routerKey) {
   const data = await deskRequest(routerKey, { method: "get", uri: "/replies" });
   if (!data || !data.to || typeof data.to !== "string") {
-    throw new Error("Não foi possível identificar o bot (confira a router key).");
+    throw new Error("Não foi possível identificar o builder (confira a router key).");
   }
   return `${data.to.split("/")[0].split("@")[0]}@msging.net`;
 }
@@ -445,7 +445,7 @@ function buildQueueMap(queues, label) {
     const key = normalizeName(queue.name);
     if (map.has(key)) {
       throw new Error(
-        `o bot de ${label} tem duas filas que se confundem: "${map.get(key).name}" e "${queue.name}"`,
+        `o builder de ${label} tem duas filas que se confundem: "${map.get(key).name}" e "${queue.name}"`,
       );
     }
     map.set(key, queue);
@@ -577,7 +577,7 @@ async function cloneAttendanceRules(sourceRouterKey, targetRouterKey) {
   const ownerSource = await getBotIdentity(sourceRouterKey);
   const ownerTarget = await getBotIdentity(targetRouterKey);
   if (ownerSource === ownerTarget) {
-    throw new Error("origem e destino são o mesmo bot - clonagem cancelada.");
+    throw new Error("origem e destino são o mesmo builder - clonagem cancelada.");
   }
 
   const sourceRules = await deskGetAll(sourceRouterKey, "/rules");
@@ -706,7 +706,7 @@ async function clonePriorityRules(sourceRouterKey, targetRouterKey) {
   const ownerSource = await getBotIdentity(sourceRouterKey);
   const ownerTarget = await getBotIdentity(targetRouterKey);
   if (ownerSource === ownerTarget) {
-    throw new Error("origem e destino são o mesmo bot - clonagem cancelada.");
+    throw new Error("origem e destino são o mesmo builder - clonagem cancelada.");
   }
 
   const sourceQueues = await deskGetAll(sourceRouterKey, "/attendance-queues");
