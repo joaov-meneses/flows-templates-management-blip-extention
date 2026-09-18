@@ -4,9 +4,11 @@ import {
   ArrowDownAZ,
   ArrowDownZA,
   Bot,
+  Check,
   CheckSquare,
   Clipboard,
   CopyPlus,
+  Eraser,
   Eye,
   ExternalLink,
   FileJson,
@@ -402,21 +404,33 @@ function extractCommandResource(response: unknown) {
 
   return response;
 }
-function extractRouterApplications(response: unknown): PortalApplicationAccount[] {
+function extractPortalApplications(
+  response: unknown,
+  options: { templateFilter?: "master" | "non-master" } = {},
+): PortalApplicationAccount[] {
   const resource = extractCommandResource(response);
   if (!isRecord(resource) || !Array.isArray(resource.items)) return [];
 
   return resource.items
     .filter((item): item is PortalApplicationAccount => {
       if (!isRecord(item)) return false;
+      const matchesTemplateFilter =
+        !options.templateFilter ||
+        (options.templateFilter === "master"
+          ? item.template === "master"
+          : item.template !== "master");
+
       return (
         item.hasPermission === true &&
-        item.template === "master" &&
+        matchesTemplateFilter &&
         typeof item.shortName === "string" &&
         typeof item.name === "string"
       );
     })
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+function extractRouterApplications(response: unknown): PortalApplicationAccount[] {
+  return extractPortalApplications(response, { templateFilter: "master" });
 }
 function extractRouterKey(response: unknown, requestedShortName: string): ResolvedRouterKey {
   const resource = extractCommandResource(response);
@@ -565,7 +579,17 @@ async function lookupBotIdentity(routerKey: string) {
   const data = await postJson<{ identity: string }>("/api/bots/identity", { routerKey });
   return data.identity || "";
 }
-function BotIdentityHint({ lookup }: { lookup: BotIdentityLookup }) {
+function BotIdentityHint({
+  lookup,
+  onCopyId,
+  onCopyKey,
+}: {
+  lookup: BotIdentityLookup;
+  onCopyId?: (identity: string) => void;
+  onCopyKey?: () => void;
+}) {
+  const [copiedField, setCopiedField] = useState<"id" | "key" | null>(null);
+
   if (lookup.status === "idle") return null;
 
   if (lookup.status === "loading") {
@@ -578,11 +602,53 @@ function BotIdentityHint({ lookup }: { lookup: BotIdentityLookup }) {
   }
 
   if (lookup.status === "success") {
+    const flashCopied = (field: "id" | "key") => {
+      setCopiedField(field);
+      window.setTimeout(
+        () => setCopiedField((current) => (current === field ? null : current)),
+        1600,
+      );
+    };
+
     return (
-      <p className="bot-identity-hint bot-identity-hint-success">
-        <ShieldCheck size={13} aria-hidden="true" />
-        Id: <strong>{lookup.identity}</strong>
-      </p>
+      <span className="bot-identity-row">
+        <button
+          type="button"
+          className={`bot-identity-hint bot-identity-hint-success bot-identity-hint-button${
+            copiedField === "id" ? " bot-identity-copied" : ""
+          }`}
+          onClick={() => {
+            onCopyId?.(lookup.identity);
+            flashCopied("id");
+          }}
+          title="Copiar Id do builder"
+        >
+          {copiedField === "id" ? (
+            <Check size={13} aria-hidden="true" />
+          ) : (
+            <ShieldCheck size={13} aria-hidden="true" />
+          )}
+          Id: <strong>{lookup.identity}</strong>
+        </button>
+        {onCopyKey && (
+          <button
+            type="button"
+            className={`bot-identity-copy${copiedField === "key" ? " bot-identity-copied" : ""}`}
+            onClick={() => {
+              onCopyKey();
+              flashCopied("key");
+            }}
+            aria-label="Copiar builder key"
+            title="Copiar builder key"
+          >
+            {copiedField === "key" ? (
+              <Check size={15} aria-hidden="true" />
+            ) : (
+              <KeyRound size={15} aria-hidden="true" />
+            )}
+          </button>
+        )}
+      </span>
     );
   }
 
@@ -695,6 +761,17 @@ export default function CreateTemplatesApp() {
   const [botTargetIdentity, setBotTargetIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
   const [botSourceKeyInvalid, setBotSourceKeyInvalid] = useState(false);
   const [botTargetKeyInvalid, setBotTargetKeyInvalid] = useState(false);
+  const [botApplications, setBotApplications] = useState<PortalApplicationAccount[]>([]);
+  const [isLoadingBotApplications, setIsLoadingBotApplications] = useState(false);
+  const [botApplicationsError, setBotApplicationsError] = useState("");
+  const [botSourceShortName, setBotSourceShortName] = useState("");
+  const [botTargetShortName, setBotTargetShortName] = useState("");
+  const [botSourceSearch, setBotSourceSearch] = useState("");
+  const [botTargetSearch, setBotTargetSearch] = useState("");
+  const [isBotSourcePickerOpen, setIsBotSourcePickerOpen] = useState(false);
+  const [isBotTargetPickerOpen, setIsBotTargetPickerOpen] = useState(false);
+  const [isResolvingBotSourceKey, setIsResolvingBotSourceKey] = useState(false);
+  const [isResolvingBotTargetKey, setIsResolvingBotTargetKey] = useState(false);
   const [botCloneOptions, setBotCloneOptions] =
     useState<BotCloneOptions>(DEFAULT_BOT_CLONE_OPTIONS);
   const [isCloningBot, setIsCloningBot] = useState(false);
@@ -926,6 +1003,34 @@ export default function CreateTemplatesApp() {
     );
   }, [routerApplications, routerDirectorySearch]);
 
+  const filteredBotSourceApplications = useMemo(() => {
+    const q = botSourceSearch.trim().toLowerCase();
+
+    return botApplications.filter((application) => {
+      if (application.shortName === botTargetShortName) return false;
+      if (!q) return true;
+
+      return (
+        application.name.toLowerCase().includes(q) ||
+        application.shortName.toLowerCase().includes(q)
+      );
+    });
+  }, [botApplications, botSourceSearch, botTargetShortName]);
+
+  const filteredBotTargetApplications = useMemo(() => {
+    const q = botTargetSearch.trim().toLowerCase();
+
+    return botApplications.filter((application) => {
+      if (application.shortName === botSourceShortName) return false;
+      if (!q) return true;
+
+      return (
+        application.name.toLowerCase().includes(q) ||
+        application.shortName.toLowerCase().includes(q)
+      );
+    });
+  }, [botApplications, botTargetSearch, botSourceShortName]);
+
   const sourceRouterApplication = useMemo(() => {
     const selectedShortName = sourceRouterShortName.trim();
     if (!selectedShortName) return null;
@@ -970,9 +1075,9 @@ export default function CreateTemplatesApp() {
             }
           : visibleActiveView === "bots"
             ? {
-                title: "Bots",
+                title: "Clone Builder",
                 description:
-                  "Clonagem de fluxo, filas, regras, atendentes, tags, respostas prontas e variáveis entre bots",
+                  "Clonagem de fluxo, filas, regras, atendentes, tags, respostas prontas e variáveis entre builders",
               }
             : devsTab === "plugins"
               ? {
@@ -1016,6 +1121,100 @@ export default function CreateTemplatesApp() {
       setRouterApplicationsError(message);
     } finally {
       setIsLoadingRouterApplications(false);
+    }
+  }
+
+  // Bots "master" são routers; o que queremos clonar aqui são os builders
+  // (tudo que não é master).
+  async function loadBotApplications() {
+    if (!isEmbedded) return;
+
+    setIsLoadingBotApplications(true);
+    setBotApplicationsError("");
+
+    const command = {
+      method: COMMAND_METHODS.GET,
+      to: DEFAULT_DEV_COMMAND_TO,
+      uri: PORTAL_APPLICATIONS_URI,
+      id: createCommandId(),
+    } as const;
+
+    try {
+      const response = await sendBlipCommand(command, {
+        destination: PORTAL_COMMAND_DESTINATION,
+        timeout: 30000,
+      });
+
+      setBotApplications(extractPortalApplications(response, { templateFilter: "non-master" }));
+    } catch (caughtError) {
+      setBotApplications([]);
+      setBotApplicationsError(getErrorMessage(caughtError, "Erro ao carregar builders."));
+    } finally {
+      setIsLoadingBotApplications(false);
+    }
+  }
+
+  async function handleSelectBotSourceApplication(application: PortalApplicationAccount) {
+    setBotSourceShortName(application.shortName);
+    setBotSourceSearch(application.name);
+    setIsBotSourcePickerOpen(false);
+    setBotSourceKeyInvalid(false);
+    setIsResolvingBotSourceKey(true);
+    setError("");
+    try {
+      const router = await loadRouterKey(application.shortName);
+
+      setBotSourceRouterKey(router.key);
+    } catch (caughtError) {
+      setBotSourceShortName("");
+      setBotSourceRouterKey("");
+      setError(getErrorMessage(caughtError, "Erro ao carregar a key do builder."));
+    } finally {
+      setIsResolvingBotSourceKey(false);
+    }
+  }
+
+  async function handleSelectBotTargetApplication(application: PortalApplicationAccount) {
+    setBotTargetShortName(application.shortName);
+    setBotTargetSearch(application.name);
+    setIsBotTargetPickerOpen(false);
+    setBotTargetKeyInvalid(false);
+    setIsResolvingBotTargetKey(true);
+    setError("");
+    try {
+      const router = await loadRouterKey(application.shortName);
+
+      setBotTargetRouterKey(router.key);
+    } catch (caughtError) {
+      setBotTargetShortName("");
+      setBotTargetRouterKey("");
+      setError(getErrorMessage(caughtError, "Erro ao carregar a key do builder."));
+    } finally {
+      setIsResolvingBotTargetKey(false);
+    }
+  }
+
+  async function handleCopyBotKey(routerKey: string, label: string) {
+    setError("");
+    try {
+      await copyText(routerKey);
+      setCopyNotice(`Key de "${label}" copiada.`);
+      window.setTimeout(() => setCopyNotice(""), 2400);
+    } catch (caughtError) {
+      setCopyNotice("");
+      setError(getErrorMessage(caughtError, "Erro ao copiar a key."));
+    }
+  }
+
+  async function handleCopyBotId(identity: string, label: string) {
+    setError("");
+    try {
+      await copyText(identity);
+      setCopyNotice(`Id de "${label}" copiado.`);
+      window.setTimeout(() => setCopyNotice(""), 2400);
+    } catch (caughtError) {
+      setCopyNotice("");
+      setError(getErrorMessage(caughtError, "Erro ao copiar o Id."));
     }
   }
 
@@ -2678,6 +2877,14 @@ export default function CreateTemplatesApp() {
   }
 
   useEffect(() => {
+    if (visibleActiveView !== "bots" || !isEmbedded) return;
+    if (botApplications.length > 0 || isLoadingBotApplications) return;
+
+    void loadBotApplications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBotApplications is redefined every render; the guards above already prevent refetching.
+  }, [visibleActiveView, isEmbedded, botApplications.length, isLoadingBotApplications]);
+
+  useEffect(() => {
     const routerKey = botSourceRouterKey.trim();
     if (!routerKey) {
       setBotSourceIdentity(IDLE_BOT_IDENTITY);
@@ -2767,12 +2974,12 @@ export default function CreateTemplatesApp() {
     setBotTargetKeyInvalid(!targetKey);
 
     if (!sourceKey) {
-      setError("Informe a bot key de origem.");
+      setError("Selecione o builder de origem.");
       return;
     }
 
     if (!targetKey) {
-      setError("Informe a bot key de destino.");
+      setError("Selecione o builder de destino.");
       return;
     }
 
@@ -2787,8 +2994,8 @@ export default function CreateTemplatesApp() {
 
     if (hasDestructiveStep) {
       const confirmed = await confirmFlowAction(
-        "Confirmar clonagem de bot",
-        "Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só no bot de destino serão <b>removidos</b>. Deseja continuar?",
+        "Confirmar clonagem de builder",
+        "Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só no builder de destino serão <b>removidos</b>. Deseja continuar?",
         "Clonar mesmo assim",
       );
 
@@ -2813,7 +3020,7 @@ export default function CreateTemplatesApp() {
         view: "bots",
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao clonar bot.");
+      setError(e instanceof Error ? e.message : "Erro ao clonar builder.");
     } finally {
       setIsCloningBot(false);
     }
@@ -3306,7 +3513,7 @@ export default function CreateTemplatesApp() {
             aria-current={visibleActiveView === "bots" ? "page" : undefined}
           >
             <Bot size={18} aria-hidden="true" />
-            Bots
+            Clone Builder
           </button>
           {canAccessDevs && (
             <button
@@ -3780,10 +3987,10 @@ export default function CreateTemplatesApp() {
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>
-                <h2>Clonar Bot</h2>
+                <h2>Clone Builder</h2>
                 <p>
-                  Copia configuração de um bot BLiP para outro, usando a bot key de cada um — não
-                  precisa estar na sua lista de routers do Portal.
+                  Copia configuração de um builder BLiP para outro, usando a builder key de cada um
+                  — não precisa estar na sua lista de routers do Portal.
                 </p>
               </div>
             </div>
@@ -3791,76 +3998,145 @@ export default function CreateTemplatesApp() {
             <form className="bot-clone-form" onSubmit={handleCloneBot}>
               <div className="bot-clone-routers">
                 <div className="bot-clone-router-field">
-                  <label className="blip-native-field" htmlFor="botSourceRouterKey">
-                    Bot Key de Origem
+                  <span className="bot-clone-field-label">Builder de Origem</span>
+                  <div className="bot-clone-combobox">
                     <input
-                      id="botSourceRouterKey"
-                      value={botSourceRouterKey}
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isBotSourcePickerOpen}
+                      aria-autocomplete="list"
+                      aria-invalid={botSourceKeyInvalid || undefined}
+                      className={botSourceKeyInvalid ? "invalid" : undefined}
+                      value={botSourceSearch}
                       onChange={(event) => {
-                        setBotSourceRouterKey(event.target.value);
+                        setBotSourceSearch(event.target.value);
+                        setIsBotSourcePickerOpen(true);
+                        if (botSourceShortName) {
+                          setBotSourceShortName("");
+                          setBotSourceRouterKey("");
+                        }
                         if (botSourceKeyInvalid) {
                           setBotSourceKeyInvalid(false);
                           setError("");
                         }
                       }}
-                      placeholder="Key ..."
-                      aria-invalid={botSourceKeyInvalid || undefined}
-                      className={botSourceKeyInvalid ? "invalid" : undefined}
+                      onFocus={() => setIsBotSourcePickerOpen(true)}
+                      onBlur={() => window.setTimeout(() => setIsBotSourcePickerOpen(false), 150)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setIsBotSourcePickerOpen(false);
+                        if (event.key === "Enter" && filteredBotSourceApplications.length === 1) {
+                          event.preventDefault();
+                          void handleSelectBotSourceApplication(filteredBotSourceApplications[0]);
+                        }
+                      }}
+                      placeholder={
+                        isEmbedded ? "Buscar builder por nome..." : "Não disponível fora do Portal"
+                      }
+                      disabled={!isEmbedded || isResolvingBotSourceKey}
                     />
-                  </label>
-                  <BotIdentityHint lookup={botSourceIdentity} />
+                    {isBotSourcePickerOpen && isEmbedded && (
+                      <ul className="bot-clone-combobox-list" role="listbox">
+                        {isLoadingBotApplications ? (
+                          <li className="bot-clone-combobox-empty">Carregando builders...</li>
+                        ) : botApplicationsError ? (
+                          <li className="bot-clone-combobox-empty">{botApplicationsError}</li>
+                        ) : filteredBotSourceApplications.length === 0 ? (
+                          <li className="bot-clone-combobox-empty">Nenhum builder encontrado.</li>
+                        ) : (
+                          filteredBotSourceApplications.map((application) => (
+                            <li key={application.shortName}>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => void handleSelectBotSourceApplication(application)}
+                              >
+                                {application.name}
+                                <span>({application.shortName})</span>
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                  <BotIdentityHint
+                    lookup={botSourceIdentity}
+                    onCopyId={(identity) => void handleCopyBotId(identity, "origem")}
+                    onCopyKey={() => void handleCopyBotKey(botSourceRouterKey, "origem")}
+                  />
                 </div>
                 <div className="bot-clone-router-field">
-                  <label className="blip-native-field" htmlFor="botTargetRouterKey">
-                    Bot Key de Destino
+                  <span className="bot-clone-field-label">Builder de Destino</span>
+                  <div className="bot-clone-combobox">
                     <input
-                      id="botTargetRouterKey"
-                      value={botTargetRouterKey}
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isBotTargetPickerOpen}
+                      aria-autocomplete="list"
+                      aria-invalid={botTargetKeyInvalid || undefined}
+                      className={botTargetKeyInvalid ? "invalid" : undefined}
+                      value={botTargetSearch}
                       onChange={(event) => {
-                        setBotTargetRouterKey(event.target.value);
+                        setBotTargetSearch(event.target.value);
+                        setIsBotTargetPickerOpen(true);
+                        if (botTargetShortName) {
+                          setBotTargetShortName("");
+                          setBotTargetRouterKey("");
+                        }
                         if (botTargetKeyInvalid) {
                           setBotTargetKeyInvalid(false);
                           setError("");
                         }
                       }}
-                      placeholder="Key ..."
-                      aria-invalid={botTargetKeyInvalid || undefined}
-                      className={botTargetKeyInvalid ? "invalid" : undefined}
+                      onFocus={() => setIsBotTargetPickerOpen(true)}
+                      onBlur={() => window.setTimeout(() => setIsBotTargetPickerOpen(false), 150)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setIsBotTargetPickerOpen(false);
+                        if (event.key === "Enter" && filteredBotTargetApplications.length === 1) {
+                          event.preventDefault();
+                          void handleSelectBotTargetApplication(filteredBotTargetApplications[0]);
+                        }
+                      }}
+                      placeholder={
+                        isEmbedded ? "Buscar builder por nome..." : "Não disponível fora do Portal"
+                      }
+                      disabled={!isEmbedded || isResolvingBotTargetKey}
                     />
-                  </label>
-                  <BotIdentityHint lookup={botTargetIdentity} />
+                    {isBotTargetPickerOpen && isEmbedded && (
+                      <ul className="bot-clone-combobox-list" role="listbox">
+                        {isLoadingBotApplications ? (
+                          <li className="bot-clone-combobox-empty">Carregando builders...</li>
+                        ) : botApplicationsError ? (
+                          <li className="bot-clone-combobox-empty">{botApplicationsError}</li>
+                        ) : filteredBotTargetApplications.length === 0 ? (
+                          <li className="bot-clone-combobox-empty">Nenhum builder encontrado.</li>
+                        ) : (
+                          filteredBotTargetApplications.map((application) => (
+                            <li key={application.shortName}>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => void handleSelectBotTargetApplication(application)}
+                              >
+                                {application.name}
+                                <span>({application.shortName})</span>
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                  <BotIdentityHint
+                    lookup={botTargetIdentity}
+                    onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
+                    onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
+                  />
                 </div>
               </div>
 
               <div className="form-group">
-                <div className="bot-clone-options-header">
-                  <h3>O que clonar?</h3>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    type="button"
-                    onClick={() => {
-                      const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
-                      setBotCloneOptions(
-                        Object.fromEntries(
-                          BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
-                        ) as BotCloneOptions,
-                      );
-                    }}
-                  >
-                    {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
-                      <>
-                        <Square size={16} aria-hidden="true" />
-                        Limpar seleção
-                      </>
-                    ) : (
-                      <>
-                        <CheckSquare size={16} aria-hidden="true" />
-                        Selecionar tudo
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <h3>O que clonar?</h3>
                 {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
                   <div key={group} className="bot-clone-option-group">
                     <span className="bot-clone-option-group-label">
@@ -3888,17 +4164,43 @@ export default function CreateTemplatesApp() {
                 ))}
               </div>
 
-              <Button
-                type="submit"
-                className="bot-clone-submit"
-                loading={
-                  isCloningBot ||
-                  (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
-                }
-              >
-                <CopyPlus size={18} aria-hidden="true" />
-                Clonar bot
-              </Button>
+              <div className="bot-clone-actions">
+                <Button
+                  type="submit"
+                  className="bot-clone-submit"
+                  loading={
+                    isCloningBot ||
+                    (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
+                  }
+                >
+                  <CopyPlus size={18} aria-hidden="true" />
+                  Clonar Builder
+                </Button>
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => {
+                    const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
+                    setBotCloneOptions(
+                      Object.fromEntries(
+                        BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
+                      ) as BotCloneOptions,
+                    );
+                  }}
+                >
+                  {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
+                    <>
+                      <Eraser size={16} aria-hidden="true" />
+                      Limpar seleção
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare size={16} aria-hidden="true" />
+                      Selecionar tudo
+                    </>
+                  )}
+                </Button>
+              </div>
             </form>
 
             {botCloneResult && (
