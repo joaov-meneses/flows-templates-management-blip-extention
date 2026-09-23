@@ -36,6 +36,10 @@ const {
   cloneBot,
   identifyBot,
 } = require("./server/botCloneService.cjs");
+const {
+  InputError: RouterDirectoryInputError,
+  getRouterPhoneNumber,
+} = require("./server/routerDirectoryService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -49,6 +53,14 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "create-templates-api",
   });
+});
+
+app.post("/api/routers/whatsapp-number", async (req, res, next) => {
+  try {
+    res.json(await getRouterPhoneNumber(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/templates/search", async (req, res, next) => {
@@ -338,7 +350,8 @@ app.use((error, _req, res, _next) => {
     error instanceof InputError ||
     error instanceof FlowInputError ||
     error instanceof PluginInputError ||
-    error instanceof BotInputError
+    error instanceof BotInputError ||
+    error instanceof RouterDirectoryInputError
       ? error.statusCode
       : error.statusCode || 500;
 

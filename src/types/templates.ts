@@ -342,4 +342,5 @@ export type CurrentApplicationRouter = {
   name?: string;
   imageUri?: string;
   accessKey?: string;
+  tenantId?: string;
 };

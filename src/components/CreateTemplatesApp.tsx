@@ -50,6 +50,14 @@ import { SelectionBar } from "./ui/SelectionBar";
 import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
 import { postJson } from "../lib/api";
+import {
+  getAccessibleApplicationUri,
+  getActiveTenantId,
+  getApplicationListUri,
+  matchesRouterSearch,
+  readWhatsAppPhone,
+  type RouterPhone,
+} from "../lib/routerDirectory";
 
 import type {
   ActiveView,
@@ -173,9 +181,7 @@ const DEV_COMMAND_TYPE_OPTIONS: Array<{ label: string; value: DevCommandType }> 
   { label: "json", value: "application/json" },
 ];
 const DEFAULT_DEV_COMMAND_TO = "postmaster@portal.blip.ai";
-const DEFAULT_DEV_COMMAND_URI = "/tenants/macro/users?$skip=0&$take=9999";
-const PORTAL_APPLICATIONS_URI = "/tenants/macro/applications";
-const ROUTER_ACCESS_COMMAND_ID = "759a6d6e-c787-4eb1-a49a-221f32a1d8aa";
+const DEFAULT_DEV_COMMAND_URI = "";
 const emptyTemplateSearch: SearchResponse = {
   search: { templateName: "", onlyApproved: false },
   total: 0,
@@ -409,7 +415,9 @@ function extractPortalApplications(
   options: { templateFilter?: "master" | "non-master" } = {},
 ): PortalApplicationAccount[] {
   const resource = extractCommandResource(response);
-  if (!isRecord(resource) || !Array.isArray(resource.items)) return [];
+  if (!isRecord(resource) || !Array.isArray(resource.items)) {
+    throw new Error("O Portal retornou uma lista de aplicações inválida.");
+  }
 
   return resource.items
     .filter((item): item is PortalApplicationAccount => {
@@ -466,7 +474,7 @@ async function loadRouterKey(shortName: string) {
     method: COMMAND_METHODS.GET,
     to: DEFAULT_DEV_COMMAND_TO,
     uri: `/applications/${shortName}@msging.net`,
-    id: ROUTER_ACCESS_COMMAND_ID,
+    id: createCommandId(),
   } as const;
   const response = await sendBlipCommand(command, {
     destination: PORTAL_COMMAND_DESTINATION,
@@ -485,12 +493,14 @@ function extractCurrentApplicationRouter(response: unknown): CurrentApplicationR
   const accessKey = typeof resource.accessKey === "string" ? resource.accessKey.trim() : "";
   const name = typeof resource.name === "string" ? resource.name.trim() : "";
   const imageUri = typeof resource.imageUri === "string" ? resource.imageUri.trim() : "";
+  const tenantId = typeof resource.tenantId === "string" ? resource.tenantId.trim() : "";
 
   return {
     shortName: resource.shortName.trim(),
     name: name || undefined,
     imageUri: imageUri || undefined,
     accessKey: accessKey || undefined,
+    tenantId: tenantId || undefined,
   };
 }
 function buildTemplateReplicateSummary(data: TemplateReplicateResponse) {
@@ -715,6 +725,10 @@ export default function CreateTemplatesApp() {
   const [routerApplicationsError, setRouterApplicationsError] = useState("");
   const [routerApplicationSearch, setRouterApplicationSearch] = useState("");
   const [routerDirectorySearch, setRouterDirectorySearch] = useState("");
+  const [routerPhoneNumbers, setRouterPhoneNumbers] = useState<
+    Record<string, RouterPhone | { status: "loading" | "unavailable"; phoneNumber: null }>
+  >({});
+  const routerListRequestId = useRef(0);
   const [isLoadingRouterApplications, setIsLoadingRouterApplications] = useState(false);
   const [routerKeyActionId, setRouterKeyActionId] = useState("");
   const [currentApplicationRouter, setCurrentApplicationRouter] =
@@ -857,6 +871,9 @@ export default function CreateTemplatesApp() {
             "O Portal não informou o router atual. Selecione a origem para continuar.",
           );
         setCurrentApplicationRouter(router);
+        if (router.tenantId) {
+          setDevCommandUri(getAccessibleApplicationUri(getActiveTenantId(router)));
+        }
         if (router?.shortName) {
           setSourceRouterShortName((current) => current || router.shortName);
           setSourceRouterKey((current) => current);
@@ -865,7 +882,7 @@ export default function CreateTemplatesApp() {
           summary: "getApplication carregado.",
           payload: {
             action: "getApplication",
-            response,
+            response: { shortName: router.shortName, tenantId: router.tenantId },
           },
         });
       } catch (caughtError) {
@@ -992,16 +1009,14 @@ export default function CreateTemplatesApp() {
   }, [routerApplicationSearch, routerApplications]);
 
   const filteredDirectoryRouterApplications = useMemo(() => {
-    const q = routerDirectorySearch.trim().toLowerCase();
-    if (!q) return routerApplications;
-
-    return routerApplications.filter(
-      (application) =>
-        application.name.toLowerCase().includes(q) ||
-        application.shortName.toLowerCase().includes(q) ||
-        application.tenantId?.toLowerCase().includes(q),
+    return routerApplications.filter((application) =>
+      matchesRouterSearch(
+        application,
+        routerPhoneNumbers[application.shortName]?.phoneNumber ?? null,
+        routerDirectorySearch,
+      ),
     );
-  }, [routerApplications, routerDirectorySearch]);
+  }, [routerApplications, routerDirectorySearch, routerPhoneNumbers]);
 
   const filteredBotSourceApplications = useMemo(() => {
     const q = botSourceSearch.trim().toLowerCase();
@@ -1045,6 +1060,7 @@ export default function CreateTemplatesApp() {
         shortName: currentApplicationRouter.shortName,
         name: currentApplicationRouter.name || currentApplicationRouter.shortName,
         imageUri: currentApplicationRouter.imageUri,
+        tenantId: currentApplicationRouter.tenantId,
       };
     }
 
@@ -1089,38 +1105,125 @@ export default function CreateTemplatesApp() {
                   description: "Testes de commands no iframe do Portal BLiP",
                 };
 
-  async function loadRouterApplications() {
+  async function getContractApplicationList(tenantId: string) {
+    let roleId: string | undefined;
+    try {
+      const account = await getAccount();
+      if (account.identity) {
+        const roleResponse = await sendBlipCommand({
+          id: createCommandId(),
+          method: COMMAND_METHODS.GET,
+          to: DEFAULT_DEV_COMMAND_TO,
+          uri: `/tenants/${tenantId}/users/${encodeURIComponent(account.identity)}`,
+        }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 });
+        const roleResource = extractCommandResource(roleResponse);
+        if (isRecord(roleResource) && typeof roleResource.roleId === "string") {
+          roleId = roleResource.roleId;
+        }
+      }
+    } catch {
+      // The accessible list also works when the contract role cannot be read.
+    }
+
+    const readList = async (uri: string) => {
+      const response = await sendBlipCommand({
+        id: createCommandId(),
+        method: COMMAND_METHODS.GET,
+        to: DEFAULT_DEV_COMMAND_TO,
+        uri,
+      }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 });
+      extractCommandResource(response);
+      return response;
+    };
+    const uri = getApplicationListUri(tenantId, roleId);
+    try {
+      return await readList(uri);
+    } catch (error) {
+      if (roleId !== "admin") throw error;
+      return readList(getAccessibleApplicationUri(tenantId));
+    }
+  }
+
+  async function loadRouterPhoneNumbers(
+    applications: PortalApplicationAccount[],
+    currentRouter: CurrentApplicationRouter,
+    requestId: number,
+  ) {
+    const ordered = [...applications].sort((a, b) =>
+      Number(b.shortName === currentRouter.shortName) - Number(a.shortName === currentRouter.shortName),
+    );
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < ordered.length && requestId === routerListRequestId.current) {
+        const application = ordered[nextIndex++];
+        let result: RouterPhone | { status: "unavailable"; phoneNumber: null };
+        try {
+          if (application.shortName === currentRouter.shortName) {
+            const response = await sendBlipCommand({
+              id: createCommandId(),
+              method: COMMAND_METHODS.GET,
+              to: "postmaster@configurations.msging.net",
+              uri: "/configuration/gateways",
+            }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 });
+            result = readWhatsAppPhone(extractCommandResource(response));
+          } else {
+            const router = await loadRouterKey(application.shortName);
+            result = await postJson<RouterPhone>("/api/routers/whatsapp-number", {
+              routerKey: router.key,
+              routerShortName: application.shortName,
+            });
+          }
+        } catch {
+          result = { phoneNumber: null, status: "unavailable" };
+        }
+        if (requestId === routerListRequestId.current) {
+          setRouterPhoneNumbers((previous) => ({
+            ...previous,
+            [application.shortName]: result,
+          }));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, ordered.length) }, worker));
+  }
+
+  async function loadRouterApplications(withPhoneNumbers = false) {
     if (!isEmbedded) return;
 
+    const requestId = ++routerListRequestId.current;
     setIsLoadingRouterApplications(true);
     setRouterApplicationsError("");
-
-    const command = {
-      method: COMMAND_METHODS.GET,
-      to: DEFAULT_DEV_COMMAND_TO,
-      uri: PORTAL_APPLICATIONS_URI,
-      id: createCommandId(),
-    } as const;
+    setRouterPhoneNumbers({});
 
     try {
-      const response = await sendBlipCommand(command, {
-        destination: PORTAL_COMMAND_DESTINATION,
-        timeout: 30000,
-      });
-      const applications = extractRouterApplications(response);
+      const currentResponse = await getCurrentApplication();
+      const currentRouter = extractCurrentApplicationRouter(currentResponse);
+      const tenantId = getActiveTenantId(currentResponse);
+      if (!currentRouter) throw new Error("O Portal não informou o router atual.");
+      const response = await getContractApplicationList(tenantId);
+      const applications = extractRouterApplications(response).filter(
+        (application) => application.tenantId?.toLowerCase() === tenantId,
+      );
 
+      if (requestId !== routerListRequestId.current) return;
+      setCurrentApplicationRouter(currentRouter);
       setRouterApplications(applications);
-      if (applications.length === 0) {
-        setRouterApplicationsError("");
+      if (withPhoneNumbers && applications.length) {
+        setRouterPhoneNumbers(Object.fromEntries(applications.map((application) => [
+          application.shortName,
+          { phoneNumber: null, status: "loading" },
+        ])));
+        void loadRouterPhoneNumbers(applications, currentRouter, requestId);
       }
     } catch (caughtError) {
+      if (requestId !== routerListRequestId.current) return;
       const message =
         caughtError instanceof Error ? caughtError.message : "Erro ao carregar routers.";
 
       setRouterApplications([]);
       setRouterApplicationsError(message);
     } finally {
-      setIsLoadingRouterApplications(false);
+      if (requestId === routerListRequestId.current) setIsLoadingRouterApplications(false);
     }
   }
 
@@ -1132,20 +1235,13 @@ export default function CreateTemplatesApp() {
     setIsLoadingBotApplications(true);
     setBotApplicationsError("");
 
-    const command = {
-      method: COMMAND_METHODS.GET,
-      to: DEFAULT_DEV_COMMAND_TO,
-      uri: PORTAL_APPLICATIONS_URI,
-      id: createCommandId(),
-    } as const;
 
     try {
-      const response = await sendBlipCommand(command, {
-        destination: PORTAL_COMMAND_DESTINATION,
-        timeout: 30000,
-      });
+      const tenantId = getActiveTenantId(await getCurrentApplication());
+      const response = await getContractApplicationList(tenantId);
 
-      setBotApplications(extractPortalApplications(response, { templateFilter: "non-master" }));
+      setBotApplications(extractPortalApplications(response, { templateFilter: "non-master" })
+        .filter((application) => application.tenantId?.toLowerCase() === tenantId));
     } catch (caughtError) {
       setBotApplications([]);
       setBotApplicationsError(getErrorMessage(caughtError, "Erro ao carregar builders."));
@@ -1222,7 +1318,7 @@ export default function CreateTemplatesApp() {
     setActiveView("routers");
     setError("");
     setCopyNotice("");
-    void loadRouterApplications();
+    void loadRouterApplications(true);
   }
 
   async function handleCopyRouterId(application: PortalApplicationAccount) {
@@ -1235,6 +1331,19 @@ export default function CreateTemplatesApp() {
     } catch (caughtError) {
       setCopyNotice("");
       setError(getErrorMessage(caughtError, "Erro ao copiar o ID do router."));
+    }
+  }
+
+  async function handleCopyRouterPhone(application: PortalApplicationAccount) {
+    const phoneNumber = routerPhoneNumbers[application.shortName]?.phoneNumber;
+    if (!phoneNumber) return;
+    setError("");
+    try {
+      await copyText(phoneNumber);
+      setCopyNotice(`Número de "${application.name}" copiado.`);
+      window.setTimeout(() => setCopyNotice(""), 2400);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Erro ao copiar o número do router."));
     }
   }
 
@@ -3653,7 +3762,7 @@ export default function CreateTemplatesApp() {
               <Button
                 variant="secondary"
                 type="button"
-                onClick={() => void loadRouterApplications()}
+                onClick={() => void loadRouterApplications(true)}
                 disabled={isLoadingRouterApplications || !isEmbedded}
               >
                 {isLoadingRouterApplications ? (
@@ -3680,7 +3789,7 @@ export default function CreateTemplatesApp() {
                       id="routerDirectorySearch"
                       value={routerDirectorySearch}
                       onChange={(event) => setRouterDirectorySearch(event.target.value)}
-                      placeholder="Nome, ID ou tenant"
+                      placeholder="Nome, ID ou número com DDI"
                     />
                   </label>
                   <span className="router-directory-count">
@@ -3689,12 +3798,18 @@ export default function CreateTemplatesApp() {
                   </span>
                 </div>
 
+                {Object.values(routerPhoneNumbers).some((item) => item.status === "loading") && (
+                  <p className="router-directory-progress" role="status">
+                    Consultando números do WhatsApp em segundo plano…
+                  </p>
+                )}
+
                 {routerApplicationsError && (
                   <Feedback
                     title="Não foi possível carregar os routers"
                     action={
                       <Button
-                        onClick={() => void loadRouterApplications()}
+                        onClick={() => void loadRouterApplications(true)}
                         loading={isLoadingRouterApplications}
                       >
                         Tentar novamente
@@ -3719,6 +3834,7 @@ export default function CreateTemplatesApp() {
                     {filteredDirectoryRouterApplications.map((application) => {
                       const routerUrl = buildRouterUrl(application);
                       const isCopyingKey = routerKeyActionId === application.shortName;
+                      const phone = routerPhoneNumbers[application.shortName];
 
                       return (
                         <article key={application.shortName} className="router-directory-card">
@@ -3749,10 +3865,29 @@ export default function CreateTemplatesApp() {
                               <strong>{application.name}</strong>
                               <span>{application.shortName}</span>
                               {application.tenantId && <small>{application.tenantId}</small>}
+                              <small className="router-directory-phone">
+                                WhatsApp: {phone?.status === "connected"
+                                  ? phone.phoneNumber
+                                  : phone?.status === "not-connected"
+                                    ? "não conectado"
+                                    : phone?.status === "unavailable"
+                                      ? "consulta indisponível"
+                                      : "consultando…"}
+                              </small>
                             </span>
                             <ExternalLink size={18} aria-hidden="true" />
                           </a>
                           <div className="router-directory-card-actions">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => void handleCopyRouterPhone(application)}
+                              disabled={phone?.status !== "connected"}
+                            >
+                              <Clipboard size={16} aria-hidden="true" />
+                              Copiar número
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -4359,7 +4494,9 @@ export default function CreateTemplatesApp() {
                     <Button
                       variant="secondary"
                       type="button"
-                      onClick={() => setDevCommandUri(DEFAULT_DEV_COMMAND_URI)}
+                      onClick={() => setDevCommandUri(currentApplicationRouter?.tenantId
+                        ? getAccessibleApplicationUri(getActiveTenantId(currentApplicationRouter))
+                        : DEFAULT_DEV_COMMAND_URI)}
                     >
                       <Clipboard size={18} aria-hidden="true" />
                       Padrão
