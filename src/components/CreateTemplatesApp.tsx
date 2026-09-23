@@ -182,6 +182,7 @@ const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
   "priorityRules",
 ];
 type CloneMode = "builder" | "router" | "bulk";
+type BulkSourceMode = "router" | "direct";
 type BotIdentityLookup = {
   status: "idle" | "loading" | "success" | "error";
   identity: string;
@@ -828,6 +829,8 @@ export default function CreateTemplatesApp() {
   const [isPreviewingRouterClone, setIsPreviewingRouterClone] = useState(false);
   const [isCloningRouter, setIsCloningRouter] = useState(false);
   const [bulkTargetTag, setBulkTargetTag] = useState("");
+  const [bulkSourceMode, setBulkSourceMode] = useState<BulkSourceMode>("router");
+  const [bulkDirectSearch, setBulkDirectSearch] = useState("");
   const [bulkBotItems, setBulkBotItems] = useState<BulkBotCreationItem[]>([]);
   const [bulkPublishAfterClone, setBulkPublishAfterClone] = useState(true);
   const [isLoadingBulkBots, setIsLoadingBulkBots] = useState(false);
@@ -1113,6 +1116,16 @@ export default function CreateTemplatesApp() {
   const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
   const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
   const selectedBulkBots = bulkBotItems.filter((item) => item.selected);
+  const visibleBulkBotItems = useMemo(() => {
+    const query = bulkDirectSearch.trim().toLowerCase();
+    if (bulkSourceMode !== "direct" || !query) return bulkBotItems;
+    return bulkBotItems.filter(
+      (item) =>
+        item.sourceName.toLowerCase().includes(query) ||
+        item.sourceShortName.toLowerCase().includes(query) ||
+        item.sourceType.includes(query),
+    );
+  }, [bulkBotItems, bulkDirectSearch, bulkSourceMode]);
   const processedBulkBots = selectedBulkBots.filter((item) =>
     ["success", "partial", "error"].includes(item.status),
   ).length;
@@ -1426,6 +1439,7 @@ export default function CreateTemplatesApp() {
     setSelectedRouterServices(new Set());
     setBulkBotItems([]);
     setBulkTargetTag("");
+    setBulkDirectSearch("");
     setError("");
     if (mode !== "builder" && !routerApplications.length) void loadRouterApplications();
     if (mode === "bulk") {
@@ -3337,6 +3351,7 @@ export default function CreateTemplatesApp() {
             (candidate) => candidate.shortName === service.shortName,
           );
           return {
+            sourceType: "builder" as const,
             ...buildBulkBotNamePlan(
               { shortName: service.shortName, name: application?.name || service.name },
               suggestedTag,
@@ -3355,24 +3370,69 @@ export default function CreateTemplatesApp() {
     }
   }
 
+  async function handleLoadBulkApplications() {
+    setError("");
+    setBulkBotItems([]);
+    setIsLoadingBulkBots(true);
+    try {
+      const tenantId = getActiveTenantId(await getCurrentApplication());
+      const response = await getContractApplicationList(tenantId);
+      const builders = extractPortalApplications(response, { templateFilter: "non-master" }).filter(
+        (application) => application.tenantId?.toLowerCase() === tenantId,
+      );
+      const routers = extractRouterApplications(response).filter(
+        (application) => application.tenantId?.toLowerCase() === tenantId,
+      );
+      setBotApplications(builders);
+      setHasLoadedBotApplications(true);
+      setRouterApplications(routers);
+      const applications = [
+        ...builders.map((application) => ({ application, sourceType: "builder" as const })),
+        ...routers.map((application) => ({ application, sourceType: "router" as const })),
+      ].sort((a, b) =>
+        a.application.name.localeCompare(b.application.name, "pt-BR", { sensitivity: "base" }),
+      );
+      const suggestedTag = suggestTargetEnvironmentTag(
+        applications.map(({ application }) => application.name),
+      );
+      setBulkTargetTag(suggestedTag);
+      setBulkBotItems(
+        applications.map(({ application, sourceType }) => ({
+          sourceType,
+          ...buildBulkBotNamePlan(application, suggestedTag),
+          imageUri: application.imageUri,
+          sourceAccess: true,
+          selected: false,
+          status: "ready" as const,
+        })),
+      );
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Não foi possível carregar os bots do contrato."));
+    } finally {
+      setIsLoadingBulkBots(false);
+    }
+  }
+
   async function handleBulkCreateBots() {
     setError("");
     setOperationResult(null);
     const selected = bulkBotItems.filter((item) => item.selected);
     if (!selected.length) {
-      setError("Selecione pelo menos um Builder para criar.");
+      setError("Selecione pelo menos um bot para criar.");
       return;
     }
     if (!formatEnvironmentTag(bulkTargetTag)) {
       setError("Informe a tag do novo ambiente, por exemplo DEV, HMG ou PRD.");
       return;
     }
+    const selectedBuilders = selected.filter((item) => item.sourceType === "builder");
+    const selectedRouters = selected.filter((item) => item.sourceType === "router");
     const selectedOptions = BOT_CLONE_OPTION_KEYS.filter((key) => botCloneOptions[key]);
-    if (!selectedOptions.length) {
+    if (selectedBuilders.length && !selectedOptions.length) {
       setError("Selecione pelo menos uma propriedade para clonar.");
       return;
     }
-    if (bulkPublishAfterClone && !botCloneOptions.flow) {
+    if (selectedBuilders.length && bulkPublishAfterClone && !botCloneOptions.flow) {
       setError("Marque Fluxo para publicar automaticamente os novos Builders.");
       return;
     }
@@ -3399,7 +3459,7 @@ export default function CreateTemplatesApp() {
     const tenantId = getActiveTenantId(await getCurrentApplication());
     const confirmed = await confirmFlowAction(
       "Criar bots em massa",
-      `Serão criados <b>${selected.length} novos Builders</b> no contrato <b>${tenantId}</b>, com a tag <b>${formatEnvironmentTag(bulkTargetTag)}</b>. Cada bot será ativado e receberá as propriedades selecionadas.${bulkPublishAfterClone ? " O runtime publicado também será clonado e verificado." : " Os fluxos ficarão somente como rascunho."} Falhas não apagam bots já criados. Deseja continuar?`,
+      `Serão criados <b>${selectedBuilders.length} Builder(s)</b> e <b>${selectedRouters.length} router(s)</b> no contrato <b>${tenantId}</b>, com a tag <b>${formatEnvironmentTag(bulkTargetTag)}</b>. Builders recebem as propriedades selecionadas${selectedBuilders.length && bulkPublishAfterClone ? " e uma publicação registrada no histórico" : ""}; routers recebem a configuração avançada e os serviços conectados da origem. Falhas não apagam bots já criados. Deseja continuar?`,
       `Criar ${selected.length} bots`,
     );
     if (!confirmed) return;
@@ -3423,7 +3483,7 @@ export default function CreateTemplatesApp() {
               imageUri: item.imageUri,
               name: item.targetName.trim(),
               shortName: item.targetShortName.trim(),
-              template: "builder",
+              template: item.sourceType === "router" ? "master" : "builder",
               tenantId,
             },
           },
@@ -3431,29 +3491,60 @@ export default function CreateTemplatesApp() {
         );
         const target = extractRouterKey(createResponse, item.targetShortName.trim());
         const source = await loadRouterKey(item.sourceShortName);
-        updateBulkBotItem(item.sourceShortName, {
-          status: "creating",
-          message: bulkPublishAfterClone ? "Clonando e publicando…" : "Clonando propriedades…",
-        });
-        const cloneResult = await postJson<BotCloneResponse>("/api/bots/clone", {
-          sourceRouterKey: source.key,
-          targetRouterKey: target.key,
-          options: botCloneOptions,
-          activateBuilder: true,
-          publishAfterClone: bulkPublishAfterClone,
-        });
-        const hasErrors = cloneResult.totals.failed > 0 || cloneResult.totals.partial > 0;
-        if (hasErrors) partial += 1;
-        else succeeded += 1;
-        updateBulkBotItem(item.sourceShortName, {
-          status: hasErrors ? "partial" : "success",
-          message: hasErrors
-            ? `${cloneResult.totals.failed} etapa(s) falharam e ${cloneResult.totals.partial} ficaram parciais.`
-            : bulkPublishAfterClone
-              ? "Criado, publicado e verificado."
-              : "Criado e clonado como rascunho.",
-          cloneResult,
-        });
+        if (item.sourceType === "router") {
+          updateBulkBotItem(item.sourceShortName, {
+            status: "creating",
+            message: "Clonando configuração e conectando serviços…",
+          });
+          const preview = await postJson<RouterClonePreview>("/api/routers/clone/preview", {
+            sourceShortName: item.sourceShortName,
+            targetShortName: item.targetShortName.trim(),
+            sourceRouterKey: source.key,
+            targetRouterKey: target.key,
+          });
+          if (!preview.compatible) {
+            throw new Error("O novo router não usa um template compatível com a origem.");
+          }
+          const routerCloneResult = await postJson<RouterCloneResponse>("/api/routers/clone", {
+            sourceShortName: item.sourceShortName,
+            targetShortName: item.targetShortName.trim(),
+            sourceRouterKey: source.key,
+            targetRouterKey: target.key,
+            sourceHash: preview.source.applicationHash,
+            targetHash: preview.target.applicationHash,
+            selectedServiceIdentities: preview.source.services.map((service) => service.identity),
+          });
+          succeeded += 1;
+          updateBulkBotItem(item.sourceShortName, {
+            status: "success",
+            message: `Router criado e verificado com ${routerCloneResult.services} serviço(s).`,
+            routerCloneResult,
+          });
+        } else {
+          updateBulkBotItem(item.sourceShortName, {
+            status: "creating",
+            message: bulkPublishAfterClone ? "Clonando e publicando…" : "Clonando propriedades…",
+          });
+          const cloneResult = await postJson<BotCloneResponse>("/api/bots/clone", {
+            sourceRouterKey: source.key,
+            targetRouterKey: target.key,
+            options: botCloneOptions,
+            activateBuilder: true,
+            publishAfterClone: bulkPublishAfterClone,
+          });
+          const hasErrors = cloneResult.totals.failed > 0 || cloneResult.totals.partial > 0;
+          if (hasErrors) partial += 1;
+          else succeeded += 1;
+          updateBulkBotItem(item.sourceShortName, {
+            status: hasErrors ? "partial" : "success",
+            message: hasErrors
+              ? `${cloneResult.totals.failed} etapa(s) falharam e ${cloneResult.totals.partial} ficaram parciais.`
+              : bulkPublishAfterClone
+                ? "Criado, publicado e verificado no histórico."
+                : "Criado e clonado como rascunho.",
+            cloneResult,
+          });
+        }
       } catch (caughtError) {
         failed += 1;
         const failureMessage = getErrorMessage(caughtError, "Falha ao criar ou clonar o bot.");
@@ -4900,47 +4991,107 @@ export default function CreateTemplatesApp() {
 
             {cloneMode === "bulk" && (
               <div className="bot-clone-form bulk-bot-create">
-                <div className="bot-clone-router-field">
-                  <span className="bot-clone-field-label">Router com os Builders de origem</span>
-                  <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
-                    <span className="router-summary-main">
-                      <span className="router-summary-avatar" aria-hidden="true">
-                        {selectedBotSource?.imageUri ? (
-                          <img src={selectedBotSource.imageUri} alt="" />
-                        ) : (
-                          <Network size={16} />
-                        )}
-                      </span>
-                      <span className="router-summary-copy">
-                        <strong>{selectedBotSource?.name || "Nenhum router selecionado"}</strong>
-                        <span>{botSourceShortName || "Selecione o router de origem"}</span>
-                      </span>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setBotSourceSearch("");
-                        setBotPicker("source");
-                      }}
-                      disabled={!isEmbedded || isBulkCreatingBots || isLoadingBulkBots}
-                    >
-                      <Pencil size={15} aria-hidden="true" />
-                      {botSourceShortName ? "Alterar" : "Selecionar"}
-                    </Button>
+                <div className="form-group bulk-source-picker">
+                  <div className="bulk-source-copy">
+                    <h3>Como escolher as origens?</h3>
+                    <p>
+                      Use os serviços de um router ou escolha Builders e routers diretamente no
+                      contrato.
+                    </p>
                   </div>
-                  <div className="bot-clone-actions">
-                    <Button
+                  <div className="dev-tabs bulk-source-tabs" role="tablist" aria-label="Origem">
+                    <button
                       type="button"
-                      onClick={() => void handleLoadBulkBots()}
-                      loading={isLoadingBulkBots}
-                      disabled={!botSourceShortName || isBulkCreatingBots}
+                      role="tab"
+                      aria-selected={bulkSourceMode === "router"}
+                      className={bulkSourceMode === "router" ? "active" : ""}
+                      onClick={() => {
+                        setBulkSourceMode("router");
+                        setBulkBotItems([]);
+                        setBulkDirectSearch("");
+                      }}
+                      disabled={isBulkCreatingBots}
                     >
-                      <Search size={18} aria-hidden="true" /> Carregar Builders
-                    </Button>
+                      <Network size={16} aria-hidden="true" /> Serviços de um router
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={bulkSourceMode === "direct"}
+                      className={bulkSourceMode === "direct" ? "active" : ""}
+                      onClick={() => {
+                        setBulkSourceMode("direct");
+                        setBulkBotItems([]);
+                        setBulkDirectSearch("");
+                      }}
+                      disabled={isBulkCreatingBots}
+                    >
+                      <Layers3 size={16} aria-hidden="true" /> Selecionar bots
+                    </button>
                   </div>
                 </div>
+
+                {bulkSourceMode === "router" ? (
+                  <div className="bot-clone-router-field">
+                    <span className="bot-clone-field-label">Router com os Builders de origem</span>
+                    <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
+                      <span className="router-summary-main">
+                        <span className="router-summary-avatar" aria-hidden="true">
+                          {selectedBotSource?.imageUri ? (
+                            <img src={selectedBotSource.imageUri} alt="" />
+                          ) : (
+                            <Network size={16} />
+                          )}
+                        </span>
+                        <span className="router-summary-copy">
+                          <strong>{selectedBotSource?.name || "Nenhum router selecionado"}</strong>
+                          <span>{botSourceShortName || "Selecione o router de origem"}</span>
+                        </span>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setBotSourceSearch("");
+                          setBotPicker("source");
+                        }}
+                        disabled={!isEmbedded || isBulkCreatingBots || isLoadingBulkBots}
+                      >
+                        <Pencil size={15} aria-hidden="true" />
+                        {botSourceShortName ? "Alterar" : "Selecionar"}
+                      </Button>
+                    </div>
+                    <div className="bot-clone-actions">
+                      <Button
+                        type="button"
+                        onClick={() => void handleLoadBulkBots()}
+                        loading={isLoadingBulkBots}
+                        disabled={!botSourceShortName || isBulkCreatingBots}
+                      >
+                        <Search size={18} aria-hidden="true" /> Carregar Builders
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bot-clone-router-field">
+                    <span className="bot-clone-field-label">Builders e routers acessíveis</span>
+                    <p className="bulk-source-help">
+                      Routers são recriados com sua configuração avançada e todos os serviços
+                      conectados. O conteúdo desses serviços não é duplicado automaticamente.
+                    </p>
+                    <div className="bot-clone-actions">
+                      <Button
+                        type="button"
+                        onClick={() => void handleLoadBulkApplications()}
+                        loading={isLoadingBulkBots}
+                        disabled={isBulkCreatingBots}
+                      >
+                        <Search size={18} aria-hidden="true" /> Carregar bots do contrato
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {bulkBotItems.length > 0 && (
                   <>
@@ -4981,16 +5132,15 @@ export default function CreateTemplatesApp() {
                         <span className="flow-switch-copy">
                           <strong>Publicar automaticamente</strong>
                           <span>
-                            Copia o runtime publicado da origem e confirma o destino por nova
-                            leitura.
+                            Publica o runtime, registra uma versão no histórico e confirma ambos por
+                            nova leitura.
                           </span>
                         </span>
                       </label>
                       {bulkPublishAfterClone && (
                         <Feedback tone="warning">
-                          A publicação ativa o mesmo runtime da origem no novo ID. O histórico de
-                          versões do Builder não é copiado; o resultado é validado pela configuração
-                          publicada do destino.
+                          A publicação ativa o runtime da origem no novo ID e cria uma nova entrada
+                          de histórico no destino. Esta opção se aplica somente aos Builders.
                         </Feedback>
                       )}
                     </div>
@@ -5031,6 +5181,17 @@ export default function CreateTemplatesApp() {
                           <p>{selectedBulkBots.length} selecionado(s) para criação</p>
                         </div>
                         <div className="router-clone-selection-actions">
+                          {bulkSourceMode === "direct" && (
+                            <label className="blip-native-field bulk-bot-search">
+                              Buscar origem
+                              <input
+                                value={bulkDirectSearch}
+                                onChange={(event) => setBulkDirectSearch(event.target.value)}
+                                placeholder="Nome, ID ou tipo"
+                                disabled={isBulkCreatingBots}
+                              />
+                            </label>
+                          )}
                           <Button
                             type="button"
                             variant="secondary"
@@ -5039,13 +5200,19 @@ export default function CreateTemplatesApp() {
                               setBulkBotItems((current) =>
                                 current.map((item) => ({
                                   ...item,
-                                  selected: item.sourceAccess,
+                                  selected:
+                                    bulkSourceMode !== "direct" ||
+                                    visibleBulkBotItems.some(
+                                      (visible) => visible.sourceShortName === item.sourceShortName,
+                                    )
+                                      ? item.sourceAccess
+                                      : item.selected,
                                 })),
                               )
                             }
                             disabled={isBulkCreatingBots}
                           >
-                            Selecionar todos
+                            Selecionar {bulkSourceMode === "direct" ? "visíveis" : "todos"}
                           </Button>
                           <Button
                             type="button"
@@ -5074,7 +5241,7 @@ export default function CreateTemplatesApp() {
                             </tr>
                           </thead>
                           <tbody>
-                            {bulkBotItems.map((item) => {
+                            {visibleBulkBotItems.map((item) => {
                               const exists = [...routerApplications, ...botApplications].some(
                                 (application) => application.shortName === item.targetShortName,
                               );
@@ -5107,6 +5274,9 @@ export default function CreateTemplatesApp() {
                                   </td>
                                   <td>
                                     <strong>{item.sourceName}</strong>
+                                    <span className={`bulk-bot-type ${item.sourceType}`}>
+                                      {item.sourceType === "router" ? "Router" : "Builder"}
+                                    </span>
                                     <span className="bulk-bot-source-id">
                                       {item.sourceShortName}
                                     </span>

@@ -352,6 +352,7 @@ export type RouterClonePrepared = {
 export type RouterServicesResponse = RouterCloneConfiguration;
 export type BulkBotCreationStatus = "ready" | "creating" | "success" | "partial" | "error";
 export type BulkBotCreationItem = {
+  sourceType: "builder" | "router";
   sourceShortName: string;
   sourceName: string;
   sourceTag: string | null;
@@ -363,6 +364,7 @@ export type BulkBotCreationItem = {
   status: BulkBotCreationStatus;
   message?: string;
   cloneResult?: BotCloneResponse;
+  routerCloneResult?: RouterCloneResponse;
 };
 export type OperationResult = {
   summary: string;

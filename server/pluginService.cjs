@@ -54,7 +54,7 @@ function validateTargetRouterKeys(targetRouterKeys) {
   }
 }
 
-async function sendBlipCommand(routerKey, command) {
+async function sendBlipCommand(routerKey, command, { allowNotFound = false } = {}) {
   const response = await fetch(MSGING_COMMANDS_URL, {
     method: "POST",
     headers: {
@@ -77,7 +77,11 @@ async function sendBlipCommand(routerKey, command) {
     throw new Error(`Erro HTTP ${response.status}: ${JSON.stringify(responseBody, null, 2)}`);
   }
 
-  if (responseBody?.status && responseBody.status !== "success") {
+  if (
+    responseBody?.status &&
+    responseBody.status !== "success" &&
+    !(allowNotFound && responseBody?.reason?.code === 67)
+  ) {
     throw new Error(
       `Comando retornou status "${responseBody.status}": ${JSON.stringify(responseBody, null, 2)}`,
     );
@@ -280,7 +284,9 @@ function mergePlugins(existingPlugins, incomingPlugins, replaceDuplicates) {
 }
 
 async function getPluginsFromRouter(routerKey) {
-  const response = await sendBlipCommand(routerKey, buildGetPluginsCommand());
+  const response = await sendBlipCommand(routerKey, buildGetPluginsCommand(), {
+    allowNotFound: true,
+  });
 
   return {
     plugins: extractPluginsFromResponse(response),

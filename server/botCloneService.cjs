@@ -183,6 +183,81 @@ async function getBuilderRuntime(routerKey) {
   return data.resource;
 }
 
+function parseJsonResource(resource, fallback) {
+  if (resource === undefined || resource === null || resource === "") return fallback;
+  if (typeof resource !== "string") return resource;
+  try {
+    return JSON.parse(resource);
+  } catch {
+    return fallback;
+  }
+}
+
+function buildPublicationRecord(sourceLatest, sourceIdentity, index) {
+  const sourcePublication = Array.isArray(sourceLatest?.publications)
+    ? sourceLatest.publications[0]
+    : undefined;
+  return {
+    authorIdentity: sourcePublication?.authorIdentity || sourceIdentity,
+    author: sourcePublication?.author || "Templates/Flows Manager",
+    publishedAt: new Date().toISOString(),
+    index,
+  };
+}
+
+async function registerBuilderPublication(
+  sourceRouterKey,
+  targetRouterKey,
+  sourceIdentity,
+  documents,
+) {
+  const [sourceLatestRaw, targetLatestRaw] = await Promise.all([
+    getBucket(sourceRouterKey, "blip_portal:builder_latestpublications"),
+    getBucket(targetRouterKey, "blip_portal:builder_latestpublications"),
+  ]);
+  const sourceLatest = parseJsonResource(sourceLatestRaw, {});
+  const targetLatest = parseJsonResource(targetLatestRaw, {});
+  const previousPublications = Array.isArray(targetLatest?.publications)
+    ? targetLatest.publications
+    : [];
+  const lastInsertedIndex = Number.isInteger(targetLatest?.lastInsertedIndex)
+    ? targetLatest.lastInsertedIndex
+    : 0;
+  const nextIndex = lastInsertedIndex + 1;
+  const publication = buildPublicationRecord(sourceLatest, sourceIdentity, nextIndex);
+  const publications = [publication, ...previousPublications].slice(0, 5);
+  const isMoreOptionsActive =
+    targetLatest?.isMoreOptionsActive === true || previousPublications.length >= 5;
+  const history = {
+    flow: documents.flow || {},
+    configuration: documents.configuration || {},
+    globalActions: documents.globalActions || {},
+  };
+
+  await setBucket(targetRouterKey, "blip_portal:builder_latestpublications", {
+    lastInsertedIndex: nextIndex,
+    isMoreOptionsActive,
+    publications,
+  });
+  await setBucket(targetRouterKey, `blip_portal:builder_latestpublications:${nextIndex}`, history);
+
+  const [verifiedLatestRaw, verifiedHistoryRaw] = await Promise.all([
+    getBucket(targetRouterKey, "blip_portal:builder_latestpublications"),
+    getBucket(targetRouterKey, `blip_portal:builder_latestpublications:${nextIndex}`),
+  ]);
+  const verifiedLatest = parseJsonResource(verifiedLatestRaw, {});
+  const verifiedHistory = parseJsonResource(verifiedHistoryRaw, {});
+  if (
+    verifiedLatest?.lastInsertedIndex !== nextIndex ||
+    !Array.isArray(verifiedLatest?.publications) ||
+    !verifiedLatest.publications.some((item) => item?.index === nextIndex) ||
+    JSON.stringify(verifiedHistory) !== JSON.stringify(history)
+  ) {
+    throw new Error("A leitura após publicação não confirmou o histórico do Builder.");
+  }
+  return nextIndex;
+}
+
 async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
   const [sourceIdentity, targetIdentity, sourceRuntime] = await Promise.all([
     getBotIdentity(sourceRouterKey),
@@ -198,23 +273,23 @@ async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
   }
   runtime.identifier = targetIdentity.replace(/@msging\.net$/, "");
   const application = JSON.stringify(runtime);
-  const publishedDocuments = [
-    ["blip_portal:builder_published_flow", "blip_portal:builder_working_flow"],
-    ["blip_portal:builder_published_configuration", "blip_portal:builder_working_configuration"],
-    ["blip_portal:builder_published_global_actions", "blip_portal:builder_working_global_actions"],
-  ];
-  for (const [publishedKey, workingKey] of publishedDocuments) {
-    const resource =
-      (await getBucket(sourceRouterKey, publishedKey)) ??
-      (await getBucket(sourceRouterKey, workingKey));
-    if (resource !== undefined) await setBucket(targetRouterKey, publishedKey, resource);
-  }
+  const publishedDocuments = {
+    flow:
+      (await getBucket(sourceRouterKey, "blip_portal:builder_published_flow")) ??
+      (await getBucket(sourceRouterKey, "blip_portal:builder_working_flow")),
+    configuration:
+      (await getBucket(sourceRouterKey, "blip_portal:builder_published_configuration")) ??
+      (await getBucket(sourceRouterKey, "blip_portal:builder_working_configuration")),
+    globalActions:
+      (await getBucket(sourceRouterKey, "blip_portal:builder_published_global_actions")) ??
+      (await getBucket(sourceRouterKey, "blip_portal:builder_working_global_actions")),
+  };
   const response = await sendBlipCommand(
     targetRouterKey,
     buildCommand({
       to: "postmaster@msging.net",
       method: "set",
-      uri: "lime://builder.hosting@msging.net/configuration",
+      uri: `lime://builder.hosting@msging.net/configuration?caller=${targetIdentity}`,
       type: "application/json",
       resource: {
         Template: sourceRuntime.Template || "builder",
@@ -223,6 +298,29 @@ async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
     }),
   );
   if (response?.status && response.status !== "success") throw new Error(reasonOf(response));
+  if (publishedDocuments.flow !== undefined) {
+    await setBucket(targetRouterKey, "blip_portal:builder_published_flow", publishedDocuments.flow);
+  }
+  if (publishedDocuments.configuration !== undefined) {
+    await setBucket(
+      targetRouterKey,
+      "blip_portal:builder_published_configuration",
+      publishedDocuments.configuration,
+    );
+  }
+  if (publishedDocuments.globalActions !== undefined) {
+    await setBucket(
+      targetRouterKey,
+      "blip_portal:builder_published_global_actions",
+      publishedDocuments.globalActions,
+    );
+  }
+  const publicationIndex = await registerBuilderPublication(
+    sourceRouterKey,
+    targetRouterKey,
+    sourceIdentity,
+    publishedDocuments,
+  );
   const verified = await getBuilderRuntime(targetRouterKey);
   if (!verified || verified.Application !== application) {
     throw new Error("A leitura após publicação não confirmou o runtime clonado.");
@@ -230,6 +328,7 @@ async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
   return {
     status: "success",
     verified: true,
+    publicationIndex,
     states: runtime?.settings?.flow?.states?.length || 0,
   };
 }

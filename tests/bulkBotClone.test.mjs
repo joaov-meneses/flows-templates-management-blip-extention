@@ -16,6 +16,19 @@ test("criação em massa ativa Builder, copia todos os JSONs e confirma o runtim
     ["blip_portal:builder_published_global_actions", { id: "global-actions" }],
   ]);
   const targetBuckets = new Map();
+  const sourceLatestPublications = {
+    lastInsertedIndex: 3,
+    isMoreOptionsActive: false,
+    publications: [
+      {
+        authorIdentity: "author@example.com",
+        author: "Autora de origem",
+        publishedAt: "2026-09-23T12:00:00.000Z",
+        index: 3,
+      },
+    ],
+  };
+  sourceBuckets.set("blip_portal:builder_latestpublications", sourceLatestPublications);
   const runtime = {
     identifier: "source",
     settingsType: "Settings",
@@ -30,7 +43,7 @@ test("criação em massa ativa Builder, copia todos os JSONs e confirma o runtim
     let body;
     if (request.uri === "/replies") {
       body = { status: "success", to: `${owner}@msging.net/!server`, resource: { items: [] } };
-    } else if (request.uri === "lime://builder.hosting@msging.net/configuration") {
+    } else if (request.uri.startsWith("lime://builder.hosting@msging.net/configuration")) {
       if (request.method === "get") {
         body = {
           status: "success",
@@ -87,5 +100,16 @@ test("criação em massa ativa Builder, copia todos os JSONs e confirma o runtim
     sourceBuckets.get("blip_portal:builder_published_flow"),
   );
   assert.equal(JSON.parse(targetRuntime).identifier, "target");
+  assert.equal(targetBuckets.get("blip_portal:builder_latestpublications").lastInsertedIndex, 1);
+  assert.deepEqual(Object.keys(targetBuckets.get("blip_portal:builder_latestpublications:1")), [
+    "flow",
+    "configuration",
+    "globalActions",
+  ]);
+  assert.equal(
+    targetBuckets.get("blip_portal:builder_latestpublications").publications[0].author,
+    "Autora de origem",
+  );
   assert.equal(result.steps.at(-1).detail.verified, true);
+  assert.equal(result.steps.at(-1).detail.publicationIndex, 1);
 });
