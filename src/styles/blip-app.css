@@ -794,7 +794,29 @@
 }
 .bot-clone-results {
   display: grid;
+  gap: 14px;
+}
+.builder-clone-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.builder-clone-target-tag {
+  border: 1px solid var(--blip-border-soft);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--blip-content-soft);
+}
+.builder-clone-target-result {
+  display: grid;
   gap: 8px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 14px;
+}
+.builder-clone-target-result h4 {
+  margin: 0;
 }
 .bot-clone-results .ember-alert {
   animation: bot-clone-step-in 0.25s ease-out;
@@ -809,59 +831,9 @@
     transform: translateY(0);
   }
 }
-.devs-panel {
+.plugins-panel {
   display: grid;
   gap: 16px;
-}
-.dev-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  border-bottom: 1px solid var(--blip-border-soft);
-  padding-bottom: 10px;
-}
-.dev-tabs button {
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid transparent;
-  border-radius: var(--blip-radius-sm);
-  padding: 0 12px;
-  color: var(--blip-content-soft);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 800;
-}
-.dev-tabs button:hover {
-  color: var(--blip-primary);
-  background: rgba(30, 107, 241, 0.06);
-}
-.dev-tabs button.active {
-  color: var(--blip-primary);
-  border-color: rgba(30, 107, 241, 0.22);
-  background: rgba(30, 107, 241, 0.1);
-}
-.dev-command-row {
-  grid-template-columns:
-    minmax(150px, 200px) minmax(120px, 150px) minmax(200px, 260px) minmax(260px, 1fr)
-    minmax(120px, 150px);
-}
-.dev-command-resource-field,
-.dev-command-actions {
-  grid-column: 1 / -1;
-}
-.dev-command-resource-field textarea {
-  min-height: 132px;
-}
-.dev-command-resource-field .json-resource-input {
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-}
-.dev-command-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 .plugin-editor-form,
 .plugin-toolbar {
@@ -1074,7 +1046,6 @@
   vertical-align: middle;
   font-weight: 600;
 }
-
 
 /* ---------- Modal ---------- */
 .ember-modal-backdrop {
@@ -2000,7 +1971,7 @@
   }
   .ember-side-nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
   }
   .ember-side-nav button {
@@ -2009,7 +1980,6 @@
   .ember-content {
     padding: 20px 18px 36px;
   }
-  .dev-command-row,
   .plugin-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2093,17 +2063,12 @@
   .action-grid,
   .template-filter-row,
   .flow-filter-row,
-  .dev-command-row,
   .plugin-editor-form,
   .plugin-toolbar,
   .router-picker-toolbar,
   .router-directory-toolbar,
   .compare-form {
     grid-template-columns: 1fr;
-  }
-  .dev-command-actions {
-    align-items: stretch;
-    flex-direction: column;
   }
   .plugin-editor-form .plugin-url-field,
   .plugin-editor-form > button[type="submit"],

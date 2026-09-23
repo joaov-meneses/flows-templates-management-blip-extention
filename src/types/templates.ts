@@ -1,29 +1,7 @@
-import type { COMMAND_METHODS } from "../lib/blipActions";
-
-export type ActiveView =
-  | "routers"
-  | "templates"
-  | "flows"
-  | "bots"
-  | "commands"
-  | "plugins"
-  | "logs";
+export type ActiveView = "routers" | "templates" | "flows" | "bots" | "plugins" | "logs";
 export type RouterModal = "source" | "targets" | null;
 export type SortDirection = "asc" | "desc";
-export type CommandDestination = "BlipService" | "MessagingHubService";
-export type CommandMethod = (typeof COMMAND_METHODS)[keyof typeof COMMAND_METHODS];
-export type DevCommandType = "" | "text/plain" | "application/json";
-export type DevCommandContentType = Exclude<DevCommandType, "">;
 export type PluginCopyMode = "add" | "replace";
-
-export type DevCommand = {
-  method: CommandMethod;
-  to: string;
-  uri: string;
-  id: string;
-  type?: DevCommandContentType;
-  resource?: unknown;
-};
 
 export type Template = {
   name: string;

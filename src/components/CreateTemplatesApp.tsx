@@ -30,7 +30,6 @@ import {
   Sparkles,
   Square,
   Sun,
-  Terminal,
   Trash2,
   Workflow,
   X,
@@ -77,17 +76,16 @@ import {
   suggestTargetEnvironmentTag,
   validateBulkTargetShortName,
 } from "../lib/bulkBotCreation";
+import {
+  cloneBuilderTargetsSequentially,
+  type BuilderCloneTargetResult,
+} from "../lib/builderCloneBatch";
 
 import type {
   ActiveView,
   RouterModal,
   SortDirection,
-  CommandDestination,
-  CommandMethod,
-  DevCommandType,
-  DevCommandContentType,
   PluginCopyMode,
-  DevCommand,
   Template,
   SearchResponse,
   TemplateReplicateResponse,
@@ -156,7 +154,6 @@ const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
   flows: "Flows",
   bots: "Clone Bots",
   plugins: "Plugins Manager",
-  commands: "Commands",
   logs: "Logs",
 };
 const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
@@ -213,15 +210,7 @@ type BotIdentityLookup = {
 };
 const IDLE_BOT_IDENTITY: BotIdentityLookup = { status: "idle", identity: "" };
 const PORTAL_COMMAND_DESTINATION = "BlipService";
-const COMMAND_DESTINATIONS: CommandDestination[] = ["BlipService", "MessagingHubService"];
-const DEV_COMMAND_METHODS = Object.values(COMMAND_METHODS) as CommandMethod[];
-const DEV_COMMAND_TYPE_OPTIONS: Array<{ label: string; value: DevCommandType }> = [
-  { label: "Sem type", value: "" },
-  { label: "text", value: "text/plain" },
-  { label: "json", value: "application/json" },
-];
-const DEFAULT_DEV_COMMAND_TO = "postmaster@portal.blip.ai";
-const DEFAULT_DEV_COMMAND_URI = "";
+const PORTAL_COMMAND_TO = "postmaster@portal.blip.ai";
 const emptyTemplateSearch: SearchResponse = {
   search: { templateName: "", onlyApproved: false },
   total: 0,
@@ -251,26 +240,6 @@ function removeRouterSelection(values: string[], blockedRouter: string) {
 }
 function removeRouterSelectionFromLines(value: string, blockedRouter: string) {
   return removeRouterSelection(splitLines(value), blockedRouter).join("\n");
-}
-function getDevCommandTypeLabel(type: DevCommandType) {
-  return DEV_COMMAND_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? "Sem type";
-}
-function buildDevCommandResource(type: DevCommandContentType, rawResource: string) {
-  if (type === "application/json") {
-    const trimmedResource = rawResource.trim();
-
-    if (!trimmedResource) {
-      return {};
-    }
-
-    try {
-      return JSON.parse(trimmedResource) as unknown;
-    } catch {
-      throw new Error("Resource precisa ser um JSON válido.");
-    }
-  }
-
-  return rawResource;
 }
 function templateKey(t: Template) {
   return `${t.name}|${t.language}`;
@@ -510,7 +479,7 @@ function extractRouterKey(response: unknown, requestedShortName: string): Resolv
 async function loadRouterKey(shortName: string) {
   const command = {
     method: COMMAND_METHODS.GET,
-    to: DEFAULT_DEV_COMMAND_TO,
+    to: PORTAL_COMMAND_TO,
     uri: `/applications/${shortName}@msging.net`,
     id: createCommandId(),
   } as const;
@@ -826,9 +795,7 @@ export default function CreateTemplatesApp() {
   const [isCopyingPlugins, setIsCopyingPlugins] = useState(false);
   const [pluginReplicateProgress, setPluginReplicateProgress] = useState<Progress | null>(null);
   const [botSourceRouterKey, setBotSourceRouterKey] = useState("");
-  const [botTargetRouterKey, setBotTargetRouterKey] = useState("");
   const [botSourceIdentity, setBotSourceIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
-  const [botTargetIdentity, setBotTargetIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
   const [botSourceKeyInvalid, setBotSourceKeyInvalid] = useState(false);
   const [botTargetKeyInvalid, setBotTargetKeyInvalid] = useState(false);
   const [botApplications, setBotApplications] = useState<PortalApplicationAccount[]>([]);
@@ -836,7 +803,10 @@ export default function CreateTemplatesApp() {
   const [isLoadingBotApplications, setIsLoadingBotApplications] = useState(false);
   const [botApplicationsError, setBotApplicationsError] = useState("");
   const [botSourceShortName, setBotSourceShortName] = useState("");
-  const [botTargetShortName, setBotTargetShortName] = useState("");
+  const [builderCloneTargets, setBuilderCloneTargets] = useState<RouterCloneTarget[]>([]);
+  const [builderTargetPickerSelection, setBuilderTargetPickerSelection] = useState<Set<string>>(
+    new Set(),
+  );
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
   const [botPicker, setBotPicker] = useState<"source" | "target" | null>(null);
@@ -845,7 +815,7 @@ export default function CreateTemplatesApp() {
   const [botCloneOptions, setBotCloneOptions] =
     useState<BotCloneOptions>(DEFAULT_BOT_CLONE_OPTIONS);
   const [isCloningBot, setIsCloningBot] = useState(false);
-  const [botCloneResult, setBotCloneResult] = useState<BotCloneResponse | null>(null);
+  const [botCloneResults, setBotCloneResults] = useState<BuilderCloneTargetResult[]>([]);
   const [routerClonePreview, setRouterClonePreview] = useState<RouterClonePreview | null>(null);
   const [routerClonePreviews, setRouterClonePreviews] = useState<
     Record<string, RouterClonePreview>
@@ -880,15 +850,6 @@ export default function CreateTemplatesApp() {
   const [bulkPublishAfterClone, setBulkPublishAfterClone] = useState(true);
   const [isLoadingBulkBots, setIsLoadingBulkBots] = useState(false);
   const [isBulkCreatingBots, setIsBulkCreatingBots] = useState(false);
-  const [visibleBotStepCount, setVisibleBotStepCount] = useState(0);
-  const [devCommandDestination, setDevCommandDestination] =
-    useState<CommandDestination>("BlipService");
-  const [devCommandMethod, setDevCommandMethod] = useState<CommandMethod>(COMMAND_METHODS.GET);
-  const [devCommandType, setDevCommandType] = useState<DevCommandType>("");
-  const [devCommandResource, setDevCommandResource] = useState("");
-  const [devCommandTo, setDevCommandTo] = useState(DEFAULT_DEV_COMMAND_TO);
-  const [devCommandUri, setDevCommandUri] = useState(DEFAULT_DEV_COMMAND_URI);
-  const [isRunningDevCommand, setIsRunningDevCommand] = useState(false);
   const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
   const isEmbedded = useIframeAutoHeight(shellRef);
   const visibleActiveView = activeView;
@@ -975,9 +936,6 @@ export default function CreateTemplatesApp() {
             "O Portal não informou o router atual. Selecione a origem para continuar.",
           );
         setCurrentApplicationRouter(router);
-        if (router.tenantId) {
-          setDevCommandUri(getAccessibleApplicationUri(getActiveTenantId(router)));
-        }
         if (router?.shortName) {
           setSourceRouterShortName((current) => current || router.shortName);
           setSourceRouterKey((current) => current);
@@ -1137,7 +1095,6 @@ export default function CreateTemplatesApp() {
 
     return (cloneMode === "builder" ? botApplications : routerApplications).filter(
       (application) => {
-        if (application.shortName === botTargetShortName) return false;
         if (!q) return true;
 
         return (
@@ -1146,7 +1103,7 @@ export default function CreateTemplatesApp() {
         );
       },
     );
-  }, [botApplications, routerApplications, cloneMode, botSourceSearch, botTargetShortName]);
+  }, [botApplications, routerApplications, cloneMode, botSourceSearch]);
 
   const filteredBotTargetApplications = useMemo(() => {
     const q = botTargetSearch.trim().toLowerCase();
@@ -1166,7 +1123,9 @@ export default function CreateTemplatesApp() {
 
   const cloneApplications = cloneMode === "builder" ? botApplications : routerApplications;
   const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
-  const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
+  const selectedBuilderCloneApplications = builderCloneTargets
+    .map((target) => botApplications.find((item) => item.shortName === target.shortName))
+    .filter((item): item is PortalApplicationAccount => Boolean(item));
   const selectedRouterCloneApplications = routerCloneTargets
     .map((target) => routerApplications.find((item) => item.shortName === target.shortName))
     .filter((item): item is PortalApplicationAccount => Boolean(item));
@@ -1240,15 +1199,10 @@ export default function CreateTemplatesApp() {
                   title: "Plugins Manager",
                   description: "Gerenciamento e cópia de plugins entre routers BLiP",
                 }
-              : visibleActiveView === "logs"
-                ? {
-                    title: "Logs",
-                    description: "Requisições e resultados desta sessão da extensão",
-                  }
-                : {
-                    title: "Commands",
-                    description: "Testes de commands no iframe do Portal BLiP",
-                  };
+              : {
+                  title: "Logs",
+                  description: "Requisições e resultados desta sessão da extensão",
+                };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -1259,7 +1213,7 @@ export default function CreateTemplatesApp() {
           {
             id: createCommandId(),
             method: COMMAND_METHODS.GET,
-            to: DEFAULT_DEV_COMMAND_TO,
+            to: PORTAL_COMMAND_TO,
             uri: `/tenants/${tenantId}/users/${encodeURIComponent(account.identity)}`,
           },
           { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 },
@@ -1278,7 +1232,7 @@ export default function CreateTemplatesApp() {
         {
           id: createCommandId(),
           method: COMMAND_METHODS.GET,
-          to: DEFAULT_DEV_COMMAND_TO,
+          to: PORTAL_COMMAND_TO,
           uri,
         },
         { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
@@ -1431,7 +1385,12 @@ export default function CreateTemplatesApp() {
       const router = await loadRouterKey(application.shortName);
 
       setBotSourceRouterKey(router.key);
-      if (cloneMode === "router") {
+      if (cloneMode === "builder") {
+        setBuilderCloneTargets((current) =>
+          current.filter((target) => target.shortName !== application.shortName),
+        );
+        setBotCloneResults([]);
+      } else if (cloneMode === "router") {
         setRouterCloneTargets((current) =>
           current.filter((target) => target.shortName !== application.shortName),
         );
@@ -1446,22 +1405,26 @@ export default function CreateTemplatesApp() {
     }
   }
 
-  async function handleSelectBotTargetApplication(application: PortalApplicationAccount) {
-    setRouterClonePreview(null);
-    setRouterCloneResult(null);
-    setBotTargetShortName(application.shortName);
-    setBotTargetKeyInvalid(false);
-    setIsResolvingBotTargetKey(true);
+  async function handleConfirmBuilderTargets() {
+    const applications = botApplications.filter((application) =>
+      builderTargetPickerSelection.has(application.shortName),
+    );
+    if (!applications.length) {
+      setError("Selecione pelo menos um builder de destino.");
+      return;
+    }
     setError("");
+    setIsResolvingBotTargetKey(true);
     try {
-      const router = await loadRouterKey(application.shortName);
-
-      setBotTargetRouterKey(router.key);
+      const targets = await Promise.all(
+        applications.map((application) => loadRouterKey(application.shortName)),
+      );
+      setBuilderCloneTargets(targets);
+      setBotCloneResults([]);
+      setBotTargetKeyInvalid(false);
       setBotPicker(null);
     } catch (caughtError) {
-      setBotTargetShortName("");
-      setBotTargetRouterKey("");
-      setError(getErrorMessage(caughtError, "Erro ao carregar a key do bot."));
+      setError(getErrorMessage(caughtError, "Erro ao carregar as keys dos builders de destino."));
     } finally {
       setIsResolvingBotTargetKey(false);
     }
@@ -1534,10 +1497,10 @@ export default function CreateTemplatesApp() {
   function changeCloneMode(mode: CloneMode) {
     setCloneMode(mode);
     setBotSourceShortName("");
-    setBotTargetShortName("");
     setBotSourceRouterKey("");
-    setBotTargetRouterKey("");
-    setBotCloneResult(null);
+    setBuilderCloneTargets([]);
+    setBuilderTargetPickerSelection(new Set());
+    setBotCloneResults([]);
     setRouterClonePreview(null);
     setRouterClonePreviews({});
     setRouterCloneResult(null);
@@ -3292,75 +3255,24 @@ export default function CreateTemplatesApp() {
     };
   }, [botSourceRouterKey, cloneMode]);
 
-  useEffect(() => {
-    if (cloneMode !== "builder") return;
-    const routerKey = botTargetRouterKey.trim();
-    if (!routerKey) {
-      setBotTargetIdentity(IDLE_BOT_IDENTITY);
-      return;
-    }
-
-    let cancelled = false;
-    setBotTargetIdentity({ status: "loading", identity: "" });
-    const timeoutId = window.setTimeout(() => {
-      lookupBotIdentity(routerKey)
-        .then((identity) => {
-          if (cancelled) return;
-          setBotTargetIdentity(
-            identity ? { status: "success", identity } : { status: "error", identity: "" },
-          );
-        })
-        .catch(() => {
-          if (!cancelled) setBotTargetIdentity({ status: "error", identity: "" });
-        });
-    }, 300);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [botTargetRouterKey, cloneMode]);
-
-  useEffect(() => {
-    if (!botCloneResult || botCloneResult.steps.length === 0) {
-      setVisibleBotStepCount(0);
-      return;
-    }
-
-    setVisibleBotStepCount(1);
-    if (botCloneResult.steps.length <= 1) return;
-
-    let shown = 1;
-    const intervalId = window.setInterval(() => {
-      shown += 1;
-      setVisibleBotStepCount(shown);
-      if (shown >= botCloneResult.steps.length) {
-        window.clearInterval(intervalId);
-      }
-    }, 500);
-
-    return () => window.clearInterval(intervalId);
-  }, [botCloneResult]);
-
   async function handleCloneBot(event: FormEvent) {
     event.preventDefault();
     setError("");
     setOperationResult(null);
-    setBotCloneResult(null);
+    setBotCloneResults([]);
 
     const sourceKey = botSourceRouterKey.trim();
-    const targetKey = botTargetRouterKey.trim();
 
     setBotSourceKeyInvalid(!sourceKey);
-    setBotTargetKeyInvalid(!targetKey);
+    setBotTargetKeyInvalid(!builderCloneTargets.length);
 
     if (!sourceKey) {
       setError("Selecione o builder de origem.");
       return;
     }
 
-    if (!targetKey) {
-      setError("Selecione o builder de destino.");
+    if (!builderCloneTargets.length) {
+      setError("Selecione pelo menos um builder de destino.");
       return;
     }
 
@@ -3373,11 +3285,13 @@ export default function CreateTemplatesApp() {
 
     const hasDestructiveStep = selectedKeys.some((key) => BOT_CLONE_DESTRUCTIVE_KEYS.includes(key));
 
-    if (hasDestructiveStep) {
+    if (hasDestructiveStep || builderCloneTargets.length > 1) {
       const confirmed = await confirmFlowAction(
         "Confirmar clonagem de builder",
-        "Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só no builder de destino serão <b>removidos</b>. Deseja continuar?",
-        "Clonar mesmo assim",
+        hasDestructiveStep
+          ? `Os itens selecionados serão copiados para <b>${builderCloneTargets.length} builder(s) de destino</b>. Regras de atendimento e/ou de priorização funcionam como espelho: itens que existirem só nos destinos serão <b>removidos</b>. Deseja continuar?`
+          : `Os itens selecionados serão copiados para <b>${builderCloneTargets.length} builders de destino</b>. Deseja continuar?`,
+        hasDestructiveStep ? "Clonar mesmo assim" : "Clonar builders",
       );
 
       if (!confirmed) return;
@@ -3385,23 +3299,32 @@ export default function CreateTemplatesApp() {
 
     setIsCloningBot(true);
     try {
-      const data = await postJson<BotCloneResponse>("/api/bots/clone", {
-        sourceRouterKey: sourceKey,
-        targetRouterKey: targetKey,
-        options: botCloneOptions,
-      });
-
-      setBotCloneResult(data);
+      const results = await cloneBuilderTargetsSequentially(
+        builderCloneTargets,
+        (target) =>
+          postJson<BotCloneResponse>("/api/bots/clone", {
+            sourceRouterKey: sourceKey,
+            targetRouterKey: target.key,
+            options: botCloneOptions,
+          }),
+        setBotCloneResults,
+      );
+      const succeeded = results.filter(
+        (result) =>
+          result.response &&
+          result.response.totals.failed === 0 &&
+          result.response.totals.partial === 0,
+      ).length;
       setOperationResult({
-        summary: `Clonagem concluída: ${data.totals.succeeded}/${data.totals.requested} etapa(s) ok${
-          data.totals.failed ? `, ${data.totals.failed} com erro` : ""
-        }.`,
-        payload: data,
-        status: data.totals.failed > 0 ? "warning" : "success",
+        summary: `Clonagem concluída: ${succeeded}/${results.length} builder(s) sem erro.`,
+        payload: results.map((result) => ({
+          destino: result.target.shortName,
+          totais: result.response?.totals,
+          erro: result.error,
+        })),
+        status: succeeded === results.length ? "success" : "warning",
         view: "bots",
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao clonar builder.");
     } finally {
       setIsCloningBot(false);
     }
@@ -3576,9 +3499,6 @@ export default function CreateTemplatesApp() {
       setError("Marque Fluxo para publicar automaticamente os novos Builders.");
       return;
     }
-    const allExistingIds = new Set(
-      [...routerApplications, ...botApplications].map((application) => application.shortName),
-    );
     const selectedIds = selected.map((item) => item.targetShortName);
     const duplicateIds = new Set(
       selectedIds.filter((shortName, index) => selectedIds.indexOf(shortName) !== index),
@@ -3587,12 +3507,11 @@ export default function CreateTemplatesApp() {
       (item) =>
         !item.targetName.trim() ||
         validateBulkTargetShortName(item.targetShortName) ||
-        allExistingIds.has(item.targetShortName) ||
         duplicateIds.has(item.targetShortName),
     );
     if (invalid) {
       setError(
-        `Revise o destino de ${invalid.sourceName}: nome/ID inválido, duplicado ou já existente no contrato.`,
+        `Revise o novo nome de ${invalid.sourceName}: nome inválido ou repetido nesta seleção.`,
       );
       return;
     }
@@ -3614,7 +3533,7 @@ export default function CreateTemplatesApp() {
         const createResponse = await sendBlipCommand(
           {
             id: createCommandId(),
-            to: DEFAULT_DEV_COMMAND_TO,
+            to: PORTAL_COMMAND_TO,
             method: COMMAND_METHODS.SET,
             uri: "/applications",
             type: "application/vnd.iris.portal.application-account+json",
@@ -3972,119 +3891,6 @@ export default function CreateTemplatesApp() {
       status: results.some((item) => item.status !== "success") ? "warning" : "success",
       view: "bots",
     });
-  }
-
-  async function handleRunDevCommand(event: FormEvent) {
-    event.preventDefault();
-    const to = devCommandTo.trim();
-    const uri = devCommandUri.trim();
-
-    setError("");
-    setOperationResult(null);
-
-    if (!uri) {
-      setError("Informe a URI do command.");
-      return;
-    }
-
-    const command: DevCommand = {
-      method: devCommandMethod,
-      to,
-      uri,
-      id: createCommandId(),
-    };
-
-    if (devCommandType) {
-      command.type = devCommandType;
-
-      try {
-        command.resource = buildDevCommandResource(devCommandType, devCommandResource);
-      } catch (caughtError) {
-        setError(caughtError instanceof Error ? caughtError.message : "Resource inválido.");
-        return;
-      }
-    }
-
-    setIsRunningDevCommand(true);
-    setOperationResult({
-      summary: `Executando command em ${devCommandDestination}...`,
-      payload: {
-        destination: devCommandDestination,
-        command,
-        status: "loading",
-      },
-    });
-
-    try {
-      const response = await sendBlipCommand(command, {
-        destination: devCommandDestination,
-        timeout: 30000,
-      });
-      const commandFailed = isRecord(response) && response.status === "failure";
-
-      setOperationResult({
-        summary: commandFailed
-          ? `Command retornou falha em ${devCommandDestination}.`
-          : `Command executado em ${devCommandDestination}.`,
-        payload: {
-          destination: devCommandDestination,
-          command,
-          response,
-        },
-        status: commandFailed ? "warning" : "success",
-      });
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error ? caughtError.message : "Erro ao executar command.";
-
-      setOperationResult({
-        summary: `Falha ao executar command em ${devCommandDestination}.`,
-        payload: {
-          destination: devCommandDestination,
-          command,
-          error: { message },
-        },
-      });
-    } finally {
-      setIsRunningDevCommand(false);
-    }
-  }
-
-  async function handleGetCurrentApplication() {
-    setError("");
-    setIsLoadingCurrentApplication(true);
-    setOperationResult({
-      summary: "Executando getApplication...",
-      payload: {
-        action: "getApplication",
-        status: "loading",
-      },
-    });
-
-    try {
-      const response = await getCurrentApplication();
-
-      setOperationResult({
-        summary: "getApplication executado.",
-        payload: {
-          action: "getApplication",
-          response,
-        },
-      });
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error ? caughtError.message : "Erro ao executar getApplication.";
-
-      setOperationResult({
-        summary: "Falha ao executar getApplication.",
-        payload: {
-          action: "getApplication",
-          error: { message },
-        },
-      });
-    } finally {
-      setIsLoadingCurrentApplication(false);
-    }
   }
 
   function toggleTemplate(key: string) {
@@ -4483,15 +4289,6 @@ export default function CreateTemplatesApp() {
           >
             <Layers3 size={18} aria-hidden="true" />
             Plugins Manager
-          </button>
-          <button
-            className={visibleActiveView === "commands" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("commands")}
-            aria-current={visibleActiveView === "commands" ? "page" : undefined}
-          >
-            <Terminal size={18} aria-hidden="true" />
-            Commands
           </button>
           <button
             className={visibleActiveView === "logs" ? "active" : ""}
@@ -5128,7 +4925,7 @@ export default function CreateTemplatesApp() {
                 </h2>
                 <p>
                   {cloneMode === "builder"
-                    ? "Selecione dois builders do contrato atual e escolha quais configurações copiar."
+                    ? "Selecione um builder de origem, um ou mais destinos e escolha quais configurações copiar."
                     : cloneMode === "router"
                       ? "Selecione um router de origem, vários destinos e escolha serviços e recursos para copiar com auditoria."
                       : "Escolha os serviços de um router ou selecione Builders e routers diretamente para criar o novo ambiente."}
@@ -5196,15 +4993,16 @@ export default function CreateTemplatesApp() {
                   </div>
                   <div className="bot-clone-router-field">
                     <span className="bot-clone-field-label">
-                      {cloneMode === "builder" ? "Builder de destino" : "Routers de destino"}
+                      {cloneMode === "builder" ? "Builders de destino" : "Routers de destino"}
                     </span>
                     <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
                       <span className="router-summary-main">
                         <span className="router-summary-avatar" aria-hidden="true">
                           {cloneMode === "router" ? (
                             <Layers3 size={16} />
-                          ) : selectedBotTarget?.imageUri ? (
-                            <img src={selectedBotTarget.imageUri} alt="" />
+                          ) : builderCloneTargets.length === 1 &&
+                            selectedBuilderCloneApplications[0]?.imageUri ? (
+                            <img src={selectedBuilderCloneApplications[0].imageUri} alt="" />
                           ) : (
                             <Bot size={16} />
                           )}
@@ -5215,14 +5013,18 @@ export default function CreateTemplatesApp() {
                               ? routerCloneTargets.length
                                 ? `${routerCloneTargets.length} router(s) selecionado(s)`
                                 : "Nenhum router selecionado"
-                              : selectedBotTarget?.name || "Nenhum builder selecionado"}
+                              : builderCloneTargets.length
+                                ? `${builderCloneTargets.length} builder(s) selecionado(s)`
+                                : "Nenhum builder selecionado"}
                           </strong>
                           <span>
                             {cloneMode === "router"
                               ? selectedRouterCloneApplications
                                   .map((application) => application.name)
                                   .join(", ") || "Selecione um ou mais destinos"
-                              : botTargetShortName || "Selecione o destino"}
+                              : selectedBuilderCloneApplications
+                                  .map((application) => application.name)
+                                  .join(", ") || "Selecione um ou mais destinos"}
                           </span>
                         </span>
                       </span>
@@ -5236,6 +5038,10 @@ export default function CreateTemplatesApp() {
                             setRouterTargetPickerSelection(
                               new Set(routerCloneTargets.map((target) => target.shortName)),
                             );
+                          } else {
+                            setBuilderTargetPickerSelection(
+                              new Set(builderCloneTargets.map((target) => target.shortName)),
+                            );
                           }
                           setBotPicker("target");
                         }}
@@ -5246,17 +5052,22 @@ export default function CreateTemplatesApp() {
                           ? routerCloneTargets.length
                             ? "Alterar"
                             : "Selecionar"
-                          : botTargetShortName
+                          : builderCloneTargets.length
                             ? "Alterar"
                             : "Selecionar"}
                       </Button>
                     </div>
-                    {cloneMode === "builder" && (
-                      <BotIdentityHint
-                        lookup={botTargetIdentity}
-                        onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
-                        onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
-                      />
+                    {cloneMode === "builder" && builderCloneTargets.length > 0 && (
+                      <div
+                        className="builder-clone-targets"
+                        aria-label="Builders de destino selecionados"
+                      >
+                        {selectedBuilderCloneApplications.map((application) => (
+                          <span key={application.shortName} className="builder-clone-target-tag">
+                            {application.name}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -5349,11 +5160,7 @@ export default function CreateTemplatesApp() {
                   <Button
                     type="submit"
                     className="bot-clone-submit"
-                    loading={
-                      cloneMode === "builder" &&
-                      (isCloningBot ||
-                        (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length))
-                    }
+                    loading={cloneMode === "builder" && isCloningBot}
                     disabled={
                       cloneMode === "router" &&
                       (isPreviewingRouterClone ||
@@ -5365,7 +5172,9 @@ export default function CreateTemplatesApp() {
                     ) : (
                       <CopyPlus size={18} aria-hidden="true" />
                     )}
-                    {cloneMode === "router" ? "Revisar clonagem" : "Clonar Builder"}
+                    {cloneMode === "router"
+                      ? "Revisar clonagem"
+                      : `Clonar para ${builderCloneTargets.length} Builder(s)`}
                   </Button>
                   {cloneMode === "router" && (
                     <Button
@@ -5689,9 +5498,6 @@ export default function CreateTemplatesApp() {
                           </thead>
                           <tbody>
                             {reviewedBulkBotItems.map((item) => {
-                              const exists = [...routerApplications, ...botApplications].some(
-                                (application) => application.shortName === item.targetShortName,
-                              );
                               const duplicated =
                                 bulkBotItems.filter(
                                   (candidate) =>
@@ -5699,11 +5505,7 @@ export default function CreateTemplatesApp() {
                                     candidate.targetShortName === item.targetShortName,
                                 ).length > 1;
                               const validation = validateBulkTargetShortName(item.targetShortName);
-                              const issue = exists
-                                ? "ID já existe"
-                                : duplicated
-                                  ? "ID duplicado"
-                                  : validation;
+                              const issue = duplicated ? "Nome repetido na seleção" : validation;
                               return (
                                 <tr key={item.sourceShortName}>
                                   <td>
@@ -5808,31 +5610,56 @@ export default function CreateTemplatesApp() {
               </div>
             )}
 
-            {cloneMode === "builder" && botCloneResult && (
+            {cloneMode === "builder" && (isCloningBot || botCloneResults.length > 0) && (
               <div className="bot-clone-result-section">
-                <h3>Resultado</h3>
-                {visibleBotStepCount >= botCloneResult.steps.length &&
-                  botCloneResult.totals.failed === 0 && (
+                <h3>Resultado por destino</h3>
+                {isCloningBot && (
+                  <p className="router-clone-auto-loading">
+                    <LoaderCircle className="spin" size={15} aria-hidden="true" />
+                    Processando {botCloneResults.length}/{builderCloneTargets.length} builder(s)…
+                  </p>
+                )}
+                {!isCloningBot &&
+                  botCloneResults.length === builderCloneTargets.length &&
+                  botCloneResults.every(
+                    (result) =>
+                      result.response &&
+                      result.response.totals.failed === 0 &&
+                      result.response.totals.partial === 0,
+                  ) && (
                     <p className="bot-clone-all-clear">
                       <Sparkles size={16} aria-hidden="true" />
-                      Tudo certo — nenhuma etapa com erro.
+                      Tudo certo — nenhum destino com erro.
                     </p>
                   )}
                 <div className="bot-clone-results" aria-live="polite">
-                  {botCloneResult.steps.slice(0, visibleBotStepCount).map((step) => (
-                    <Feedback
-                      key={step.key}
-                      tone={
-                        step.status === "success"
-                          ? "success"
-                          : step.status === "partial"
-                            ? "warning"
-                            : "danger"
-                      }
-                      title={step.label}
-                    >
-                      {describeBotCloneStep(step)}
-                    </Feedback>
+                  {botCloneResults.map((result) => (
+                    <div key={result.target.shortName} className="builder-clone-target-result">
+                      <h4>
+                        {botApplications.find(
+                          (application) => application.shortName === result.target.shortName,
+                        )?.name || result.target.shortName}
+                      </h4>
+                      {result.error ? (
+                        <Feedback tone="danger">{result.error}</Feedback>
+                      ) : (
+                        result.response?.steps.map((step) => (
+                          <Feedback
+                            key={step.key}
+                            tone={
+                              step.status === "success"
+                                ? "success"
+                                : step.status === "partial"
+                                  ? "warning"
+                                  : "danger"
+                            }
+                            title={step.label}
+                          >
+                            {describeBotCloneStep(step)}
+                          </Feedback>
+                        ))
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -6137,7 +5964,6 @@ export default function CreateTemplatesApp() {
                     <option value="flows">Flows</option>
                     <option value="bots">Clone Bots</option>
                     <option value="plugins">Plugins Manager</option>
-                    <option value="commands">Commands</option>
                   </select>
                 </label>
                 <ActionsMenu
@@ -6220,371 +6046,224 @@ export default function CreateTemplatesApp() {
             )}
           </section>
         ) : (
-          <section className="ember-panel results-panel devs-panel">
-            {visibleActiveView === "commands" ? (
-              <>
-                <div className="ember-panel-title results-title">
-                  <div>
-                    <h2>Commands</h2>
-                    <p>Envie commands pelo proxy do Portal BLiP sem metadata.</p>
-                  </div>
-                  <Terminal size={18} aria-hidden="true" />
-                </div>
+          <section className="ember-panel results-panel plugins-panel">
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Plugins Manager</h2>
+                <p>
+                  {pluginSearchResult.total} carregados, {filteredPlugins.length} filtrados,{" "}
+                  {selectedPlugins.length} selecionados
+                </p>
+              </div>
+              <ActionsMenu
+                label="Mais opções de plugins"
+                actions={[
+                  {
+                    label: allVisiblePluginsSelected
+                      ? "Limpar seleção visível"
+                      : "Selecionar visíveis",
+                    icon: allVisiblePluginsSelected ? (
+                      <Square size={16} aria-hidden="true" />
+                    ) : (
+                      <CheckSquare size={16} aria-hidden="true" />
+                    ),
+                    onSelect: toggleVisiblePlugins,
+                    disabled: filteredPlugins.length === 0,
+                  },
+                  {
+                    label: "Remover selecionados",
+                    icon: <Trash2 size={16} aria-hidden="true" />,
+                    onSelect: () => void handleDeleteSelectedPlugins(),
+                    disabled: isSavingPlugin || selectedPlugins.length === 0,
+                    danger: true,
+                  },
+                ]}
+              />
+            </div>
 
-                <form
-                  className="template-filter-row dev-command-row"
-                  onSubmit={handleRunDevCommand}
+            <form className="plugin-editor-form" onSubmit={handleSavePlugin}>
+              <label className="blip-native-field" htmlFor="pluginDraftId">
+                ID
+                <input
+                  id="pluginDraftId"
+                  value={pluginDraftId}
+                  onChange={(event) => setPluginDraftId(event.target.value)}
+                  placeholder="Gerar automaticamente"
+                  disabled={Boolean(editingPluginId)}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                className="icon-only"
+                type="button"
+                aria-label="Gerar ID do plugin"
+                title="Gerar ID"
+                onClick={() => setPluginDraftId(createCommandId())}
+                disabled={Boolean(editingPluginId)}
+              >
+                <Plus size={18} aria-hidden="true" />
+              </Button>
+              <label className="blip-native-field" htmlFor="pluginDraftName">
+                Nome
+                <input
+                  id="pluginDraftName"
+                  value={pluginDraftName}
+                  onChange={(event) => setPluginDraftName(event.target.value)}
+                  placeholder="Nome do plugin"
+                />
+              </label>
+              <label className="blip-native-field plugin-url-field" htmlFor="pluginDraftUrl">
+                URL
+                <input
+                  id="pluginDraftUrl"
+                  value={pluginDraftUrl}
+                  onChange={(event) => setPluginDraftUrl(event.target.value)}
+                  placeholder="https://plugin.example.com/"
+                />
+              </label>
+              {editingPluginId && (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={resetPluginDraft}
+                  disabled={isSavingPlugin}
                 >
-                  <label className="blip-native-field" htmlFor="devCommandDestination">
-                    Destination
-                    <select
-                      id="devCommandDestination"
-                      value={devCommandDestination}
-                      onChange={(event) =>
-                        setDevCommandDestination(event.target.value as CommandDestination)
-                      }
-                    >
-                      {COMMAND_DESTINATIONS.map((destination) => (
-                        <option key={destination} value={destination}>
-                          {destination}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="blip-native-field" htmlFor="devCommandMethod">
-                    Method
-                    <select
-                      id="devCommandMethod"
-                      value={devCommandMethod}
-                      onChange={(event) => setDevCommandMethod(event.target.value as CommandMethod)}
-                    >
-                      {DEV_COMMAND_METHODS.map((method) => (
-                        <option key={method} value={method}>
-                          {method}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="blip-native-field" htmlFor="devCommandTo">
-                    To
-                    <input
-                      id="devCommandTo"
-                      value={devCommandTo}
-                      onChange={(event) => setDevCommandTo(event.target.value)}
-                      placeholder="postmaster@portal.blip.ai"
-                    />
-                  </label>
-                  <label
-                    className="blip-native-field template-search-field"
-                    htmlFor="devCommandUri"
-                  >
-                    URI
-                    <input
-                      id="devCommandUri"
-                      value={devCommandUri}
-                      onChange={(event) => setDevCommandUri(event.target.value)}
-                      placeholder="/resources"
-                    />
-                  </label>
-                  <label className="blip-native-field" htmlFor="devCommandType">
-                    Type
-                    <select
-                      id="devCommandType"
-                      value={devCommandType}
-                      onChange={(event) => setDevCommandType(event.target.value as DevCommandType)}
-                    >
-                      {DEV_COMMAND_TYPE_OPTIONS.map((option) => (
-                        <option key={option.value || "none"} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {devCommandType && (
-                    <label
-                      className="blip-native-field dev-command-resource-field"
-                      htmlFor="devCommandResource"
-                    >
-                      Resource
-                      <textarea
-                        id="devCommandResource"
-                        className={
-                          devCommandType === "application/json" ? "json-resource-input" : ""
-                        }
-                        value={devCommandResource}
-                        onChange={(event) => setDevCommandResource(event.target.value)}
-                        placeholder={devCommandType === "application/json" ? "{}" : "Texto"}
-                        spellCheck={devCommandType !== "application/json"}
-                      />
-                    </label>
-                  )}
-                  <div className="dev-command-actions">
-                    <ActionsMenu
-                      label="Mais opções de commands"
-                      actions={[
-                        {
-                          label: "Usar URI padrão",
-                          icon: <Clipboard size={16} aria-hidden="true" />,
-                          onSelect: () =>
-                            setDevCommandUri(
-                              currentApplicationRouter?.tenantId
-                                ? getAccessibleApplicationUri(
-                                    getActiveTenantId(currentApplicationRouter),
-                                  )
-                                : DEFAULT_DEV_COMMAND_URI,
-                            ),
-                        },
-                        {
-                          label: "Get application",
-                          icon: <FileJson size={16} aria-hidden="true" />,
-                          onSelect: () => void handleGetCurrentApplication(),
-                          disabled: isLoadingCurrentApplication || !isEmbedded,
-                        },
-                      ]}
-                    />
-                    <Button
-                      variant="primary"
-                      type="submit"
-                      disabled={isRunningDevCommand || !isEmbedded}
-                    >
-                      {isRunningDevCommand ? (
-                        <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                      ) : (
-                        <Send size={18} aria-hidden="true" />
-                      )}
-                      Executar
-                    </Button>
-                  </div>
-                </form>
-              </>
-            ) : (
-              <>
-                <div className="ember-panel-title results-title">
-                  <div>
-                    <h2>Plugins Manager</h2>
-                    <p>
-                      {pluginSearchResult.total} carregados, {filteredPlugins.length} filtrados,{" "}
-                      {selectedPlugins.length} selecionados
-                    </p>
-                  </div>
-                  <ActionsMenu
-                    label="Mais opções de plugins"
-                    actions={[
-                      {
-                        label: allVisiblePluginsSelected
-                          ? "Limpar seleção visível"
-                          : "Selecionar visíveis",
-                        icon: allVisiblePluginsSelected ? (
-                          <Square size={16} aria-hidden="true" />
-                        ) : (
-                          <CheckSquare size={16} aria-hidden="true" />
-                        ),
-                        onSelect: toggleVisiblePlugins,
-                        disabled: filteredPlugins.length === 0,
-                      },
-                      {
-                        label: "Remover selecionados",
-                        icon: <Trash2 size={16} aria-hidden="true" />,
-                        onSelect: () => void handleDeleteSelectedPlugins(),
-                        disabled: isSavingPlugin || selectedPlugins.length === 0,
-                        danger: true,
-                      },
-                    ]}
-                  />
-                </div>
-
-                <form className="plugin-editor-form" onSubmit={handleSavePlugin}>
-                  <label className="blip-native-field" htmlFor="pluginDraftId">
-                    ID
-                    <input
-                      id="pluginDraftId"
-                      value={pluginDraftId}
-                      onChange={(event) => setPluginDraftId(event.target.value)}
-                      placeholder="Gerar automaticamente"
-                      disabled={Boolean(editingPluginId)}
-                    />
-                  </label>
-                  <Button
-                    variant="secondary"
-                    className="icon-only"
-                    type="button"
-                    aria-label="Gerar ID do plugin"
-                    title="Gerar ID"
-                    onClick={() => setPluginDraftId(createCommandId())}
-                    disabled={Boolean(editingPluginId)}
-                  >
-                    <Plus size={18} aria-hidden="true" />
-                  </Button>
-                  <label className="blip-native-field" htmlFor="pluginDraftName">
-                    Nome
-                    <input
-                      id="pluginDraftName"
-                      value={pluginDraftName}
-                      onChange={(event) => setPluginDraftName(event.target.value)}
-                      placeholder="Nome do plugin"
-                    />
-                  </label>
-                  <label className="blip-native-field plugin-url-field" htmlFor="pluginDraftUrl">
-                    URL
-                    <input
-                      id="pluginDraftUrl"
-                      value={pluginDraftUrl}
-                      onChange={(event) => setPluginDraftUrl(event.target.value)}
-                      placeholder="https://plugin.example.com/"
-                    />
-                  </label>
-                  {editingPluginId && (
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={resetPluginDraft}
-                      disabled={isSavingPlugin}
-                    >
-                      <X size={18} aria-hidden="true" />
-                      Cancelar
-                    </Button>
-                  )}
-                  <Button
-                    variant="primary"
-                    type="submit"
-                    disabled={isSavingPlugin || !pluginsLoaded}
-                  >
-                    {isSavingPlugin ? (
-                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                    ) : (
-                      <Plus size={18} aria-hidden="true" />
-                    )}
-                    {editingPluginId ? "Salvar edição" : "Adicionar"}
-                  </Button>
-                </form>
-
-                <form className="plugin-toolbar" onSubmit={handleLoadPlugins}>
-                  <label className="blip-native-field plugin-filter-field" htmlFor="pluginFilter">
-                    Filtrar por nome, ID ou URL
-                    <input
-                      id="pluginFilter"
-                      value={pluginFilter}
-                      onChange={(event) => setPluginFilter(event.target.value)}
-                      placeholder="Digite para filtrar"
-                    />
-                  </label>
-                  <label className="blip-native-field" htmlFor="pluginCopyMode">
-                    Modo de cópia
-                    <select
-                      id="pluginCopyMode"
-                      value={pluginCopyMode}
-                      onChange={(event) => setPluginCopyMode(event.target.value as PluginCopyMode)}
-                    >
-                      <option value="add">Adicionar aos existentes</option>
-                      <option value="replace">Substituir lista do destino</option>
-                    </select>
-                  </label>
-                  <Button variant="secondary" type="submit" disabled={isLoadingPlugins}>
-                    {isLoadingPlugins ? (
-                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                    ) : (
-                      <Search size={18} aria-hidden="true" />
-                    )}
-                    Buscar
-                  </Button>
-                  <Button variant="secondary" type="button" onClick={openTargetsModal}>
-                    <Plus size={18} aria-hidden="true" />
-                    {targetCount
-                      ? `Editar routers de destino (${targetCount})`
-                      : "Adicionar routers de destino"}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    type="button"
-                    onClick={handleReplicatePlugins}
-                    disabled={isCopyingPlugins || selectedPlugins.length === 0}
-                  >
-                    {isCopyingPlugins ? (
-                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                    ) : (
-                      <CopyPlus size={18} aria-hidden="true" />
-                    )}
-                    Copiar
-                  </Button>
-                </form>
-                {pluginReplicateProgress && (
-                  <OperationProgress
-                    progress={pluginReplicateProgress}
-                    label="destinos processados"
-                  />
+                  <X size={18} aria-hidden="true" />
+                  Cancelar
+                </Button>
+              )}
+              <Button variant="primary" type="submit" disabled={isSavingPlugin || !pluginsLoaded}>
+                {isSavingPlugin ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Plus size={18} aria-hidden="true" />
                 )}
+                {editingPluginId ? "Salvar edição" : "Adicionar"}
+              </Button>
+            </form>
 
-                <div className="ember-table-wrap template-table-wrap">
-                  <table className="ember-table plugins-table">
-                    <thead>
-                      <tr>
-                        <th className="select-column">Sel.</th>
-                        <th>Nome</th>
-                        <th>ID</th>
-                        <th>URL</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredPlugins.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="empty-cell">
-                            Nenhum plugin carregado
+            <form className="plugin-toolbar" onSubmit={handleLoadPlugins}>
+              <label className="blip-native-field plugin-filter-field" htmlFor="pluginFilter">
+                Filtrar por nome, ID ou URL
+                <input
+                  id="pluginFilter"
+                  value={pluginFilter}
+                  onChange={(event) => setPluginFilter(event.target.value)}
+                  placeholder="Digite para filtrar"
+                />
+              </label>
+              <label className="blip-native-field" htmlFor="pluginCopyMode">
+                Modo de cópia
+                <select
+                  id="pluginCopyMode"
+                  value={pluginCopyMode}
+                  onChange={(event) => setPluginCopyMode(event.target.value as PluginCopyMode)}
+                >
+                  <option value="add">Adicionar aos existentes</option>
+                  <option value="replace">Substituir lista do destino</option>
+                </select>
+              </label>
+              <Button variant="secondary" type="submit" disabled={isLoadingPlugins}>
+                {isLoadingPlugins ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Search size={18} aria-hidden="true" />
+                )}
+                Buscar
+              </Button>
+              <Button variant="secondary" type="button" onClick={openTargetsModal}>
+                <Plus size={18} aria-hidden="true" />
+                {targetCount
+                  ? `Editar routers de destino (${targetCount})`
+                  : "Adicionar routers de destino"}
+              </Button>
+              <Button
+                variant="primary"
+                type="button"
+                onClick={handleReplicatePlugins}
+                disabled={isCopyingPlugins || selectedPlugins.length === 0}
+              >
+                {isCopyingPlugins ? (
+                  <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <CopyPlus size={18} aria-hidden="true" />
+                )}
+                Copiar
+              </Button>
+            </form>
+            {pluginReplicateProgress && (
+              <OperationProgress progress={pluginReplicateProgress} label="destinos processados" />
+            )}
+
+            <div className="ember-table-wrap template-table-wrap">
+              <table className="ember-table plugins-table">
+                <thead>
+                  <tr>
+                    <th className="select-column">Sel.</th>
+                    <th>Nome</th>
+                    <th>ID</th>
+                    <th>URL</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPlugins.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="empty-cell">
+                        Nenhum plugin carregado
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPlugins.map((plugin) => {
+                      const key = pluginKey(plugin);
+                      const checked = selectedPluginIds.has(key);
+
+                      return (
+                        <tr key={key} className={checked ? "selected" : ""}>
+                          <td className="select-column">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePlugin(key)}
+                              aria-label={`Selecionar ${plugin.name}`}
+                            />
+                          </td>
+                          <td className="template-name">{plugin.name}</td>
+                          <td className="mono-cell">{plugin.id}</td>
+                          <td className="plugin-url-cell">
+                            <a href={plugin.url} target="_blank" rel="noreferrer">
+                              {plugin.url}
+                            </a>
+                          </td>
+                          <td>
+                            <div className="table-actions">
+                              <ActionsMenu
+                                label={`Mais opções de ${plugin.name}`}
+                                compact
+                                disabled={isSavingPlugin}
+                                actions={[
+                                  {
+                                    label: "Editar",
+                                    icon: <Pencil size={16} aria-hidden="true" />,
+                                    onSelect: () => handleEditPlugin(plugin),
+                                  },
+                                  {
+                                    label: "Remover",
+                                    icon: <Trash2 size={16} aria-hidden="true" />,
+                                    onSelect: () => void handleDeletePlugin(plugin),
+                                    danger: true,
+                                  },
+                                ]}
+                              />
+                            </div>
                           </td>
                         </tr>
-                      ) : (
-                        filteredPlugins.map((plugin) => {
-                          const key = pluginKey(plugin);
-                          const checked = selectedPluginIds.has(key);
-
-                          return (
-                            <tr key={key} className={checked ? "selected" : ""}>
-                              <td className="select-column">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => togglePlugin(key)}
-                                  aria-label={`Selecionar ${plugin.name}`}
-                                />
-                              </td>
-                              <td className="template-name">{plugin.name}</td>
-                              <td className="mono-cell">{plugin.id}</td>
-                              <td className="plugin-url-cell">
-                                <a href={plugin.url} target="_blank" rel="noreferrer">
-                                  {plugin.url}
-                                </a>
-                              </td>
-                              <td>
-                                <div className="table-actions">
-                                  <ActionsMenu
-                                    label={`Mais opções de ${plugin.name}`}
-                                    compact
-                                    disabled={isSavingPlugin}
-                                    actions={[
-                                      {
-                                        label: "Editar",
-                                        icon: <Pencil size={16} aria-hidden="true" />,
-                                        onSelect: () => handleEditPlugin(plugin),
-                                      },
-                                      {
-                                        label: "Remover",
-                                        icon: <Trash2 size={16} aria-hidden="true" />,
-                                        onSelect: () => void handleDeletePlugin(plugin),
-                                        danger: true,
-                                      },
-                                    ]}
-                                  />
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
@@ -7766,8 +7445,8 @@ export default function CreateTemplatesApp() {
                     {botPicker === "source" ? "origem" : "destino"}
                   </h2>
                   <p>
-                    {cloneMode === "router" && botPicker === "target"
-                      ? "Selecione um ou mais routers de destino do contrato atual."
+                    {botPicker === "target"
+                      ? `Selecione um ou mais ${cloneMode === "builder" ? "builders" : "routers"} de destino do contrato atual.`
                       : `Selecione um ${cloneMode === "builder" ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
                   </p>
                 </div>
@@ -7822,8 +7501,8 @@ export default function CreateTemplatesApp() {
                     ).length
                   }{" "}
                   {cloneMode === "builder" ? "builders" : "routers"} disponíveis
-                  {cloneMode === "router" && botPicker === "target"
-                    ? ` · ${routerTargetPickerSelection.size} selecionado(s)`
+                  {botPicker === "target"
+                    ? ` · ${cloneMode === "builder" ? builderTargetPickerSelection.size : routerTargetPickerSelection.size} selecionado(s)`
                     : ""}
                 </div>
                 <div className="router-application-list">
@@ -7850,8 +7529,12 @@ export default function CreateTemplatesApp() {
                       ? filteredBotSourceApplications
                       : filteredBotTargetApplications
                     ).map((application) => {
-                      const isMultiTarget = cloneMode === "router" && botPicker === "target";
-                      const selected = routerTargetPickerSelection.has(application.shortName);
+                      const isMultiTarget = botPicker === "target";
+                      const selected = (
+                        cloneMode === "builder"
+                          ? builderTargetPickerSelection
+                          : routerTargetPickerSelection
+                      ).has(application.shortName);
                       const content = (
                         <>
                           <span className="router-application-avatar">
@@ -7876,7 +7559,9 @@ export default function CreateTemplatesApp() {
                             type="checkbox"
                             checked={selected}
                             onChange={(event) =>
-                              setRouterTargetPickerSelection((current) => {
+                              (cloneMode === "builder"
+                                ? setBuilderTargetPickerSelection
+                                : setRouterTargetPickerSelection)((current) => {
                                 const next = new Set(current);
                                 if (event.target.checked) next.add(application.shortName);
                                 else next.delete(application.shortName);
@@ -7891,11 +7576,7 @@ export default function CreateTemplatesApp() {
                           key={application.shortName}
                           type="button"
                           className="router-application-option bot-clone-picker-option"
-                          onClick={() =>
-                            void (botPicker === "source"
-                              ? handleSelectBotSourceApplication(application)
-                              : handleSelectBotTargetApplication(application))
-                          }
+                          onClick={() => void handleSelectBotSourceApplication(application)}
                           disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
                         >
                           {content}
@@ -7913,14 +7594,20 @@ export default function CreateTemplatesApp() {
                 >
                   Cancelar
                 </Button>
-                {cloneMode === "router" && botPicker === "target" && (
+                {botPicker === "target" && (
                   <Button
                     variant="primary"
-                    onClick={() => void handleConfirmRouterTargets()}
+                    onClick={() =>
+                      void (cloneMode === "builder"
+                        ? handleConfirmBuilderTargets()
+                        : handleConfirmRouterTargets())
+                    }
                     loading={isResolvingBotTargetKey}
                   >
                     <Check size={18} aria-hidden="true" /> Confirmar{" "}
-                    {routerTargetPickerSelection.size}
+                    {cloneMode === "builder"
+                      ? builderTargetPickerSelection.size
+                      : routerTargetPickerSelection.size}
                   </Button>
                 )}
               </div>
