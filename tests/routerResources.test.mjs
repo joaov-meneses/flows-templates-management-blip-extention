@@ -84,6 +84,32 @@ test("audita recursos iguais, diferentes e ausentes por router de destino", asyn
   }
 });
 
+test("trata a resposta de nenhum recurso da Blip como lista vazia", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    const isSource = options.headers.Authorization === sourceKey;
+    const body = request.uri.startsWith("/resources?")
+      ? isSource
+        ? { status: "failure", reason: { description: "No keys has been found" } }
+        : { status: "success", resource: { total: 0, items: [] } }
+      : { status: "failure", reason: { description: "unexpected request" } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+
+  try {
+    const preview = await service.previewRouterResources({
+      sourceShortName: "source",
+      sourceRouterKey: sourceKey,
+      targets: [{ shortName: "target", key: targetKey }],
+    });
+    assert.deepEqual(preview.source.resources, []);
+    assert.deepEqual(preview.targets[0].resources, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("clona recursos, resolve variáveis do destino, cria backup e verifica por leitura", async () => {
   const fake = setupFetch();
   const originalCwd = process.cwd();

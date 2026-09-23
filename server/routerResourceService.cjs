@@ -33,7 +33,7 @@ function reasonOf(response) {
   return response?.reason?.description || response?.status || "Resposta inesperada da Blip.";
 }
 
-async function command(key, request) {
+async function command(key, request, { allowEmptyResourceList = false } = {}) {
   const response = await fetch(COMMANDS_URL, {
     method: "POST",
     headers: { Authorization: key, "Content-Type": "application/json" },
@@ -41,7 +41,21 @@ async function command(key, request) {
   });
   const body = await response.json();
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${reasonOf(body)}`);
-  if (body.status !== "success") throw new Error(reasonOf(body));
+  if (body.status !== "success") {
+    const reason = reasonOf(body);
+    if (
+      allowEmptyResourceList &&
+      typeof reason === "string" &&
+      reason.trim().toLowerCase() === "no keys has been found"
+    ) {
+      return {
+        ...body,
+        status: "success",
+        resource: { total: 0, items: [] },
+      };
+    }
+    throw new Error(reason);
+  }
   return body;
 }
 
@@ -56,10 +70,14 @@ function comparable(type, resource) {
 }
 
 async function readResourceIds(routerKey) {
-  const response = await command(routerKey, {
-    method: "get",
-    uri: `/resources?skip=0&take=${MAX_RESOURCES}`,
-  });
+  const response = await command(
+    routerKey,
+    {
+      method: "get",
+      uri: `/resources?skip=0&take=${MAX_RESOURCES}`,
+    },
+    { allowEmptyResourceList: true },
+  );
   const items = response.resource?.items;
   if (!Array.isArray(items) || items.some((item) => typeof item !== "string")) {
     throw new Error("A Blip retornou uma lista de recursos inválida.");
