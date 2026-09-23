@@ -49,6 +49,11 @@ const {
   cloneRouter,
   cloneNewRouter,
 } = require("./server/routerCloneService.cjs");
+const {
+  RouterResourceInputError,
+  previewRouterResources,
+  cloneRouterResources,
+} = require("./server/routerResourceService.cjs");
 const { streamOperation } = require("./server/progressStream.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
@@ -313,6 +318,22 @@ app.post("/api/routers/clone/verify", async (req, res, next) => {
   }
 });
 
+app.post("/api/routers/resources/preview", async (req, res, next) => {
+  try {
+    res.json(await previewRouterResources(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/resources/clone", async (req, res, next) => {
+  try {
+    res.json(await cloneRouterResources(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/bots/identity", async (req, res, next) => {
   try {
     const result = await identifyBot(req.body);
@@ -422,7 +443,8 @@ app.use((error, _req, res, _next) => {
     error instanceof PluginInputError ||
     error instanceof BotInputError ||
     error instanceof RouterDirectoryInputError ||
-    error instanceof RouterCloneInputError
+    error instanceof RouterCloneInputError ||
+    error instanceof RouterResourceInputError
       ? error.statusCode
       : error.statusCode || 500;
 

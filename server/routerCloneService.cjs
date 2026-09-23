@@ -210,12 +210,15 @@ async function prepareRouterClone(params) {
   }
   const selectedSet = new Set(selected);
   const services = source.services.filter((service) => selectedSet.has(service.identity));
-  if (services.length && !services.some((service) => service.isDefault)) {
-    throw new RouterCloneInputError("Inclua o serviço padrão da origem na seleção.");
-  }
-  const application = structuredClone(source.application);
-  application.identifier = targetShortName;
-  application.settings.children = selected.length ? services : target.services;
+  const application = structuredClone(target.application);
+  const existingIdentities = new Set(target.services.map((service) => service.identity));
+  const additions = services
+    .filter((service) => !existingIdentities.has(service.identity))
+    .map((service) => ({
+      ...structuredClone(service),
+      isDefault: target.services.length === 0 && service.isDefault === true,
+    }));
+  application.settings.children = [...target.services, ...additions];
   const nextApplication = JSON.stringify(application);
   if (nextApplication === target.resource.Application) {
     return {

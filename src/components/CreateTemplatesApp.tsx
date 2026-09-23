@@ -124,6 +124,11 @@ import type {
   RouterClonePreview,
   RouterCloneResponse,
   RouterClonePrepared,
+  RouterCloneTarget,
+  RouterCloneTargetResult,
+  RouterResourceDraft,
+  RouterResourcePreview,
+  RouterResourceCloneResponse,
   RouterServicesResponse,
   OperationResult,
   PortalApplicationAccount,
@@ -185,6 +190,7 @@ const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
 ];
 type CloneMode = "builder" | "router" | "bulk";
 type BulkSourceMode = "router" | "direct";
+type RouterCloneOptions = { services: boolean; resources: boolean };
 type BotIdentityLookup = {
   status: "idle" | "loading" | "success" | "error";
   identity: string;
@@ -826,8 +832,28 @@ export default function CreateTemplatesApp() {
   const [isCloningBot, setIsCloningBot] = useState(false);
   const [botCloneResult, setBotCloneResult] = useState<BotCloneResponse | null>(null);
   const [routerClonePreview, setRouterClonePreview] = useState<RouterClonePreview | null>(null);
+  const [routerClonePreviews, setRouterClonePreviews] = useState<
+    Record<string, RouterClonePreview>
+  >({});
   const [routerCloneResult, setRouterCloneResult] = useState<RouterCloneResponse | null>(null);
+  const [routerCloneResults, setRouterCloneResults] = useState<RouterCloneTargetResult[]>([]);
+  const [routerCloneTargets, setRouterCloneTargets] = useState<RouterCloneTarget[]>([]);
+  const [routerTargetPickerSelection, setRouterTargetPickerSelection] = useState<Set<string>>(
+    new Set(),
+  );
+  const [routerCloneOptions, setRouterCloneOptions] = useState<RouterCloneOptions>({
+    services: false,
+    resources: false,
+  });
   const [selectedRouterServices, setSelectedRouterServices] = useState<Set<string>>(new Set());
+  const [routerResourcePreview, setRouterResourcePreview] = useState<RouterResourcePreview | null>(
+    null,
+  );
+  const [selectedRouterResources, setSelectedRouterResources] = useState<Set<string>>(new Set());
+  const [routerResourceDrafts, setRouterResourceDrafts] = useState<
+    Record<string, RouterResourceDraft>
+  >({});
+  const [isRouterAuditModalOpen, setIsRouterAuditModalOpen] = useState(false);
   const [isPreviewingRouterClone, setIsPreviewingRouterClone] = useState(false);
   const [isCloningRouter, setIsCloningRouter] = useState(false);
   const [bulkTargetTag, setBulkTargetTag] = useState("");
@@ -861,19 +887,21 @@ export default function CreateTemplatesApp() {
     ? "bot-picker"
     : isBulkBotPickerOpen
       ? "bulk-bot-picker"
-      : routerModal
-        ? "router"
-        : isBulkFlowMappingModalOpen
-          ? "bulk-flow-mapping"
-          : isEditFlowModalOpen
-            ? "edit-flow"
-            : isCreateFlowModalOpen
-              ? "create-flow"
-              : isTemplateDeleteModalOpen
-                ? "template-delete"
-                : isTemplateCompareModalOpen
-                  ? "template-compare"
-                  : null;
+      : isRouterAuditModalOpen
+        ? "router-clone-audit"
+        : routerModal
+          ? "router"
+          : isBulkFlowMappingModalOpen
+            ? "bulk-flow-mapping"
+            : isEditFlowModalOpen
+              ? "edit-flow"
+              : isCreateFlowModalOpen
+                ? "create-flow"
+                : isTemplateDeleteModalOpen
+                  ? "template-delete"
+                  : isTemplateCompareModalOpen
+                    ? "template-compare"
+                    : null;
 
   useEffect(() => {
     if (!isEmbedded) return;
@@ -1121,6 +1149,9 @@ export default function CreateTemplatesApp() {
   const cloneApplications = cloneMode === "builder" ? botApplications : routerApplications;
   const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
   const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
+  const selectedRouterCloneApplications = routerCloneTargets
+    .map((target) => routerApplications.find((item) => item.shortName === target.shortName))
+    .filter((item): item is PortalApplicationAccount => Boolean(item));
   const selectedBulkBots = bulkBotItems.filter((item) => item.selected);
   const filteredBulkBotPickerItems = useMemo(() => {
     const query = bulkDirectSearch.trim().toLowerCase();
@@ -1362,7 +1393,12 @@ export default function CreateTemplatesApp() {
 
   async function handleSelectBotSourceApplication(application: PortalApplicationAccount) {
     setRouterClonePreview(null);
+    setRouterClonePreviews({});
     setRouterCloneResult(null);
+    setRouterCloneResults([]);
+    setRouterResourcePreview(null);
+    setSelectedRouterServices(new Set());
+    setSelectedRouterResources(new Set());
     setBulkBotItems([]);
     setBotSourceShortName(application.shortName);
     setBotSourceKeyInvalid(false);
@@ -1372,6 +1408,11 @@ export default function CreateTemplatesApp() {
       const router = await loadRouterKey(application.shortName);
 
       setBotSourceRouterKey(router.key);
+      if (cloneMode === "router") {
+        setRouterCloneTargets((current) =>
+          current.filter((target) => target.shortName !== application.shortName),
+        );
+      }
       setBotPicker(null);
     } catch (caughtError) {
       setBotSourceShortName("");
@@ -1398,6 +1439,39 @@ export default function CreateTemplatesApp() {
       setBotTargetShortName("");
       setBotTargetRouterKey("");
       setError(getErrorMessage(caughtError, "Erro ao carregar a key do bot."));
+    } finally {
+      setIsResolvingBotTargetKey(false);
+    }
+  }
+
+  async function handleConfirmRouterTargets() {
+    const applications = routerApplications.filter((application) =>
+      routerTargetPickerSelection.has(application.shortName),
+    );
+    if (!applications.length) {
+      setError("Selecione pelo menos um router de destino.");
+      return;
+    }
+    setError("");
+    setIsResolvingBotTargetKey(true);
+    try {
+      const targets = await Promise.all(
+        applications.map((application) => loadRouterKey(application.shortName)),
+      );
+      setRouterCloneTargets(targets);
+      setRouterClonePreview(null);
+      setRouterClonePreviews({});
+      setRouterResourcePreview(null);
+      setRouterCloneResult(null);
+      setRouterCloneResults([]);
+      setSelectedRouterServices(new Set());
+      setSelectedRouterResources(new Set());
+      setBotPicker(null);
+      if (routerCloneOptions.services || routerCloneOptions.resources) {
+        window.setTimeout(() => void handlePreviewRouterClone(routerCloneOptions, targets), 0);
+      }
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Erro ao carregar as keys dos routers de destino."));
     } finally {
       setIsResolvingBotTargetKey(false);
     }
@@ -1442,7 +1516,16 @@ export default function CreateTemplatesApp() {
     setBotTargetRouterKey("");
     setBotCloneResult(null);
     setRouterClonePreview(null);
+    setRouterClonePreviews({});
     setRouterCloneResult(null);
+    setRouterCloneResults([]);
+    setRouterCloneTargets([]);
+    setRouterTargetPickerSelection(new Set());
+    setRouterCloneOptions({ services: false, resources: false });
+    setRouterResourcePreview(null);
+    setSelectedRouterResources(new Set());
+    setRouterResourceDrafts({});
+    setIsRouterAuditModalOpen(false);
     setSelectedRouterServices(new Set());
     setBulkBotItems([]);
     setBulkTargetTag("");
@@ -3594,111 +3677,284 @@ export default function CreateTemplatesApp() {
     void loadBotApplications();
   }
 
-  async function handlePreviewRouterClone() {
+  async function handlePreviewRouterClone(
+    options: RouterCloneOptions = routerCloneOptions,
+    targets: RouterCloneTarget[] = routerCloneTargets,
+  ) {
     setError("");
     setRouterClonePreview(null);
+    setRouterClonePreviews({});
+    setRouterResourcePreview(null);
     setRouterCloneResult(null);
-    if (!botSourceShortName || !botTargetShortName || !botSourceRouterKey || !botTargetRouterKey) {
-      setError("Selecione os routers de origem e destino antes de consultar os serviços.");
+    setRouterCloneResults([]);
+    if (!options.services && !options.resources) return;
+    if (!botSourceShortName || !botSourceRouterKey || !targets.length) {
+      setError("Selecione a origem e pelo menos um router de destino.");
       return;
     }
     setIsPreviewingRouterClone(true);
     try {
-      const preview = await postJson<RouterClonePreview>("/api/routers/clone/preview", {
-        sourceShortName: botSourceShortName,
-        targetShortName: botTargetShortName,
-        sourceRouterKey: botSourceRouterKey,
-        targetRouterKey: botTargetRouterKey,
-      });
-      setRouterClonePreview(preview);
-      setSelectedRouterServices(
-        new Set(preview.source.services.map((service) => service.identity)),
-      );
+      if (options.services) {
+        const previews = await Promise.all(
+          targets.map(async (target) => ({
+            shortName: target.shortName,
+            preview: await postJson<RouterClonePreview>("/api/routers/clone/preview", {
+              sourceShortName: botSourceShortName,
+              targetShortName: target.shortName,
+              sourceRouterKey: botSourceRouterKey,
+              targetRouterKey: target.key,
+            }),
+          })),
+        );
+        const byTarget = Object.fromEntries(
+          previews.map(({ shortName, preview }) => [shortName, preview]),
+        );
+        setRouterClonePreviews(byTarget);
+        setRouterClonePreview(previews[0]?.preview || null);
+      }
+      if (options.resources) {
+        const preview = await postJson<RouterResourcePreview>("/api/routers/resources/preview", {
+          sourceShortName: botSourceShortName,
+          sourceRouterKey: botSourceRouterKey,
+          targets: targets.map((target) => ({ shortName: target.shortName, key: target.key })),
+        });
+        setRouterResourcePreview(preview);
+        setRouterResourceDrafts((current) =>
+          Object.fromEntries(
+            preview.source.resources.map((resource) => [
+              resource.key,
+              current[resource.key] || resource,
+            ]),
+          ),
+        );
+      }
     } catch (caughtError) {
-      setError(getErrorMessage(caughtError, "Não foi possível consultar os serviços dos routers."));
+      setError(
+        getErrorMessage(
+          caughtError,
+          "Não foi possível auditar os serviços e recursos dos routers.",
+        ),
+      );
     } finally {
       setIsPreviewingRouterClone(false);
     }
   }
 
-  async function handleCloneRouter() {
+  function handleRouterCloneOptionChange(key: keyof RouterCloneOptions, checked: boolean) {
+    const next = { ...routerCloneOptions, [key]: checked };
+    setRouterCloneOptions(next);
+    setRouterCloneResult(null);
+    setRouterCloneResults([]);
+    if (!checked && key === "services") {
+      setRouterClonePreview(null);
+      setRouterClonePreviews({});
+      setSelectedRouterServices(new Set());
+    }
+    if (!checked && key === "resources") {
+      setRouterResourcePreview(null);
+      setSelectedRouterResources(new Set());
+    }
+    if (checked && botSourceRouterKey && routerCloneTargets.length) {
+      window.setTimeout(() => void handlePreviewRouterClone(next), 0);
+    }
+  }
+
+  function updateRouterResourceDraft(key: string, patch: Partial<RouterResourceDraft>) {
+    setRouterResourceDrafts((current) => ({
+      ...current,
+      [key]: { ...current[key], ...patch },
+    }));
+  }
+
+  function appendRouterResourceVariable(key: string, variable: string) {
+    const current = routerResourceDrafts[key];
+    if (!current) return;
+    updateRouterResourceDraft(key, {
+      value: `${current.value}${current.value ? " " : ""}${variable}`,
+    });
+  }
+
+  async function handleOpenRouterAudit() {
     setError("");
-    if (!routerClonePreview || !routerClonePreview.compatible) {
-      setError("Consulte a prévia de dois routers compatíveis antes de clonar.");
+    if (!routerCloneOptions.services && !routerCloneOptions.resources) {
+      setError("Ative Serviços e/ou Recursos para continuar.");
       return;
     }
-    const confirmed = await confirmFlowAction(
-      "Confirmar clonagem do router",
-      `As configurações avançadas do router <b>${botTargetShortName}</b> serão substituídas. ${selectedRouterServices.size ? `${selectedRouterServices.size} serviço(s) da origem serão conectados ao destino, sem duplicar o conteúdo dos builders.` : "Os serviços atuais do destino serão preservados."} Um backup local será criado antes da gravação. Deseja continuar?`,
-      "Clonar router",
+    if (!routerCloneTargets.length) {
+      setError("Selecione pelo menos um router de destino.");
+      return;
+    }
+    if (routerCloneOptions.services) {
+      if (!selectedRouterServices.size) {
+        setError("Selecione pelo menos um serviço ou desative a opção Serviços.");
+        return;
+      }
+      if (routerCloneTargets.some((target) => !routerClonePreviews[target.shortName]?.compatible)) {
+        setError("Há routers de destino incompatíveis na auditoria de serviços.");
+        return;
+      }
+    }
+    if (routerCloneOptions.resources && !selectedRouterResources.size) {
+      setError("Selecione pelo menos um recurso ou desative a opção Recursos.");
+      return;
+    }
+    if (routerCloneOptions.resources && !routerResourcePreview) {
+      setError("Atualize a auditoria de recursos antes de continuar.");
+      return;
+    }
+    const invalidJsonResource = [...selectedRouterResources].find((key) => {
+      const draft = routerResourceDrafts[key];
+      if (!draft || draft.format !== "json") return false;
+      try {
+        JSON.parse(draft.value.replace(/\{\{router\.(id|key|number)\}\}/g, "valor"));
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    if (invalidJsonResource) {
+      setError(`O recurso ${invalidJsonResource} contém JSON inválido.`);
+      return;
+    }
+    const needsPhoneNumber = [...selectedRouterResources].some((key) =>
+      routerResourceDrafts[key]?.value.includes("{{router.number}}"),
     );
-    if (!confirmed) return;
+    if (needsPhoneNumber) {
+      setIsPreviewingRouterClone(true);
+      try {
+        const phones = await Promise.all(
+          routerCloneTargets.map(async (target) => ({
+            shortName: target.shortName,
+            phone: await postJson<RouterPhone>("/api/routers/whatsapp-number", {
+              routerKey: target.key,
+              routerShortName: target.shortName,
+            }),
+          })),
+        );
+        const missing = phones.filter((item) => !item.phone.phoneNumber);
+        if (missing.length) {
+          setError(
+            `A variável de número não pode ser resolvida em: ${missing
+              .map((item) => item.shortName)
+              .join(", ")}.`,
+          );
+          return;
+        }
+      } catch (caughtError) {
+        setError(getErrorMessage(caughtError, "Não foi possível validar os números dos destinos."));
+        return;
+      } finally {
+        setIsPreviewingRouterClone(false);
+      }
+    }
+    setIsRouterAuditModalOpen(true);
+  }
+
+  async function handleCloneRouter() {
+    setError("");
     setIsCloningRouter(true);
     setRouterCloneResult(null);
-    try {
-      const params = {
-        sourceShortName: botSourceShortName,
-        targetShortName: botTargetShortName,
-        sourceRouterKey: botSourceRouterKey,
-        targetRouterKey: botTargetRouterKey,
-        sourceHash: routerClonePreview.source.applicationHash,
-        targetHash: routerClonePreview.target.applicationHash,
-        selectedServiceIdentities: [...selectedRouterServices],
-      };
-      let result: RouterCloneResponse;
-      if (currentApplicationRouter?.shortName === botTargetShortName) {
-        const prepared = await postJson<RouterClonePrepared>("/api/routers/clone/prepare", params);
-        if (prepared.status === "unchanged") {
-          result = { status: "unchanged", services: prepared.services, backup: null };
-        } else {
-          const beforeResponse = await sendBlipCommand(
-            {
-              id: createCommandId(),
-              method: COMMAND_METHODS.GET,
-              to: "postmaster@configurations.msging.net",
-              uri: `lime://${prepared.host}@msging.net/configuration`,
-            },
-            { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
-          );
-          const beforeResource = extractCommandResource(beforeResponse);
-          if (
-            !isRecord(beforeResource) ||
-            typeof beforeResource.Application !== "string" ||
-            (await sha256Hex(beforeResource.Application)) !== prepared.previousHash
-          ) {
-            throw new Error(
-              "A configuração do router atual mudou desde a prévia. Nenhuma gravação foi enviada.",
+    const results: RouterCloneTargetResult[] = [];
+    for (const target of routerCloneTargets) {
+      const result: RouterCloneTargetResult = { shortName: target.shortName, status: "success" };
+      const errors: string[] = [];
+      if (routerCloneOptions.services) {
+        const preview = routerClonePreviews[target.shortName];
+        try {
+          const params = {
+            sourceShortName: botSourceShortName,
+            targetShortName: target.shortName,
+            sourceRouterKey: botSourceRouterKey,
+            targetRouterKey: target.key,
+            sourceHash: preview.source.applicationHash,
+            targetHash: preview.target.applicationHash,
+            selectedServiceIdentities: [...selectedRouterServices],
+          };
+          if (currentApplicationRouter?.shortName === target.shortName) {
+            const prepared = await postJson<RouterClonePrepared>(
+              "/api/routers/clone/prepare",
+              params,
             );
+            if (prepared.status === "unchanged") {
+              result.services = { status: "unchanged", services: prepared.services, backup: null };
+            } else {
+              const beforeResponse = await sendBlipCommand(
+                {
+                  id: createCommandId(),
+                  method: COMMAND_METHODS.GET,
+                  to: "postmaster@configurations.msging.net",
+                  uri: `lime://${prepared.host}@msging.net/configuration`,
+                },
+                { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
+              );
+              const beforeResource = extractCommandResource(beforeResponse);
+              if (
+                !isRecord(beforeResource) ||
+                typeof beforeResource.Application !== "string" ||
+                (await sha256Hex(beforeResource.Application)) !== prepared.previousHash
+              ) {
+                throw new Error("A configuração mudou desde a auditoria.");
+              }
+              const writeResponse = await sendBlipCommand(
+                {
+                  id: createCommandId(),
+                  method: COMMAND_METHODS.SET,
+                  to: "postmaster@msging.net",
+                  uri: `lime://${prepared.host}@msging.net/configuration?caller=${target.shortName}@msging.net`,
+                  type: "application/json",
+                  resource: { Application: prepared.application },
+                },
+                { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
+              );
+              extractCommandResource(writeResponse);
+              await postJson<{ verified: boolean }>("/api/routers/clone/verify", {
+                targetShortName: target.shortName,
+                targetRouterKey: target.key,
+                expectedHash: prepared.expectedHash,
+              });
+              result.services = {
+                status: "success",
+                services: prepared.services,
+                backup: prepared.backup,
+              };
+            }
+          } else {
+            result.services = await postJson<RouterCloneResponse>("/api/routers/clone", params);
           }
-          const writeResponse = await sendBlipCommand(
-            {
-              id: createCommandId(),
-              method: COMMAND_METHODS.SET,
-              to: "postmaster@msging.net",
-              uri: `lime://${prepared.host}@msging.net/configuration?caller=${botTargetShortName}@msging.net`,
-              type: "application/json",
-              resource: { Application: prepared.application },
-            },
-            { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
-          );
-          extractCommandResource(writeResponse);
-          await postJson<{ verified: boolean }>("/api/routers/clone/verify", {
-            targetShortName: botTargetShortName,
-            targetRouterKey: botTargetRouterKey,
-            expectedHash: prepared.expectedHash,
-          });
-          result = { status: "success", services: prepared.services, backup: prepared.backup };
+        } catch (caughtError) {
+          errors.push(`Serviços: ${getErrorMessage(caughtError, "falha")}`);
         }
-      } else {
-        result = await postJson<RouterCloneResponse>("/api/routers/clone", params);
       }
-      setRouterCloneResult(result);
-      setRouterClonePreview(null);
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError, "Não foi possível clonar o router."));
-    } finally {
-      setIsCloningRouter(false);
+      if (routerCloneOptions.resources) {
+        try {
+          result.resources = await postJson<RouterResourceCloneResponse>(
+            "/api/routers/resources/clone",
+            {
+              targetShortName: target.shortName,
+              targetRouterKey: target.key,
+              resources: [...selectedRouterResources].map((key) => routerResourceDrafts[key]),
+            },
+          );
+        } catch (caughtError) {
+          errors.push(`Recursos: ${getErrorMessage(caughtError, "falha")}`);
+        }
+      }
+      if (errors.length) {
+        result.status = result.services || result.resources ? "partial" : "error";
+        result.message = errors.join(" · ");
+      }
+      results.push(result);
     }
+    setRouterCloneResults(results);
+    setRouterCloneResult(results[0]?.services || null);
+    setIsRouterAuditModalOpen(false);
+    setIsCloningRouter(false);
+    setOperationResult({
+      summary: `Clonagem de routers concluída: ${results.filter((item) => item.status === "success").length}/${results.length} destino(s) sem erro.`,
+      payload: results,
+      status: results.some((item) => item.status !== "success") ? "warning" : "success",
+      view: "bots",
+    });
   }
 
   async function handleRunDevCommand(event: FormEvent) {
@@ -3939,6 +4195,9 @@ export default function CreateTemplatesApp() {
         return;
       case "bulk-bot-picker":
         if (!isBulkCreatingBots) setIsBulkBotPickerOpen(false);
+        return;
+      case "router-clone-audit":
+        if (!isCloningRouter) setIsRouterAuditModalOpen(false);
         return;
       case "router":
         closeRouterModal();
@@ -4829,7 +5088,7 @@ export default function CreateTemplatesApp() {
                   {cloneMode === "builder"
                     ? "Selecione dois builders do contrato atual e escolha quais configurações copiar."
                     : cloneMode === "router"
-                      ? "Selecione dois routers do contrato atual, confira os serviços da origem e escolha quais conectar ao destino."
+                      ? "Selecione um router de origem, vários destinos e escolha serviços e recursos para copiar com auditoria."
                       : "Escolha os serviços de um router ou selecione Builders e routers diretamente para criar o novo ambiente."}
                 </p>
               </div>
@@ -4843,7 +5102,7 @@ export default function CreateTemplatesApp() {
                     ? handleCloneBot
                     : (event) => {
                         event.preventDefault();
-                        void handlePreviewRouterClone();
+                        void handleOpenRouterAudit();
                       }
                 }
               >
@@ -4895,25 +5154,34 @@ export default function CreateTemplatesApp() {
                   </div>
                   <div className="bot-clone-router-field">
                     <span className="bot-clone-field-label">
-                      {cloneMode === "builder" ? "Builder" : "Router"} de destino
+                      {cloneMode === "builder" ? "Builder de destino" : "Routers de destino"}
                     </span>
                     <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
                       <span className="router-summary-main">
                         <span className="router-summary-avatar" aria-hidden="true">
-                          {selectedBotTarget?.imageUri ? (
+                          {cloneMode === "router" ? (
+                            <Layers3 size={16} />
+                          ) : selectedBotTarget?.imageUri ? (
                             <img src={selectedBotTarget.imageUri} alt="" />
-                          ) : cloneMode === "router" ? (
-                            <Network size={16} />
                           ) : (
                             <Bot size={16} />
                           )}
                         </span>
                         <span className="router-summary-copy">
                           <strong>
-                            {selectedBotTarget?.name ||
-                              `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
+                            {cloneMode === "router"
+                              ? routerCloneTargets.length
+                                ? `${routerCloneTargets.length} router(s) selecionado(s)`
+                                : "Nenhum router selecionado"
+                              : selectedBotTarget?.name || "Nenhum builder selecionado"}
                           </strong>
-                          <span>{botTargetShortName || "Selecione o destino"}</span>
+                          <span>
+                            {cloneMode === "router"
+                              ? selectedRouterCloneApplications
+                                  .map((application) => application.name)
+                                  .join(", ") || "Selecione um ou mais destinos"
+                              : botTargetShortName || "Selecione o destino"}
+                          </span>
                         </span>
                       </span>
                       <Button
@@ -4922,12 +5190,23 @@ export default function CreateTemplatesApp() {
                         size="sm"
                         onClick={() => {
                           setBotTargetSearch("");
+                          if (cloneMode === "router") {
+                            setRouterTargetPickerSelection(
+                              new Set(routerCloneTargets.map((target) => target.shortName)),
+                            );
+                          }
                           setBotPicker("target");
                         }}
                         disabled={!isEmbedded || isCloningBot || isCloningRouter}
                       >
                         <Pencil size={15} aria-hidden="true" />
-                        {botTargetShortName ? "Alterar" : "Selecionar"}
+                        {cloneMode === "router"
+                          ? routerCloneTargets.length
+                            ? "Alterar"
+                            : "Selecionar"
+                          : botTargetShortName
+                            ? "Alterar"
+                            : "Selecionar"}
                       </Button>
                     </div>
                     {cloneMode === "builder" && (
@@ -4951,7 +5230,7 @@ export default function CreateTemplatesApp() {
                         </span>
                         <div className="action-grid bot-clone-options">
                           {fields.map(({ key, label }) => (
-                            <label key={key} className="bot-clone-option">
+                            <label key={key} className="bot-clone-option blip-switch-option">
                               <input
                                 type="checkbox"
                                 checked={botCloneOptions[key]}
@@ -4962,7 +5241,10 @@ export default function CreateTemplatesApp() {
                                   }))
                                 }
                               />
-                              {label}
+                              <span className="flow-switch-track" aria-hidden="true">
+                                <span className="flow-switch-thumb" />
+                              </span>
+                              <span className="blip-switch-label">{label}</span>
                             </label>
                           ))}
                         </div>
@@ -4971,24 +5253,93 @@ export default function CreateTemplatesApp() {
                   </div>
                 )}
 
+                {cloneMode === "router" && (
+                  <div className="form-group router-clone-modules">
+                    <div>
+                      <h3>O que clonar?</h3>
+                      <p>Ative os módulos que deseja auditar e copiar para os destinos.</p>
+                    </div>
+                    <div className="router-clone-module-grid">
+                      <label className="bot-clone-option blip-switch-option">
+                        <input
+                          type="checkbox"
+                          checked={routerCloneOptions.services}
+                          onChange={(event) =>
+                            handleRouterCloneOptionChange("services", event.target.checked)
+                          }
+                          disabled={isPreviewingRouterClone || isCloningRouter}
+                        />
+                        <span className="flow-switch-track" aria-hidden="true">
+                          <span className="flow-switch-thumb" />
+                        </span>
+                        <span className="blip-switch-label">
+                          <strong>Serviços</strong>
+                          <small>Auditar e conectar os Builders selecionados.</small>
+                        </span>
+                      </label>
+                      <label className="bot-clone-option blip-switch-option">
+                        <input
+                          type="checkbox"
+                          checked={routerCloneOptions.resources}
+                          onChange={(event) =>
+                            handleRouterCloneOptionChange("resources", event.target.checked)
+                          }
+                          disabled={isPreviewingRouterClone || isCloningRouter}
+                        />
+                        <span className="flow-switch-track" aria-hidden="true">
+                          <span className="flow-switch-thumb" />
+                        </span>
+                        <span className="blip-switch-label">
+                          <strong>Recursos</strong>
+                          <small>Comparar e copiar documentos da extensão Resources.</small>
+                        </span>
+                      </label>
+                    </div>
+                    {isPreviewingRouterClone && (
+                      <p className="router-clone-auto-loading">
+                        <LoaderCircle className="spin" size={15} /> Atualizando auditoria…
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div className="bot-clone-actions">
                   <Button
                     type="submit"
                     className="bot-clone-submit"
                     loading={
-                      cloneMode === "router"
-                        ? isPreviewingRouterClone
-                        : isCloningBot ||
-                          (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
+                      cloneMode === "builder" &&
+                      (isCloningBot ||
+                        (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length))
+                    }
+                    disabled={
+                      cloneMode === "router" &&
+                      (isPreviewingRouterClone ||
+                        (!routerCloneOptions.services && !routerCloneOptions.resources))
                     }
                   >
                     {cloneMode === "router" ? (
-                      <Search size={18} aria-hidden="true" />
+                      <ShieldCheck size={18} aria-hidden="true" />
                     ) : (
                       <CopyPlus size={18} aria-hidden="true" />
                     )}
-                    {cloneMode === "router" ? "Consultar serviços" : "Clonar Builder"}
+                    {cloneMode === "router" ? "Revisar clonagem" : "Clonar Builder"}
                   </Button>
+                  {cloneMode === "router" && (
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      onClick={() => void handlePreviewRouterClone()}
+                      loading={isPreviewingRouterClone}
+                      disabled={
+                        !botSourceRouterKey ||
+                        !routerCloneTargets.length ||
+                        (!routerCloneOptions.services && !routerCloneOptions.resources)
+                      }
+                    >
+                      <Search size={16} aria-hidden="true" /> Atualizar auditoria
+                    </Button>
+                  )}
                   {cloneMode === "builder" && (
                     <Button
                       variant="secondary"
@@ -5210,7 +5561,7 @@ export default function CreateTemplatesApp() {
                           </span>
                           <div className="action-grid bot-clone-options">
                             {fields.map(({ key, label }) => (
-                              <label key={key} className="bot-clone-option">
+                              <label key={key} className="bot-clone-option blip-switch-option">
                                 <input
                                   type="checkbox"
                                   checked={botCloneOptions[key]}
@@ -5222,7 +5573,10 @@ export default function CreateTemplatesApp() {
                                   }
                                   disabled={isBulkCreatingBots}
                                 />
-                                {label}
+                                <span className="flow-switch-track" aria-hidden="true">
+                                  <span className="flow-switch-thumb" />
+                                </span>
+                                <span className="blip-switch-label">{label}</span>
                               </label>
                             ))}
                           </div>
@@ -5441,18 +5795,20 @@ export default function CreateTemplatesApp() {
                 </div>
               </div>
             )}
-            {cloneMode === "router" && routerClonePreview && (
+            {cloneMode === "router" && routerCloneOptions.services && routerClonePreview && (
               <div className="router-clone-preview">
                 <div className="ember-panel-title results-title">
                   <div>
                     <h3>Serviços de {selectedBotSource?.name || botSourceShortName}</h3>
                     <p>
                       {routerClonePreview.source.services.length} serviço(s) na origem ·{" "}
-                      {routerClonePreview.target.services.length} no destino
+                      {routerCloneTargets.length} destino(s) auditado(s)
                     </p>
                   </div>
                 </div>
-                {!routerClonePreview.compatible && (
+                {routerCloneTargets.some(
+                  (target) => !routerClonePreviews[target.shortName]?.compatible,
+                ) && (
                   <Feedback tone="danger">
                     Os routers usam templates ou tipos de configuração diferentes. A clonagem foi
                     bloqueada.
@@ -5484,7 +5840,7 @@ export default function CreateTemplatesApp() {
                     size="sm"
                     onClick={() => setSelectedRouterServices(new Set())}
                   >
-                    Manter serviços do destino
+                    Limpar seleção
                   </Button>
                 </div>
                 <div className="ember-table-wrap">
@@ -5496,6 +5852,7 @@ export default function CreateTemplatesApp() {
                         <th>ID</th>
                         <th>Acesso</th>
                         <th>Função</th>
+                        <th>Nos destinos</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5503,6 +5860,11 @@ export default function CreateTemplatesApp() {
                         const access = botApplications.some(
                           (application) => application.shortName === service.shortName,
                         );
+                        const alreadyConnected = routerCloneTargets.filter((target) =>
+                          routerClonePreviews[target.shortName]?.target.services.some(
+                            (targetService) => targetService.identity === service.identity,
+                          ),
+                        ).length;
                         return (
                           <tr key={service.identity}>
                             <td>
@@ -5536,43 +5898,178 @@ export default function CreateTemplatesApp() {
                               </span>
                             </td>
                             <td>{service.isDefault ? "Padrão" : "Adicional"}</td>
+                            <td>
+                              {alreadyConnected
+                                ? `${alreadyConnected}/${routerCloneTargets.length} já conectado(s)`
+                                : "Novo em todos"}
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
-                {selectedRouterServices.size > 0 &&
-                  !routerClonePreview.source.services.some(
-                    (service) => service.isDefault && selectedRouterServices.has(service.identity),
-                  ) && (
-                    <Feedback tone="warning">Selecione também o serviço padrão da origem.</Feedback>
+              </div>
+            )}
+            {cloneMode === "router" && routerCloneOptions.resources && routerResourcePreview && (
+              <div className="router-clone-preview router-resource-preview">
+                <div className="ember-panel-title results-title">
+                  <div>
+                    <h3>Recursos de {selectedBotSource?.name || botSourceShortName}</h3>
+                    <p>
+                      {routerResourcePreview.source.resources.length} recurso(s) na origem · valores
+                      editáveis antes da clonagem
+                    </p>
+                  </div>
+                  <div className="router-clone-selection-actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setSelectedRouterResources(
+                          new Set(routerResourcePreview.source.resources.map((item) => item.key)),
+                        )
+                      }
+                    >
+                      Selecionar todos
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setSelectedRouterResources(new Set())}
+                    >
+                      Limpar seleção
+                    </Button>
+                  </div>
+                </div>
+                <Feedback>
+                  Variáveis disponíveis: <code>{"{{router.id}}"}</code>,{" "}
+                  <code>{"{{router.key}}"}</code> e <code>{"{{router.number}}"}</code>. Cada uma é
+                  resolvida com os dados do próprio destino no momento da gravação.
+                </Feedback>
+                <div className="router-resource-list">
+                  {routerResourcePreview.source.resources.length ? (
+                    routerResourcePreview.source.resources.map((resource) => {
+                      const draft = routerResourceDrafts[resource.key] || resource;
+                      const comparisons = routerResourcePreview.targets.map((target) =>
+                        target.resources.find((item) => item.key === resource.key),
+                      );
+                      const same = comparisons.filter((item) => item?.status === "same").length;
+                      const different = comparisons.filter(
+                        (item) => item?.status === "different",
+                      ).length;
+                      const missing = comparisons.filter(
+                        (item) => item?.status === "missing",
+                      ).length;
+                      return (
+                        <article key={resource.key} className="router-resource-card">
+                          <div className="router-resource-card-header">
+                            <label className="router-resource-select">
+                              <input
+                                type="checkbox"
+                                checked={selectedRouterResources.has(resource.key)}
+                                onChange={(event) =>
+                                  setSelectedRouterResources((current) => {
+                                    const next = new Set(current);
+                                    if (event.target.checked) next.add(resource.key);
+                                    else next.delete(resource.key);
+                                    return next;
+                                  })
+                                }
+                              />
+                              <span>
+                                <strong>{resource.key}</strong>
+                                <small>{draft.type}</small>
+                              </span>
+                            </label>
+                            <span className="router-resource-comparison">
+                              {same ? `${same} igual(is)` : ""}
+                              {different ? `${different} diferente(s)` : ""}
+                              {missing ? `${missing} novo(s)` : ""}
+                            </span>
+                          </div>
+                          <label className="blip-native-field">
+                            Valor do recurso
+                            <textarea
+                              value={draft.value}
+                              onChange={(event) =>
+                                updateRouterResourceDraft(resource.key, {
+                                  value: event.target.value,
+                                })
+                              }
+                              rows={draft.format === "json" ? 8 : 4}
+                              spellCheck={false}
+                              disabled={!selectedRouterResources.has(resource.key)}
+                            />
+                          </label>
+                          <div className="router-resource-variable-actions">
+                            <span>Inserir variável:</span>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                appendRouterResourceVariable(resource.key, "{{router.id}}")
+                              }
+                              disabled={!selectedRouterResources.has(resource.key)}
+                            >
+                              ID do router
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                appendRouterResourceVariable(resource.key, "{{router.key}}")
+                              }
+                              disabled={!selectedRouterResources.has(resource.key)}
+                            >
+                              Router key
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                appendRouterResourceVariable(resource.key, "{{router.number}}")
+                              }
+                              disabled={!selectedRouterResources.has(resource.key)}
+                            >
+                              Número conectado
+                            </Button>
+                          </div>
+                        </article>
+                      );
+                    })
+                  ) : (
+                    <div className="router-picker-empty">Nenhum recurso encontrado na origem.</div>
                   )}
-                <div className="bot-clone-actions">
-                  <Button
-                    type="button"
-                    onClick={() => void handleCloneRouter()}
-                    loading={isCloningRouter}
-                    disabled={
-                      !routerClonePreview.compatible ||
-                      (selectedRouterServices.size > 0 &&
-                        !routerClonePreview.source.services.some(
-                          (service) =>
-                            service.isDefault && selectedRouterServices.has(service.identity),
-                        ))
-                    }
-                  >
-                    <CopyPlus size={18} aria-hidden="true" /> Clonar router
-                  </Button>
                 </div>
               </div>
             )}
-            {cloneMode === "router" && routerCloneResult && (
-              <Feedback tone="success" title="Router verificado">
-                {routerCloneResult.status === "unchanged"
-                  ? "O destino já tinha essa configuração."
-                  : `${routerCloneResult.services} serviço(s) configurados. Backup local: ${routerCloneResult.backup}.`}
-              </Feedback>
+            {cloneMode === "router" && routerCloneResults.length > 0 && (
+              <div className="bot-clone-results" aria-live="polite">
+                {routerCloneResults.map((result) => (
+                  <Feedback
+                    key={result.shortName}
+                    tone={
+                      result.status === "success"
+                        ? "success"
+                        : result.status === "partial"
+                          ? "warning"
+                          : "danger"
+                    }
+                    title={result.shortName}
+                  >
+                    {result.message ||
+                      `${result.services ? `${result.services.services} serviço(s)` : ""}${
+                        result.services && result.resources ? " · " : ""
+                      }${result.resources ? `${result.resources.copied} recurso(s)` : ""} verificados.`}
+                  </Feedback>
+                ))}
+              </div>
             )}
           </section>
         ) : (
@@ -6869,6 +7366,193 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
+        {isRouterAuditModalOpen && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal bulk-flow-modal router-clone-audit-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="router-clone-audit-title"
+              data-modal-id="router-clone-audit"
+              tabIndex={-1}
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="router-clone-audit-title">Auditoria da clonagem</h2>
+                  <p>
+                    Confira serviços, recursos e conflitos em {routerCloneTargets.length} router(s)
+                    de destino.
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
+                  onClick={() => setIsRouterAuditModalOpen(false)}
+                  disabled={isCloningRouter}
+                >
+                  <X size={18} aria-hidden="true" />
+                </Button>
+              </div>
+              <div className="ember-modal-body router-clone-audit-body">
+                <Feedback tone="warning">
+                  Serviços reutilizam os Builders existentes. Recursos com o mesmo nome e conteúdo
+                  diferente serão substituídos após backup. As variáveis usam os dados de cada
+                  destino; a router key não é exibida nesta auditoria.
+                </Feedback>
+                <div className="router-clone-audit-targets">
+                  {routerCloneTargets.map((target) => {
+                    const application = routerApplications.find(
+                      (item) => item.shortName === target.shortName,
+                    );
+                    const preview = routerClonePreviews[target.shortName];
+                    const resourceTarget = routerResourcePreview?.targets.find(
+                      (item) => item.shortName === target.shortName,
+                    );
+                    const selectedServices = routerClonePreview?.source.services.filter((service) =>
+                      selectedRouterServices.has(service.identity),
+                    );
+                    const connectedServices = selectedServices?.filter((service) =>
+                      preview?.target.services.some(
+                        (targetService) => targetService.identity === service.identity,
+                      ),
+                    ).length;
+                    const selectedResources = resourceTarget?.resources
+                      .filter((resource) => selectedRouterResources.has(resource.key))
+                      .map((resource) => {
+                        const original = routerResourcePreview?.source.resources.find(
+                          (item) => item.key === resource.key,
+                        );
+                        const draft = routerResourceDrafts[resource.key];
+                        const edited =
+                          Boolean(draft && original) &&
+                          (draft.value !== original?.value || draft.type !== original?.type);
+                        const dynamic = /\{\{router\.(id|key|number)\}\}/.test(draft?.value || "");
+                        return {
+                          ...resource,
+                          status:
+                            resource.status === "missing"
+                              ? resource.status
+                              : edited || dynamic
+                                ? ("different" as const)
+                                : resource.status,
+                        };
+                      });
+                    return (
+                      <article key={target.shortName} className="router-clone-audit-card">
+                        <div className="router-clone-audit-card-header">
+                          <span className="router-application-avatar" aria-hidden="true">
+                            {application?.imageUri ? (
+                              <img src={application.imageUri} alt="" />
+                            ) : (
+                              <Network size={18} />
+                            )}
+                          </span>
+                          <span className="router-application-copy">
+                            <strong>{application?.name || target.shortName}</strong>
+                            <span>{target.shortName}</span>
+                          </span>
+                          <span
+                            className={`bulk-bot-status ${
+                              !routerCloneOptions.services || preview?.compatible
+                                ? "success"
+                                : "error"
+                            }`}
+                          >
+                            {!routerCloneOptions.services || preview?.compatible
+                              ? "Validado"
+                              : "Incompatível"}
+                          </span>
+                        </div>
+                        {routerCloneOptions.services && (
+                          <div className="router-clone-audit-section-wrap">
+                            <div className="router-clone-audit-section">
+                              <strong>Serviços</strong>
+                              <span>
+                                {selectedServices?.length || 0} selecionado(s) ·{" "}
+                                {connectedServices || 0} já conectado(s) ·{" "}
+                                {(selectedServices?.length || 0) - (connectedServices || 0)} novo(s)
+                              </span>
+                            </div>
+                            <div className="router-clone-audit-items">
+                              {selectedServices?.map((service) => {
+                                const exists = preview?.target.services.some(
+                                  (item) => item.identity === service.identity,
+                                );
+                                return (
+                                  <span key={service.identity}>
+                                    {service.name} · {exists ? "já conectado" : "será conectado"}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        {routerCloneOptions.resources && (
+                          <div className="router-clone-audit-section-wrap">
+                            <div className="router-clone-audit-section">
+                              <strong>Recursos</strong>
+                              <span>
+                                {selectedResources?.length || 0} selecionado(s) ·{" "}
+                                {selectedResources?.filter((item) => item.status === "same")
+                                  .length || 0}{" "}
+                                igual(is) ·{" "}
+                                {selectedResources?.filter((item) => item.status === "different")
+                                  .length || 0}{" "}
+                                substituição(ões) ·{" "}
+                                {selectedResources?.filter((item) => item.status === "missing")
+                                  .length || 0}{" "}
+                                novo(s)
+                              </span>
+                            </div>
+                            <div className="router-clone-audit-items">
+                              {selectedResources?.map((resource) => (
+                                <span key={resource.key}>
+                                  {resource.key} ·{" "}
+                                  {resource.status === "same"
+                                    ? "igual"
+                                    : resource.status === "different"
+                                      ? "será substituído"
+                                      : "será criado"}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="router-clone-audit-summary">
+                  <strong>Resumo do lote</strong>
+                  <span>{selectedRouterServices.size} serviço(s) selecionado(s)</span>
+                  <span>{selectedRouterResources.size} recurso(s) selecionado(s)</span>
+                  <span>
+                    Variáveis: ID, router key e número conectado são resolvidos individualmente.
+                  </span>
+                </div>
+              </div>
+              <div className="ember-modal-footer">
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsRouterAuditModalOpen(false)}
+                  disabled={isCloningRouter}
+                >
+                  Voltar
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => void handleCloneRouter()}
+                  loading={isCloningRouter}
+                >
+                  <CopyPlus size={18} aria-hidden="true" /> Clonar para {routerCloneTargets.length}{" "}
+                  router(s)
+                </Button>
+              </div>
+            </section>
+          </div>
+        )}
+
         {isBulkBotPickerOpen && (
           <div className="ember-modal-backdrop" role="presentation">
             <section
@@ -7005,8 +7689,9 @@ export default function CreateTemplatesApp() {
                     {botPicker === "source" ? "origem" : "destino"}
                   </h2>
                   <p>
-                    Selecione um {cloneMode === "builder" ? "builder" : "router"} do contrato atual
-                    ao qual você tem acesso.
+                    {cloneMode === "router" && botPicker === "target"
+                      ? "Selecione um ou mais routers de destino do contrato atual."
+                      : `Selecione um ${cloneMode === "builder" ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
                   </p>
                 </div>
                 <Button
@@ -7060,6 +7745,9 @@ export default function CreateTemplatesApp() {
                     ).length
                   }{" "}
                   {cloneMode === "builder" ? "builders" : "routers"} disponíveis
+                  {cloneMode === "router" && botPicker === "target"
+                    ? ` · ${routerTargetPickerSelection.size} selecionado(s)`
+                    : ""}
                 </div>
                 <div className="router-application-list">
                   {(
@@ -7084,31 +7772,59 @@ export default function CreateTemplatesApp() {
                     (botPicker === "source"
                       ? filteredBotSourceApplications
                       : filteredBotTargetApplications
-                    ).map((application) => (
-                      <button
-                        key={application.shortName}
-                        type="button"
-                        className="router-application-option bot-clone-picker-option"
-                        onClick={() =>
-                          void (botPicker === "source"
-                            ? handleSelectBotSourceApplication(application)
-                            : handleSelectBotTargetApplication(application))
-                        }
-                        disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
-                      >
-                        <span className="router-application-avatar">
-                          {application.imageUri ? (
-                            <img src={application.imageUri} alt="" loading="lazy" />
-                          ) : (
-                            application.name.slice(0, 1).toUpperCase()
-                          )}
-                        </span>
-                        <span className="router-application-copy">
-                          <strong>{application.name}</strong>
-                          <span>{application.shortName}</span>
-                        </span>
-                      </button>
-                    ))
+                    ).map((application) => {
+                      const isMultiTarget = cloneMode === "router" && botPicker === "target";
+                      const selected = routerTargetPickerSelection.has(application.shortName);
+                      const content = (
+                        <>
+                          <span className="router-application-avatar">
+                            {application.imageUri ? (
+                              <img src={application.imageUri} alt="" loading="lazy" />
+                            ) : (
+                              application.name.slice(0, 1).toUpperCase()
+                            )}
+                          </span>
+                          <span className="router-application-copy">
+                            <strong>{application.name}</strong>
+                            <span>{application.shortName}</span>
+                          </span>
+                        </>
+                      );
+                      return isMultiTarget ? (
+                        <label
+                          key={application.shortName}
+                          className={`router-application-option${selected ? " selected" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) =>
+                              setRouterTargetPickerSelection((current) => {
+                                const next = new Set(current);
+                                if (event.target.checked) next.add(application.shortName);
+                                else next.delete(application.shortName);
+                                return next;
+                              })
+                            }
+                          />
+                          {content}
+                        </label>
+                      ) : (
+                        <button
+                          key={application.shortName}
+                          type="button"
+                          className="router-application-option bot-clone-picker-option"
+                          onClick={() =>
+                            void (botPicker === "source"
+                              ? handleSelectBotSourceApplication(application)
+                              : handleSelectBotTargetApplication(application))
+                          }
+                          disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
+                        >
+                          {content}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -7120,6 +7836,16 @@ export default function CreateTemplatesApp() {
                 >
                   Cancelar
                 </Button>
+                {cloneMode === "router" && botPicker === "target" && (
+                  <Button
+                    variant="primary"
+                    onClick={() => void handleConfirmRouterTargets()}
+                    loading={isResolvingBotTargetKey}
+                  >
+                    <Check size={18} aria-hidden="true" /> Confirmar{" "}
+                    {routerTargetPickerSelection.size}
+                  </Button>
+                )}
               </div>
             </section>
           </div>

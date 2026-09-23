@@ -105,11 +105,12 @@ test("prévia e clonagem do router preservam o ID do destino, conectam serviços
     );
     const cloned = JSON.parse(fake.getTargetApplication());
     assert.equal(cloned.identifier, "target");
-    assert.equal(cloned.extra, "source");
+    assert.equal(cloned.extra, "old");
     assert.deepEqual(
       cloned.settings.children.map((child) => child.identity),
-      ["first@msging.net", "second@msging.net"],
+      ["old@msging.net", "first@msging.net", "second@msging.net"],
     );
+    assert.equal(cloned.settings.children.filter((child) => child.isDefault).length, 1);
     const backup = JSON.parse(
       await readFile(path.join(tmp, ".local", "router-clone-backups", result.backup), "utf8"),
     );

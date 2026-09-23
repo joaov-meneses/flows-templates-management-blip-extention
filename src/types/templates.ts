@@ -335,6 +335,40 @@ export type RouterClonePreview = {
   target: RouterCloneConfiguration;
   compatible: boolean;
 };
+export type RouterCloneTarget = ResolvedRouterKey;
+export type RouterResourceDraft = {
+  key: string;
+  type: string;
+  format: "text" | "json";
+  value: string;
+};
+export type RouterResourceComparisonStatus = "missing" | "same" | "different";
+export type RouterResourcePreview = {
+  source: {
+    shortName: string;
+    resources: RouterResourceDraft[];
+  };
+  targets: Array<{
+    shortName: string;
+    resources: Array<{
+      key: string;
+      status: RouterResourceComparisonStatus;
+      targetType: string | null;
+    }>;
+  }>;
+};
+export type RouterResourceCloneResponse = {
+  status: "success";
+  copied: number;
+  backup: string;
+};
+export type RouterCloneTargetResult = {
+  shortName: string;
+  status: "success" | "partial" | "error";
+  services?: RouterCloneResponse;
+  resources?: RouterResourceCloneResponse;
+  message?: string;
+};
 export type RouterCloneResponse = {
   status: "success" | "unchanged";
   services: number;

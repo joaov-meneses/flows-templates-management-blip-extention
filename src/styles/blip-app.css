@@ -721,6 +721,62 @@
 .bot-clone-option input {
   accent-color: var(--blip-primary);
 }
+.blip-switch-option {
+  gap: 12px;
+}
+.blip-switch-option > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.blip-switch-option > input:checked + .flow-switch-track {
+  border-color: rgba(30, 107, 241, 0.48);
+  background: var(--blip-primary);
+}
+.blip-switch-option > input:checked + .flow-switch-track .flow-switch-thumb {
+  transform: translateX(20px);
+}
+.blip-switch-option > input:focus-visible + .flow-switch-track {
+  box-shadow: 0 0 0 3px rgba(30, 107, 241, 0.18);
+}
+.blip-switch-option > input:disabled + .flow-switch-track,
+.blip-switch-option > input:disabled ~ .blip-switch-label {
+  opacity: 0.58;
+}
+.blip-switch-label {
+  display: grid;
+  gap: 2px;
+}
+.blip-switch-label small {
+  color: var(--blip-content-soft);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.router-clone-modules {
+  display: grid;
+  gap: 14px;
+}
+.router-clone-modules h3,
+.router-clone-modules p {
+  margin: 0;
+}
+.router-clone-modules p {
+  margin-top: 4px;
+  color: var(--blip-content-soft);
+  font-size: 13px;
+}
+.router-clone-module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.router-clone-auto-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .bot-clone-result-section {
   margin-top: 28px;
 }
@@ -1304,6 +1360,109 @@
 .router-clone-table th {
   vertical-align: middle;
 }
+.router-resource-preview {
+  margin-top: 22px;
+}
+.router-resource-list {
+  display: grid;
+  gap: 12px;
+}
+.router-resource-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 14px;
+  background: var(--blip-surface-0);
+}
+.router-resource-card-header,
+.router-resource-select,
+.router-resource-variable-actions,
+.router-clone-audit-card-header,
+.router-clone-audit-section,
+.router-clone-audit-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.router-resource-card-header {
+  justify-content: space-between;
+}
+.router-resource-select span {
+  display: grid;
+  gap: 2px;
+}
+.router-resource-select small,
+.router-resource-comparison,
+.router-resource-variable-actions > span {
+  color: var(--blip-content-soft);
+  font-size: 11.5px;
+}
+.router-resource-comparison {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.router-resource-variable-actions {
+  flex-wrap: wrap;
+}
+.router-resource-card textarea {
+  min-height: 96px;
+  font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+.router-clone-audit-body,
+.router-clone-audit-targets {
+  display: grid;
+  gap: 12px;
+}
+.router-clone-audit-targets {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.router-clone-audit-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 14px;
+  background: var(--blip-surface-0);
+}
+.router-clone-audit-card-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+}
+.router-clone-audit-section {
+  justify-content: space-between;
+  border-top: 1px solid var(--blip-border-soft);
+  padding-top: 10px;
+  color: var(--blip-content-soft);
+  font-size: 12px;
+}
+.router-clone-audit-section strong {
+  color: var(--blip-content);
+}
+.router-clone-audit-section-wrap,
+.router-clone-audit-items {
+  display: grid;
+  gap: 7px;
+}
+.router-clone-audit-items {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--blip-surface-1);
+  color: var(--blip-content-soft);
+  font-size: 11.5px;
+}
+.router-clone-audit-summary {
+  flex-wrap: wrap;
+  border-radius: var(--blip-radius-sm);
+  padding: 12px;
+  background: var(--blip-surface-1);
+  color: var(--blip-content-soft);
+  font-size: 12px;
+}
+.router-clone-audit-summary strong {
+  color: var(--blip-content);
+}
 .router-clone-access-ok {
   color: var(--blip-success, #16834a);
   font-weight: 700;
@@ -1854,6 +2013,9 @@
     flex-direction: column;
   }
   .bulk-bot-settings-header {
+    grid-template-columns: 1fr;
+  }
+  .router-clone-module-grid {
     grid-template-columns: 1fr;
   }
   .bulk-source-picker {
