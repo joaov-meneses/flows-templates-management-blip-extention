@@ -1,5 +1,18 @@
 # Create Templates API
 
+## Interface e componentes
+
+- `src/components/ui`: botões, menus de ações, avisos, estados vazios, status e ações da seleção.
+- `src/components/FlowTable.tsx` e `TemplateTable.tsx`: listas adaptadas para desktop e celular.
+- `src/styles/tokens.css`: cores e tokens compartilhados dos temas Blip.
+- `src/styles/ui.css`: estilos dos componentes globais; `blip-app.css` mantém os layouts específicos.
+- `src/hooks/useTheme.ts` e `src/lib/theme.ts`: preferência de tema aplicada antes da primeira pintura, sem depender do acesso ao armazenamento do iframe.
+- `src/hooks/useModalFocus.ts`: foco, Escape e rolagem dos diálogos.
+- `src/lib/api.ts`: tratamento compartilhado de falhas de rede e respostas inválidas.
+
+Validação local: `npm test`, `npx tsc --noEmit`, `npx eslint src tests --max-warnings 0` e `npm run build`.
+Os testes exigem Node 22.6 ou superior. `npm run test:ui` disponibiliza fixtures isoladas em `http://localhost:8081/ui.html` e a tela de falha em `/error.html`. Os dados são fictícios e não alteram routers. A integração real precisa ser validada com a extensão aberta dentro do Portal Blip.
+
 Ferramenta para buscar templates de mensagem WhatsApp em um router BLiP e replicá-los em um ou mais routers destino.
 
 ## Como rodar
