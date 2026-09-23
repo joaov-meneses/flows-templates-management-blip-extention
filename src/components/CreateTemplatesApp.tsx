@@ -804,8 +804,8 @@ export default function CreateTemplatesApp() {
   );
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [activityFilter, setActivityFilter] = useState<ActiveView | "all">("all");
-  const [error, setError] = useState("");
-  const [copyNotice, setCopyNotice] = useState("");
+  const [error, setErrorState] = useState("");
+  const [copyNotice, setCopyNoticeState] = useState("");
   const [isSearchingTemplates, setIsSearchingTemplates] = useState(false);
   const [isReplicatingTemplates, setIsReplicatingTemplates] = useState(false);
   const [templateReplicateProgress, setTemplateReplicateProgress] = useState<Progress | null>(null);
@@ -898,6 +898,14 @@ export default function CreateTemplatesApp() {
   const selectedActivity =
     visibleActivityEntries.find((entry) => entry.id === selectedActivityId) ||
     visibleActivityEntries[0];
+  function setError(message: string) {
+    setErrorState(message);
+    if (message) recordActivityResult(message, { message }, "error");
+  }
+  function setCopyNotice(message: string) {
+    setCopyNoticeState(message);
+    if (message) recordActivityResult(message, { message });
+  }
   function setOperationResult(result: OperationResult | null) {
     setOperationResultState(result);
     if (
@@ -941,10 +949,6 @@ export default function CreateTemplatesApp() {
   useEffect(() => {
     setActivityView(visibleActiveView);
   }, [visibleActiveView]);
-
-  useEffect(() => {
-    if (error) recordActivityResult(error, { message: error }, "error");
-  }, [error]);
 
   useEffect(() => {
     if (isEmbedded) void loadRouterApplications(true);
