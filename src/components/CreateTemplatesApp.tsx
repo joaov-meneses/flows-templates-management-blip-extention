@@ -4424,7 +4424,7 @@ export default function CreateTemplatesApp() {
 
         {visibleActiveView === "routers" ? (
           <section className="ember-panel results-panel router-directory-panel">
-            <div className="dev-tabs" role="tablist" aria-label="Tipos de bots">
+            <div className="ember-subtabs" role="tablist" aria-label="Tipos de bots">
               <button
                 type="button"
                 role="tab"
@@ -4882,7 +4882,7 @@ export default function CreateTemplatesApp() {
           </section>
         ) : visibleActiveView === "bots" ? (
           <section className="ember-panel results-panel">
-            <div className="dev-tabs" role="tablist" aria-label="Tipo de bot para clonar">
+            <div className="ember-subtabs" role="tablist" aria-label="Tipo de bot para clonar">
               <button
                 type="button"
                 role="tab"
@@ -5233,7 +5233,11 @@ export default function CreateTemplatesApp() {
                       contrato.
                     </p>
                   </div>
-                  <div className="dev-tabs bulk-source-tabs" role="tablist" aria-label="Origem">
+                  <div
+                    className="ember-subtabs bulk-source-tabs"
+                    role="tablist"
+                    aria-label="Origem"
+                  >
                     <button
                       type="button"
                       role="tab"
