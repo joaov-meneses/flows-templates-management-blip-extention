@@ -1,0 +1,256 @@
+const { createHash, randomUUID } = require("node:crypto");
+const { mkdir, writeFile } = require("node:fs/promises");
+const path = require("node:path");
+
+const COMMANDS_URL = "https://msging.net/commands";
+const CONFIGURATIONS_TO = "postmaster@configurations.msging.net";
+const CONFIGURATION_HOSTS = ["master.hosting", "business.master.hosting"];
+
+class RouterCloneInputError extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = 400;
+  }
+}
+
+function assertShortName(value, label) {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(value)) {
+    throw new RouterCloneInputError(`${label} inválido.`);
+  }
+  return value;
+}
+
+function assertKey(value, label) {
+  if (typeof value !== "string" || !/^Key [A-Za-z0-9+/=]+$/.test(value)) {
+    throw new RouterCloneInputError(`${label} inválida.`);
+  }
+  return value;
+}
+
+function hash(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function reasonOf(response) {
+  return response?.reason?.description || response?.status || "Resposta inesperada da Blip.";
+}
+
+async function command(key, request) {
+  const response = await fetch(COMMANDS_URL, {
+    method: "POST",
+    headers: { Authorization: key, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: randomUUID(), ...request }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${reasonOf(body)}`);
+  return body;
+}
+
+function decodeConfiguration(resource, expectedShortName) {
+  if (!resource || typeof resource !== "object" || typeof resource.Application !== "string") {
+    throw new Error("Configuração avançada Application ausente.");
+  }
+  const application = JSON.parse(resource.Application);
+  if (
+    application?.identifier !== expectedShortName ||
+    !Array.isArray(application?.settings?.children)
+  ) {
+    throw new Error(
+      `A configuração não pertence ao router ${expectedShortName} ou não contém serviços válidos.`,
+    );
+  }
+  const services = application.settings.children;
+  const identities = new Set();
+  for (const service of services) {
+    if (
+      !service ||
+      typeof service.identity !== "string" ||
+      !service.identity.endsWith("@msging.net") ||
+      identities.has(service.identity)
+    ) {
+      throw new Error("A configuração contém um serviço inválido ou duplicado.");
+    }
+    identities.add(service.identity);
+  }
+  return { application, services, applicationHash: hash(resource.Application) };
+}
+
+async function readRouterConfiguration(routerKey, routerShortName) {
+  assertKey(routerKey, "Key do router");
+  assertShortName(routerShortName, "ID do router");
+  for (const host of CONFIGURATION_HOSTS) {
+    const response = await command(routerKey, {
+      to: CONFIGURATIONS_TO,
+      method: "get",
+      uri: `lime://${host}@msging.net/configuration`,
+    });
+    if (response.status === "success") {
+      const decoded = decodeConfiguration(response.resource, routerShortName);
+      return { host, resource: response.resource, ...decoded };
+    }
+    const reason = reasonOf(response);
+    if (response.reason?.code !== 67 && !/not found/i.test(reason)) {
+      throw new Error(`Não foi possível ler a configuração do router: ${reason}`);
+    }
+  }
+  throw new Error("Configuração avançada do router não encontrada.");
+}
+
+function summarize(config) {
+  return {
+    routerShortName: config.application.identifier,
+    template: config.resource.Template || null,
+    applicationHash: config.applicationHash,
+    services: config.services.map((service) => ({
+      identity: service.identity,
+      shortName:
+        typeof service.shortName === "string" ? service.shortName : service.identity.split("@")[0],
+      name: typeof service.longName === "string" ? service.longName : service.identity,
+      isDefault: service.isDefault === true,
+      isOnline: service.isOnline === true,
+    })),
+  };
+}
+
+async function previewRouterClone(params) {
+  const sourceShortName = assertShortName(params?.sourceShortName, "Router de origem");
+  const targetShortName = assertShortName(params?.targetShortName, "Router de destino");
+  if (sourceShortName === targetShortName)
+    throw new RouterCloneInputError("Origem e destino precisam ser diferentes.");
+  const [source, target] = await Promise.all([
+    readRouterConfiguration(params.sourceRouterKey, sourceShortName),
+    readRouterConfiguration(params.targetRouterKey, targetShortName),
+  ]);
+  return {
+    source: summarize(source),
+    target: summarize(target),
+    compatible:
+      source.host === target.host &&
+      source.resource.Template === target.resource.Template &&
+      source.application.settingsType === target.application.settingsType,
+  };
+}
+
+async function prepareRouterClone(params) {
+  const sourceShortName = assertShortName(params?.sourceShortName, "Router de origem");
+  const targetShortName = assertShortName(params?.targetShortName, "Router de destino");
+  if (sourceShortName === targetShortName)
+    throw new RouterCloneInputError("Origem e destino precisam ser diferentes.");
+  const sourceKey = assertKey(params.sourceRouterKey, "Key de origem");
+  const targetKey = assertKey(params.targetRouterKey, "Key de destino");
+  if (!/^[a-f0-9]{64}$/.test(params.sourceHash) || !/^[a-f0-9]{64}$/.test(params.targetHash)) {
+    throw new RouterCloneInputError("Atualize a prévia antes de clonar.");
+  }
+  const selected = params.selectedServiceIdentities;
+  if (
+    !Array.isArray(selected) ||
+    selected.some((item) => typeof item !== "string") ||
+    new Set(selected).size !== selected.length
+  ) {
+    throw new RouterCloneInputError("Seleção de serviços inválida.");
+  }
+  const [source, target] = await Promise.all([
+    readRouterConfiguration(sourceKey, sourceShortName),
+    readRouterConfiguration(targetKey, targetShortName),
+  ]);
+  if (
+    source.applicationHash !== params.sourceHash ||
+    target.applicationHash !== params.targetHash
+  ) {
+    throw new Error("A configuração mudou desde a prévia. Atualize antes de clonar.");
+  }
+  if (
+    source.host !== target.host ||
+    source.resource.Template !== target.resource.Template ||
+    source.application.settingsType !== target.application.settingsType
+  ) {
+    throw new Error("Origem e destino usam templates de router incompatíveis.");
+  }
+  const allIdentities = new Set(source.services.map((item) => item.identity));
+  if (selected.some((identity) => !allIdentities.has(identity))) {
+    throw new RouterCloneInputError("A seleção contém serviços ausentes na origem.");
+  }
+  const selectedSet = new Set(selected);
+  const services = source.services.filter((service) => selectedSet.has(service.identity));
+  if (services.length && !services.some((service) => service.isDefault)) {
+    throw new RouterCloneInputError("Inclua o serviço padrão da origem na seleção.");
+  }
+  const application = structuredClone(source.application);
+  application.identifier = targetShortName;
+  application.settings.children = selected.length ? services : target.services;
+  const nextApplication = JSON.stringify(application);
+  if (nextApplication === target.resource.Application) {
+    return {
+      status: "unchanged",
+      services: application.settings.children.length,
+      backup: null,
+      host: target.host,
+      application: nextApplication,
+      expectedHash: hash(nextApplication),
+      previousHash: target.applicationHash,
+    };
+  }
+
+  const backupDirectory = path.join(process.cwd(), ".local", "router-clone-backups");
+  await mkdir(backupDirectory, { recursive: true });
+  const backupName = `${targetShortName}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.json`;
+  await writeFile(
+    path.join(backupDirectory, backupName),
+    JSON.stringify({ targetShortName, host: target.host, resource: target.resource }, null, 2),
+    { flag: "wx", mode: 0o600 },
+  );
+
+  return {
+    status: "ready",
+    services: application.settings.children.length,
+    backup: backupName,
+    host: target.host,
+    application: nextApplication,
+    expectedHash: hash(nextApplication),
+    previousHash: target.applicationHash,
+  };
+}
+
+async function verifyRouterClone(params) {
+  const targetShortName = assertShortName(params?.targetShortName, "Router de destino");
+  const targetKey = assertKey(params?.targetRouterKey, "Key de destino");
+  if (!/^[a-f0-9]{64}$/.test(params?.expectedHash)) {
+    throw new RouterCloneInputError("Hash esperado inválido.");
+  }
+  const actual = await readRouterConfiguration(targetKey, targetShortName);
+  if (actual.applicationHash !== params.expectedHash) {
+    throw new Error("A leitura após gravação não confirmou o conteúdo. Consulte o backup local.");
+  }
+  return { verified: true };
+}
+
+async function cloneRouter(params) {
+  const prepared = await prepareRouterClone(params);
+  if (prepared.status === "unchanged") {
+    return { status: "unchanged", services: prepared.services, backup: null };
+  }
+  const response = await command(params.targetRouterKey, {
+    to: "postmaster@msging.net",
+    method: "set",
+    uri: `lime://${prepared.host}@msging.net/configuration?caller=${params.targetShortName}@msging.net`,
+    type: "application/json",
+    resource: { Application: prepared.application },
+  });
+  if (response.status !== "success")
+    throw new Error(`A Blip recusou a gravação: ${reasonOf(response)}`);
+  await verifyRouterClone({
+    targetRouterKey: params.targetRouterKey,
+    targetShortName: params.targetShortName,
+    expectedHash: prepared.expectedHash,
+  });
+  return { status: "success", services: prepared.services, backup: prepared.backup };
+}
+
+module.exports = {
+  RouterCloneInputError,
+  readRouterConfiguration,
+  previewRouterClone,
+  prepareRouterClone,
+  verifyRouterClone,
+  cloneRouter,
+};

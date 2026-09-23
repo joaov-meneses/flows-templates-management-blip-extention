@@ -316,6 +316,38 @@ export type BotCloneResponse = {
   };
   steps: BotCloneStep[];
 };
+export type RouterCloneService = {
+  identity: string;
+  shortName: string;
+  name: string;
+  isDefault: boolean;
+  isOnline: boolean;
+};
+export type RouterCloneConfiguration = {
+  routerShortName: string;
+  template: string | null;
+  applicationHash: string;
+  services: RouterCloneService[];
+};
+export type RouterClonePreview = {
+  source: RouterCloneConfiguration;
+  target: RouterCloneConfiguration;
+  compatible: boolean;
+};
+export type RouterCloneResponse = {
+  status: "success" | "unchanged";
+  services: number;
+  backup: string | null;
+};
+export type RouterClonePrepared = {
+  status: "ready" | "unchanged";
+  services: number;
+  backup: string | null;
+  host: string;
+  application: string;
+  expectedHash: string;
+  previousHash: string;
+};
 export type OperationResult = {
   summary: string;
   payload: unknown;

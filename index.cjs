@@ -40,6 +40,13 @@ const {
   InputError: RouterDirectoryInputError,
   getRouterPhoneNumber,
 } = require("./server/routerDirectoryService.cjs");
+const {
+  RouterCloneInputError,
+  previewRouterClone,
+  prepareRouterClone,
+  verifyRouterClone,
+  cloneRouter,
+} = require("./server/routerCloneService.cjs");
 const { streamOperation } = require("./server/progressStream.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
@@ -256,6 +263,38 @@ app.post("/api/bots/clone", async (req, res, next) => {
   }
 });
 
+app.post("/api/routers/clone/preview", async (req, res, next) => {
+  try {
+    res.json(await previewRouterClone(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/clone", async (req, res, next) => {
+  try {
+    res.json(await cloneRouter(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/clone/prepare", async (req, res, next) => {
+  try {
+    res.json(await prepareRouterClone(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/clone/verify", async (req, res, next) => {
+  try {
+    res.json(await verifyRouterClone(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/bots/identity", async (req, res, next) => {
   try {
     const result = await identifyBot(req.body);
@@ -364,7 +403,8 @@ app.use((error, _req, res, _next) => {
     error instanceof FlowInputError ||
     error instanceof PluginInputError ||
     error instanceof BotInputError ||
-    error instanceof RouterDirectoryInputError
+    error instanceof RouterDirectoryInputError ||
+    error instanceof RouterCloneInputError
       ? error.statusCode
       : error.statusCode || 500;
 

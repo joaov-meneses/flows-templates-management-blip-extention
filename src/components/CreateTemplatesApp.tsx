@@ -110,6 +110,9 @@ import type {
   BotCloneOptions,
   BotCloneResponse,
   BotCloneStep,
+  RouterClonePreview,
+  RouterCloneResponse,
+  RouterClonePrepared,
   OperationResult,
   PortalApplicationAccount,
   ResolvedRouterKey,
@@ -383,6 +386,10 @@ function createCommandId() {
   }
 
   return `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
@@ -679,6 +686,8 @@ export default function CreateTemplatesApp() {
   const [startupError, setStartupError] = useState("");
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>("routers");
+  const [directoryTab, setDirectoryTab] = useState<"routers" | "builders">("routers");
+  const [cloneMode, setCloneMode] = useState<"builder" | "router">("builder");
   const [devsTab, setDevsTab] = useState<DevsTab>("commands");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [sourceRouterShortName, setSourceRouterShortName] = useState("");
@@ -726,6 +735,7 @@ export default function CreateTemplatesApp() {
   const [routerApplicationsError, setRouterApplicationsError] = useState("");
   const [routerApplicationSearch, setRouterApplicationSearch] = useState("");
   const [routerDirectorySearch, setRouterDirectorySearch] = useState("");
+  const [builderDirectorySearch, setBuilderDirectorySearch] = useState("");
   const [routerPhoneNumbers, setRouterPhoneNumbers] = useState<
     Record<string, RouterPhone | { status: "loading" | "unavailable"; phoneNumber: null }>
   >({});
@@ -795,6 +805,11 @@ export default function CreateTemplatesApp() {
     useState<BotCloneOptions>(DEFAULT_BOT_CLONE_OPTIONS);
   const [isCloningBot, setIsCloningBot] = useState(false);
   const [botCloneResult, setBotCloneResult] = useState<BotCloneResponse | null>(null);
+  const [routerClonePreview, setRouterClonePreview] = useState<RouterClonePreview | null>(null);
+  const [routerCloneResult, setRouterCloneResult] = useState<RouterCloneResponse | null>(null);
+  const [selectedRouterServices, setSelectedRouterServices] = useState<Set<string>>(new Set());
+  const [isPreviewingRouterClone, setIsPreviewingRouterClone] = useState(false);
+  const [isCloningRouter, setIsCloningRouter] = useState(false);
   const [visibleBotStepCount, setVisibleBotStepCount] = useState(0);
   const [devCommandDestination, setDevCommandDestination] =
     useState<CommandDestination>("BlipService");
@@ -1030,10 +1045,20 @@ export default function CreateTemplatesApp() {
     );
   }, [routerApplications, routerDirectorySearch, routerPhoneNumbers]);
 
+  const filteredDirectoryBuilderApplications = useMemo(() => {
+    const query = builderDirectorySearch.trim().toLowerCase();
+    return botApplications.filter(
+      (application) =>
+        !query ||
+        application.name.toLowerCase().includes(query) ||
+        application.shortName.toLowerCase().includes(query),
+    );
+  }, [botApplications, builderDirectorySearch]);
+
   const filteredBotSourceApplications = useMemo(() => {
     const q = botSourceSearch.trim().toLowerCase();
 
-    return botApplications.filter((application) => {
+    return (cloneMode === "router" ? routerApplications : botApplications).filter((application) => {
       if (application.shortName === botTargetShortName) return false;
       if (!q) return true;
 
@@ -1042,12 +1067,12 @@ export default function CreateTemplatesApp() {
         application.shortName.toLowerCase().includes(q)
       );
     });
-  }, [botApplications, botSourceSearch, botTargetShortName]);
+  }, [botApplications, routerApplications, cloneMode, botSourceSearch, botTargetShortName]);
 
   const filteredBotTargetApplications = useMemo(() => {
     const q = botTargetSearch.trim().toLowerCase();
 
-    return botApplications.filter((application) => {
+    return (cloneMode === "router" ? routerApplications : botApplications).filter((application) => {
       if (application.shortName === botSourceShortName) return false;
       if (!q) return true;
 
@@ -1056,10 +1081,11 @@ export default function CreateTemplatesApp() {
         application.shortName.toLowerCase().includes(q)
       );
     });
-  }, [botApplications, botTargetSearch, botSourceShortName]);
+  }, [botApplications, routerApplications, cloneMode, botTargetSearch, botSourceShortName]);
 
-  const selectedBotSource = botApplications.find((item) => item.shortName === botSourceShortName);
-  const selectedBotTarget = botApplications.find((item) => item.shortName === botTargetShortName);
+  const cloneApplications = cloneMode === "router" ? routerApplications : botApplications;
+  const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
+  const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
 
   const sourceRouterApplication = useMemo(() => {
     const selectedShortName = sourceRouterShortName.trim();
@@ -1091,8 +1117,8 @@ export default function CreateTemplatesApp() {
   const headerCopy =
     visibleActiveView === "routers"
       ? {
-          title: "Routers",
-          description: "Routers aos quais você tem acesso no Portal BLiP",
+          title: "Bots",
+          description: "Routers e builders aos quais você tem acesso no Portal BLiP",
         }
       : visibleActiveView === "templates"
         ? {
@@ -1106,9 +1132,9 @@ export default function CreateTemplatesApp() {
             }
           : visibleActiveView === "bots"
             ? {
-                title: "Clone Builder",
+                title: "Clone Bots",
                 description:
-                  "Clonagem de fluxo, filas, regras, atendentes, tags, respostas prontas e variáveis entre builders",
+                  "Copie configurações de builders ou de routers entre bots do contrato atual",
               }
             : devsTab === "plugins"
               ? {
@@ -1284,6 +1310,8 @@ export default function CreateTemplatesApp() {
   }
 
   async function handleSelectBotSourceApplication(application: PortalApplicationAccount) {
+    setRouterClonePreview(null);
+    setRouterCloneResult(null);
     setBotSourceShortName(application.shortName);
     setBotSourceKeyInvalid(false);
     setIsResolvingBotSourceKey(true);
@@ -1296,13 +1324,15 @@ export default function CreateTemplatesApp() {
     } catch (caughtError) {
       setBotSourceShortName("");
       setBotSourceRouterKey("");
-      setError(getErrorMessage(caughtError, "Erro ao carregar a key do builder."));
+      setError(getErrorMessage(caughtError, "Erro ao carregar a key do bot."));
     } finally {
       setIsResolvingBotSourceKey(false);
     }
   }
 
   async function handleSelectBotTargetApplication(application: PortalApplicationAccount) {
+    setRouterClonePreview(null);
+    setRouterCloneResult(null);
     setBotTargetShortName(application.shortName);
     setBotTargetKeyInvalid(false);
     setIsResolvingBotTargetKey(true);
@@ -1315,7 +1345,7 @@ export default function CreateTemplatesApp() {
     } catch (caughtError) {
       setBotTargetShortName("");
       setBotTargetRouterKey("");
-      setError(getErrorMessage(caughtError, "Erro ao carregar a key do builder."));
+      setError(getErrorMessage(caughtError, "Erro ao carregar a key do bot."));
     } finally {
       setIsResolvingBotTargetKey(false);
     }
@@ -1350,6 +1380,20 @@ export default function CreateTemplatesApp() {
     setError("");
     setCopyNotice("");
     void loadRouterApplications(true);
+  }
+
+  function changeCloneMode(mode: "builder" | "router") {
+    setCloneMode(mode);
+    setBotSourceShortName("");
+    setBotTargetShortName("");
+    setBotSourceRouterKey("");
+    setBotTargetRouterKey("");
+    setBotCloneResult(null);
+    setRouterClonePreview(null);
+    setRouterCloneResult(null);
+    setSelectedRouterServices(new Set());
+    setError("");
+    if (mode === "router" && !routerApplications.length) void loadRouterApplications();
   }
 
   async function handleCopyRouterId(application: PortalApplicationAccount) {
@@ -3039,14 +3083,28 @@ export default function CreateTemplatesApp() {
   }
 
   useEffect(() => {
-    if (visibleActiveView !== "bots" || !isEmbedded) return;
+    if (
+      !isEmbedded ||
+      !(
+        visibleActiveView === "bots" ||
+        (visibleActiveView === "routers" && directoryTab === "builders")
+      )
+    )
+      return;
     if (hasLoadedBotApplications || isLoadingBotApplications) return;
 
     void loadBotApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBotApplications is redefined every render; the guards above already prevent refetching.
-  }, [visibleActiveView, isEmbedded, hasLoadedBotApplications, isLoadingBotApplications]);
+  }, [
+    visibleActiveView,
+    directoryTab,
+    isEmbedded,
+    hasLoadedBotApplications,
+    isLoadingBotApplications,
+  ]);
 
   useEffect(() => {
+    if (cloneMode !== "builder") return;
     const routerKey = botSourceRouterKey.trim();
     if (!routerKey) {
       setBotSourceIdentity(IDLE_BOT_IDENTITY);
@@ -3072,9 +3130,10 @@ export default function CreateTemplatesApp() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [botSourceRouterKey]);
+  }, [botSourceRouterKey, cloneMode]);
 
   useEffect(() => {
+    if (cloneMode !== "builder") return;
     const routerKey = botTargetRouterKey.trim();
     if (!routerKey) {
       setBotTargetIdentity(IDLE_BOT_IDENTITY);
@@ -3100,7 +3159,7 @@ export default function CreateTemplatesApp() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [botTargetRouterKey]);
+  }, [botTargetRouterKey, cloneMode]);
 
   useEffect(() => {
     if (!botCloneResult || botCloneResult.steps.length === 0) {
@@ -3185,6 +3244,113 @@ export default function CreateTemplatesApp() {
       setError(e instanceof Error ? e.message : "Erro ao clonar builder.");
     } finally {
       setIsCloningBot(false);
+    }
+  }
+
+  async function handlePreviewRouterClone() {
+    setError("");
+    setRouterClonePreview(null);
+    setRouterCloneResult(null);
+    if (!botSourceShortName || !botTargetShortName || !botSourceRouterKey || !botTargetRouterKey) {
+      setError("Selecione os routers de origem e destino antes de consultar os serviços.");
+      return;
+    }
+    setIsPreviewingRouterClone(true);
+    try {
+      const preview = await postJson<RouterClonePreview>("/api/routers/clone/preview", {
+        sourceShortName: botSourceShortName,
+        targetShortName: botTargetShortName,
+        sourceRouterKey: botSourceRouterKey,
+        targetRouterKey: botTargetRouterKey,
+      });
+      setRouterClonePreview(preview);
+      setSelectedRouterServices(
+        new Set(preview.source.services.map((service) => service.identity)),
+      );
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Não foi possível consultar os serviços dos routers."));
+    } finally {
+      setIsPreviewingRouterClone(false);
+    }
+  }
+
+  async function handleCloneRouter() {
+    setError("");
+    if (!routerClonePreview || !routerClonePreview.compatible) {
+      setError("Consulte a prévia de dois routers compatíveis antes de clonar.");
+      return;
+    }
+    const confirmed = await confirmFlowAction(
+      "Confirmar clonagem do router",
+      `As configurações avançadas do router <b>${botTargetShortName}</b> serão substituídas. ${selectedRouterServices.size ? `${selectedRouterServices.size} serviço(s) da origem serão conectados ao destino, sem duplicar o conteúdo dos builders.` : "Os serviços atuais do destino serão preservados."} Um backup local será criado antes da gravação. Deseja continuar?`,
+      "Clonar router",
+    );
+    if (!confirmed) return;
+    setIsCloningRouter(true);
+    setRouterCloneResult(null);
+    try {
+      const params = {
+        sourceShortName: botSourceShortName,
+        targetShortName: botTargetShortName,
+        sourceRouterKey: botSourceRouterKey,
+        targetRouterKey: botTargetRouterKey,
+        sourceHash: routerClonePreview.source.applicationHash,
+        targetHash: routerClonePreview.target.applicationHash,
+        selectedServiceIdentities: [...selectedRouterServices],
+      };
+      let result: RouterCloneResponse;
+      if (currentApplicationRouter?.shortName === botTargetShortName) {
+        const prepared = await postJson<RouterClonePrepared>("/api/routers/clone/prepare", params);
+        if (prepared.status === "unchanged") {
+          result = { status: "unchanged", services: prepared.services, backup: null };
+        } else {
+          const beforeResponse = await sendBlipCommand(
+            {
+              id: createCommandId(),
+              method: COMMAND_METHODS.GET,
+              to: "postmaster@configurations.msging.net",
+              uri: `lime://${prepared.host}@msging.net/configuration`,
+            },
+            { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
+          );
+          const beforeResource = extractCommandResource(beforeResponse);
+          if (
+            !isRecord(beforeResource) ||
+            typeof beforeResource.Application !== "string" ||
+            (await sha256Hex(beforeResource.Application)) !== prepared.previousHash
+          ) {
+            throw new Error(
+              "A configuração do router atual mudou desde a prévia. Nenhuma gravação foi enviada.",
+            );
+          }
+          const writeResponse = await sendBlipCommand(
+            {
+              id: createCommandId(),
+              method: COMMAND_METHODS.SET,
+              to: "postmaster@msging.net",
+              uri: `lime://${prepared.host}@msging.net/configuration?caller=${botTargetShortName}@msging.net`,
+              type: "application/json",
+              resource: { Application: prepared.application },
+            },
+            { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
+          );
+          extractCommandResource(writeResponse);
+          await postJson<{ verified: boolean }>("/api/routers/clone/verify", {
+            targetShortName: botTargetShortName,
+            targetRouterKey: botTargetRouterKey,
+            expectedHash: prepared.expectedHash,
+          });
+          result = { status: "success", services: prepared.services, backup: prepared.backup };
+        }
+      } else {
+        result = await postJson<RouterCloneResponse>("/api/routers/clone", params);
+      }
+      setRouterCloneResult(result);
+      setRouterClonePreview(null);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Não foi possível clonar o router."));
+    } finally {
+      setIsCloningRouter(false);
     }
   }
 
@@ -3654,7 +3820,7 @@ export default function CreateTemplatesApp() {
             aria-current={visibleActiveView === "routers" ? "page" : undefined}
           >
             <Network size={18} aria-hidden="true" />
-            Routers
+            Bots
           </button>
           <button
             className={visibleActiveView === "templates" ? "active" : ""}
@@ -3681,7 +3847,7 @@ export default function CreateTemplatesApp() {
             aria-current={visibleActiveView === "bots" ? "page" : undefined}
           >
             <Bot size={18} aria-hidden="true" />
-            Clone Builder
+            Clone Bots
           </button>
           {canAccessDevs && (
             <button
@@ -3706,7 +3872,7 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            {visibleActiveView !== "bots" && (
+            {visibleActiveView !== "bots" && visibleActiveView !== "routers" && (
               <div className="router-summary">
                 <span className="router-summary-label">Router de origem</span>
                 <div className="router-summary-main">
@@ -3810,21 +3976,53 @@ export default function CreateTemplatesApp() {
 
         {visibleActiveView === "routers" ? (
           <section className="ember-panel results-panel router-directory-panel">
+            <div className="dev-tabs" role="tablist" aria-label="Tipos de bots">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={directoryTab === "routers"}
+                className={directoryTab === "routers" ? "active" : ""}
+                onClick={() => setDirectoryTab("routers")}
+              >
+                <Network size={16} aria-hidden="true" /> Routers
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={directoryTab === "builders"}
+                className={directoryTab === "builders" ? "active" : ""}
+                onClick={() => setDirectoryTab("builders")}
+              >
+                <Bot size={16} aria-hidden="true" /> Builders
+              </button>
+            </div>
             <div className="ember-panel-title results-title">
               <div>
-                <h2>Routers</h2>
+                <h2>{directoryTab === "routers" ? "Routers" : "Builders"}</h2>
                 <p>
-                  Consulte os routers master em que você tem permissão e copie os dados de acesso
-                  quando necessário.
+                  Consulte os {directoryTab === "routers" ? "routers master" : "builders"} em que
+                  você tem permissão e copie os dados de acesso quando necessário.
                 </p>
               </div>
               <Button
                 variant="secondary"
                 type="button"
-                onClick={() => void loadRouterApplications(true)}
-                disabled={isLoadingRouterApplications || !isEmbedded}
+                onClick={() =>
+                  void (directoryTab === "routers"
+                    ? loadRouterApplications(true)
+                    : loadBotApplications())
+                }
+                disabled={
+                  (directoryTab === "routers"
+                    ? isLoadingRouterApplications
+                    : isLoadingBotApplications) || !isEmbedded
+                }
               >
-                {isLoadingRouterApplications ? (
+                {(
+                  directoryTab === "routers"
+                    ? isLoadingRouterApplications
+                    : isLoadingBotApplications
+                ) ? (
                   <LoaderCircle className="spin" size={18} aria-hidden="true" />
                 ) : (
                   <Search size={18} aria-hidden="true" />
@@ -3836,61 +4034,99 @@ export default function CreateTemplatesApp() {
             {!isEmbedded ? (
               <div className="router-picker-empty">
                 <span>
-                  Abra esta extensão dentro do Portal BLiP para listar os routers disponíveis.
+                  Abra esta extensão dentro do Portal BLiP para listar os bots disponíveis.
                 </span>
               </div>
             ) : (
               <>
                 <div className="router-directory-toolbar">
                   <label className="blip-native-field" htmlFor="routerDirectorySearch">
-                    Buscar router
+                    Buscar {directoryTab === "routers" ? "router" : "builder"}
                     <input
                       id="routerDirectorySearch"
-                      value={routerDirectorySearch}
-                      onChange={(event) => setRouterDirectorySearch(event.target.value)}
-                      placeholder="Nome, ID ou número com DDI"
+                      value={
+                        directoryTab === "routers" ? routerDirectorySearch : builderDirectorySearch
+                      }
+                      onChange={(event) =>
+                        directoryTab === "routers"
+                          ? setRouterDirectorySearch(event.target.value)
+                          : setBuilderDirectorySearch(event.target.value)
+                      }
+                      placeholder={
+                        directoryTab === "routers"
+                          ? "Nome, ID ou número com DDI"
+                          : "Nome ou ID do builder"
+                      }
                     />
                   </label>
                   <span className="router-directory-count">
-                    {filteredDirectoryRouterApplications.length} router
-                    {filteredDirectoryRouterApplications.length === 1 ? "" : "s"}
+                    {directoryTab === "routers"
+                      ? filteredDirectoryRouterApplications.length
+                      : filteredDirectoryBuilderApplications.length}{" "}
+                    {directoryTab === "routers" ? "router" : "builder"}
+                    {(directoryTab === "routers"
+                      ? filteredDirectoryRouterApplications.length
+                      : filteredDirectoryBuilderApplications.length) === 1
+                      ? ""
+                      : "s"}
                   </span>
                 </div>
 
-                {Object.values(routerPhoneNumbers).some((item) => item.status === "loading") && (
-                  <p className="router-directory-progress" role="status">
-                    Consultando números do WhatsApp em segundo plano…
-                  </p>
-                )}
+                {directoryTab === "routers" &&
+                  Object.values(routerPhoneNumbers).some((item) => item.status === "loading") && (
+                    <p className="router-directory-progress" role="status">
+                      Consultando números do WhatsApp em segundo plano…
+                    </p>
+                  )}
 
-                {routerApplicationsError && (
+                {(directoryTab === "routers" ? routerApplicationsError : botApplicationsError) && (
                   <Feedback
-                    title="Não foi possível carregar os routers"
+                    title={`Não foi possível carregar os ${directoryTab === "routers" ? "routers" : "builders"}`}
                     action={
                       <Button
-                        onClick={() => void loadRouterApplications(true)}
-                        loading={isLoadingRouterApplications}
+                        onClick={() =>
+                          void (directoryTab === "routers"
+                            ? loadRouterApplications(true)
+                            : loadBotApplications())
+                        }
+                        loading={
+                          directoryTab === "routers"
+                            ? isLoadingRouterApplications
+                            : isLoadingBotApplications
+                        }
                       >
                         Tentar novamente
                       </Button>
                     }
                   >
-                    {routerApplicationsError}
+                    {directoryTab === "routers" ? routerApplicationsError : botApplicationsError}
                   </Feedback>
                 )}
 
-                {isLoadingRouterApplications ? (
+                {(
+                  directoryTab === "routers"
+                    ? isLoadingRouterApplications
+                    : isLoadingBotApplications
+                ) ? (
                   <div className="router-picker-empty">
                     <LoaderCircle className="spin" size={20} aria-hidden="true" />
-                    <span>Carregando routers...</span>
+                    <span>Carregando {directoryTab === "routers" ? "routers" : "builders"}...</span>
                   </div>
-                ) : filteredDirectoryRouterApplications.length === 0 ? (
+                ) : (directoryTab === "routers"
+                    ? filteredDirectoryRouterApplications
+                    : filteredDirectoryBuilderApplications
+                  ).length === 0 ? (
                   <div className="router-picker-empty">
-                    <span>Nenhum router disponível</span>
+                    <span>
+                      Nenhum {directoryTab === "routers" ? "router" : "builder"} disponível
+                    </span>
                   </div>
                 ) : (
                   <div className="router-directory-grid">
-                    {filteredDirectoryRouterApplications.map((application) => {
+                    {(directoryTab === "routers"
+                      ? filteredDirectoryRouterApplications
+                      : filteredDirectoryBuilderApplications
+                    ).map((application) => {
                       const routerUrl = buildRouterUrl(application);
                       const isCopyingKey = routerKeyActionId === application.shortName;
                       const phone = routerPhoneNumbers[application.shortName];
@@ -3906,14 +4142,14 @@ export default function CreateTemplatesApp() {
                             title={
                               routerUrl
                                 ? `Abrir ${application.name} no Portal BLiP`
-                                : "Tenant não disponível para abrir este router."
+                                : "Tenant não disponível para abrir este bot."
                             }
                           >
                             <span className="router-directory-avatar">
                               {application.imageUri ? (
                                 <img
                                   src={application.imageUri}
-                                  alt={`Imagem do router ${application.name}`}
+                                  alt={`Imagem do bot ${application.name}`}
                                   loading="lazy"
                                 />
                               ) : (
@@ -3924,31 +4160,37 @@ export default function CreateTemplatesApp() {
                               <strong>{application.name}</strong>
                               <span>{application.shortName}</span>
                               {application.tenantId && <small>{application.tenantId}</small>}
-                              <small className="router-directory-phone">
-                                WhatsApp:{" "}
-                                {phone?.status === "connected"
-                                  ? phone.phoneNumber
-                                  : phone?.status === "not-connected"
-                                    ? "não conectado"
-                                    : phone?.status === "unavailable"
-                                      ? "consulta indisponível"
-                                      : "consultando…"}
-                              </small>
+                              {directoryTab === "routers" && (
+                                <small className="router-directory-phone">
+                                  WhatsApp:{" "}
+                                  {phone?.status === "connected"
+                                    ? phone.phoneNumber
+                                    : phone?.status === "not-connected"
+                                      ? "não conectado"
+                                      : phone?.status === "unavailable"
+                                        ? "consulta indisponível"
+                                        : "consultando…"}
+                                </small>
+                              )}
                             </span>
                             <ExternalLink size={18} aria-hidden="true" />
                           </a>
-                          <div className="router-directory-card-actions">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              type="button"
-                              aria-label={`Copiar número de ${application.name}`}
-                              onClick={() => void handleCopyRouterPhone(application)}
-                              disabled={phone?.status !== "connected"}
-                            >
-                              <Clipboard size={16} aria-hidden="true" />
-                              Número
-                            </Button>
+                          <div
+                            className={`router-directory-card-actions ${directoryTab === "builders" ? "builders" : ""}`}
+                          >
+                            {directoryTab === "routers" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                type="button"
+                                aria-label={`Copiar número de ${application.name}`}
+                                onClick={() => void handleCopyRouterPhone(application)}
+                                disabled={phone?.status !== "connected"}
+                              >
+                                <Clipboard size={16} aria-hidden="true" />
+                                Número
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -4192,30 +4434,71 @@ export default function CreateTemplatesApp() {
           </section>
         ) : visibleActiveView === "bots" ? (
           <section className="ember-panel results-panel">
+            <div className="dev-tabs" role="tablist" aria-label="Tipo de bot para clonar">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cloneMode === "builder"}
+                className={cloneMode === "builder" ? "active" : ""}
+                onClick={() => changeCloneMode("builder")}
+              >
+                {" "}
+                <Bot size={16} aria-hidden="true" /> Builder{" "}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cloneMode === "router"}
+                className={cloneMode === "router" ? "active" : ""}
+                onClick={() => changeCloneMode("router")}
+              >
+                {" "}
+                <Network size={16} aria-hidden="true" /> Router{" "}
+              </button>
+            </div>
             <div className="ember-panel-title results-title">
               <div>
-                <h2>Clone Builder</h2>
+                <h2>Clone Bots · {cloneMode === "builder" ? "Builder" : "Router"}</h2>
                 <p>
-                  Selecione dois builders do contrato atual e escolha quais configurações copiar.
+                  {cloneMode === "builder"
+                    ? "Selecione dois builders do contrato atual e escolha quais configurações copiar."
+                    : "Selecione dois routers do contrato atual, confira os serviços da origem e escolha quais conectar ao destino."}
                 </p>
               </div>
             </div>
 
-            <form className="bot-clone-form" onSubmit={handleCloneBot}>
+            <form
+              className="bot-clone-form"
+              onSubmit={
+                cloneMode === "builder"
+                  ? handleCloneBot
+                  : (event) => {
+                      event.preventDefault();
+                      void handlePreviewRouterClone();
+                    }
+              }
+            >
               <div className="bot-clone-routers">
                 <div className="bot-clone-router-field">
-                  <span className="bot-clone-field-label">Builder de Origem</span>
+                  <span className="bot-clone-field-label">
+                    {cloneMode === "builder" ? "Builder" : "Router"} de origem
+                  </span>
                   <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
                     <span className="router-summary-main">
                       <span className="router-summary-avatar" aria-hidden="true">
                         {selectedBotSource?.imageUri ? (
                           <img src={selectedBotSource.imageUri} alt="" />
+                        ) : cloneMode === "router" ? (
+                          <Network size={16} />
                         ) : (
                           <Bot size={16} />
                         )}
                       </span>
                       <span className="router-summary-copy">
-                        <strong>{selectedBotSource?.name || "Nenhum builder selecionado"}</strong>
+                        <strong>
+                          {selectedBotSource?.name ||
+                            `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
+                        </strong>
                         <span>{botSourceShortName || "Selecione a origem"}</span>
                       </span>
                     </span>
@@ -4227,31 +4510,40 @@ export default function CreateTemplatesApp() {
                         setBotSourceSearch("");
                         setBotPicker("source");
                       }}
-                      disabled={!isEmbedded || isCloningBot}
+                      disabled={!isEmbedded || isCloningBot || isCloningRouter}
                     >
                       <Pencil size={15} aria-hidden="true" />
                       {botSourceShortName ? "Alterar" : "Selecionar"}
                     </Button>
                   </div>
-                  <BotIdentityHint
-                    lookup={botSourceIdentity}
-                    onCopyId={(identity) => void handleCopyBotId(identity, "origem")}
-                    onCopyKey={() => void handleCopyBotKey(botSourceRouterKey, "origem")}
-                  />
+                  {cloneMode === "builder" && (
+                    <BotIdentityHint
+                      lookup={botSourceIdentity}
+                      onCopyId={(identity) => void handleCopyBotId(identity, "origem")}
+                      onCopyKey={() => void handleCopyBotKey(botSourceRouterKey, "origem")}
+                    />
+                  )}
                 </div>
                 <div className="bot-clone-router-field">
-                  <span className="bot-clone-field-label">Builder de Destino</span>
+                  <span className="bot-clone-field-label">
+                    {cloneMode === "builder" ? "Builder" : "Router"} de destino
+                  </span>
                   <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
                     <span className="router-summary-main">
                       <span className="router-summary-avatar" aria-hidden="true">
                         {selectedBotTarget?.imageUri ? (
                           <img src={selectedBotTarget.imageUri} alt="" />
+                        ) : cloneMode === "router" ? (
+                          <Network size={16} />
                         ) : (
                           <Bot size={16} />
                         )}
                       </span>
                       <span className="router-summary-copy">
-                        <strong>{selectedBotTarget?.name || "Nenhum builder selecionado"}</strong>
+                        <strong>
+                          {selectedBotTarget?.name ||
+                            `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
+                        </strong>
                         <span>{botTargetShortName || "Selecione o destino"}</span>
                       </span>
                     </span>
@@ -4263,89 +4555,101 @@ export default function CreateTemplatesApp() {
                         setBotTargetSearch("");
                         setBotPicker("target");
                       }}
-                      disabled={!isEmbedded || isCloningBot}
+                      disabled={!isEmbedded || isCloningBot || isCloningRouter}
                     >
                       <Pencil size={15} aria-hidden="true" />
                       {botTargetShortName ? "Alterar" : "Selecionar"}
                     </Button>
                   </div>
-                  <BotIdentityHint
-                    lookup={botTargetIdentity}
-                    onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
-                    onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
-                  />
+                  {cloneMode === "builder" && (
+                    <BotIdentityHint
+                      lookup={botTargetIdentity}
+                      onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
+                      onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
+                    />
+                  )}
                 </div>
               </div>
 
-              <div className="form-group">
-                <h3>O que clonar?</h3>
-                {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
-                  <div key={group} className="bot-clone-option-group">
-                    <span className="bot-clone-option-group-label">
-                      <GroupIcon size={14} aria-hidden="true" />
-                      {group}
-                    </span>
-                    <div className="action-grid bot-clone-options">
-                      {fields.map(({ key, label }) => (
-                        <label key={key} className="bot-clone-option">
-                          <input
-                            type="checkbox"
-                            checked={botCloneOptions[key]}
-                            onChange={(event) =>
-                              setBotCloneOptions((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
+              {cloneMode === "builder" && (
+                <div className="form-group">
+                  <h3>O que clonar?</h3>
+                  {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
+                    <div key={group} className="bot-clone-option-group">
+                      <span className="bot-clone-option-group-label">
+                        <GroupIcon size={14} aria-hidden="true" />
+                        {group}
+                      </span>
+                      <div className="action-grid bot-clone-options">
+                        {fields.map(({ key, label }) => (
+                          <label key={key} className="bot-clone-option">
+                            <input
+                              type="checkbox"
+                              checked={botCloneOptions[key]}
+                              onChange={(event) =>
+                                setBotCloneOptions((current) => ({
+                                  ...current,
+                                  [key]: event.target.checked,
+                                }))
+                              }
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
               <div className="bot-clone-actions">
                 <Button
                   type="submit"
                   className="bot-clone-submit"
                   loading={
-                    isCloningBot ||
-                    (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
+                    cloneMode === "router"
+                      ? isPreviewingRouterClone
+                      : isCloningBot ||
+                        (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
                   }
                 >
-                  <CopyPlus size={18} aria-hidden="true" />
-                  Clonar Builder
-                </Button>
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => {
-                    const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
-                    setBotCloneOptions(
-                      Object.fromEntries(
-                        BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
-                      ) as BotCloneOptions,
-                    );
-                  }}
-                >
-                  {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
-                    <>
-                      <Eraser size={16} aria-hidden="true" />
-                      Limpar seleção
-                    </>
+                  {cloneMode === "router" ? (
+                    <Search size={18} aria-hidden="true" />
                   ) : (
-                    <>
-                      <CheckSquare size={16} aria-hidden="true" />
-                      Selecionar tudo
-                    </>
+                    <CopyPlus size={18} aria-hidden="true" />
                   )}
+                  {cloneMode === "router" ? "Consultar serviços" : "Clonar Builder"}
                 </Button>
+                {cloneMode === "builder" && (
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => {
+                      const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
+                      setBotCloneOptions(
+                        Object.fromEntries(
+                          BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
+                        ) as BotCloneOptions,
+                      );
+                    }}
+                  >
+                    {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
+                      <>
+                        <Eraser size={16} aria-hidden="true" />
+                        Limpar seleção
+                      </>
+                    ) : (
+                      <>
+                        <CheckSquare size={16} aria-hidden="true" />
+                        Selecionar tudo
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
             </form>
 
-            {botCloneResult && (
+            {cloneMode === "builder" && botCloneResult && (
               <div className="bot-clone-result-section">
                 <h3>Resultado</h3>
                 {visibleBotStepCount >= botCloneResult.steps.length &&
@@ -4373,6 +4677,139 @@ export default function CreateTemplatesApp() {
                   ))}
                 </div>
               </div>
+            )}
+            {cloneMode === "router" && routerClonePreview && (
+              <div className="router-clone-preview">
+                <div className="ember-panel-title results-title">
+                  <div>
+                    <h3>Serviços de {selectedBotSource?.name || botSourceShortName}</h3>
+                    <p>
+                      {routerClonePreview.source.services.length} serviço(s) na origem ·{" "}
+                      {routerClonePreview.target.services.length} no destino
+                    </p>
+                  </div>
+                </div>
+                {!routerClonePreview.compatible && (
+                  <Feedback tone="danger">
+                    Os routers usam templates ou tipos de configuração diferentes. A clonagem foi
+                    bloqueada.
+                  </Feedback>
+                )}
+                <Feedback tone="warning">
+                  Conectar um serviço reutiliza o builder existente, inclusive quando ele pertence a
+                  outro router. O conteúdo do builder não é duplicado. Acesso ao builder é
+                  verificado separadamente da permissão de configurar o router.
+                </Feedback>
+                <div className="router-clone-selection-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setSelectedRouterServices(
+                        new Set(
+                          routerClonePreview.source.services.map((service) => service.identity),
+                        ),
+                      )
+                    }
+                  >
+                    Selecionar todos
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedRouterServices(new Set())}
+                  >
+                    Manter serviços do destino
+                  </Button>
+                </div>
+                <div className="ember-table-wrap">
+                  <table className="ember-table router-clone-table">
+                    <thead>
+                      <tr>
+                        <th>Copiar</th>
+                        <th>Builder / serviço</th>
+                        <th>ID</th>
+                        <th>Acesso</th>
+                        <th>Função</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {routerClonePreview.source.services.map((service) => {
+                        const access = botApplications.some(
+                          (application) => application.shortName === service.shortName,
+                        );
+                        return (
+                          <tr key={service.identity}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={selectedRouterServices.has(service.identity)}
+                                aria-label={`Copiar serviço ${service.name}`}
+                                onChange={(event) =>
+                                  setSelectedRouterServices((current) => {
+                                    const next = new Set(current);
+                                    if (event.target.checked) next.add(service.identity);
+                                    else next.delete(service.identity);
+                                    return next;
+                                  })
+                                }
+                              />
+                            </td>
+                            <td>{service.name}</td>
+                            <td className="mono-cell">{service.shortName}</td>
+                            <td>
+                              <span
+                                className={
+                                  access ? "router-clone-access-ok" : "router-clone-access-unknown"
+                                }
+                              >
+                                {access
+                                  ? "Acesso confirmado"
+                                  : isLoadingBotApplications
+                                    ? "Verificando…"
+                                    : "Acesso não confirmado"}
+                              </span>
+                            </td>
+                            <td>{service.isDefault ? "Padrão" : "Adicional"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {selectedRouterServices.size > 0 &&
+                  !routerClonePreview.source.services.some(
+                    (service) => service.isDefault && selectedRouterServices.has(service.identity),
+                  ) && (
+                    <Feedback tone="warning">Selecione também o serviço padrão da origem.</Feedback>
+                  )}
+                <div className="bot-clone-actions">
+                  <Button
+                    type="button"
+                    onClick={() => void handleCloneRouter()}
+                    loading={isCloningRouter}
+                    disabled={
+                      !routerClonePreview.compatible ||
+                      (selectedRouterServices.size > 0 &&
+                        !routerClonePreview.source.services.some(
+                          (service) =>
+                            service.isDefault && selectedRouterServices.has(service.identity),
+                        ))
+                    }
+                  >
+                    <CopyPlus size={18} aria-hidden="true" /> Clonar router
+                  </Button>
+                </div>
+              </div>
+            )}
+            {cloneMode === "router" && routerCloneResult && (
+              <Feedback tone="success" title="Router verificado">
+                {routerCloneResult.status === "unchanged"
+                  ? "O destino já tinha essa configuração."
+                  : `${routerCloneResult.services} serviço(s) configurados. Backup local: ${routerCloneResult.backup}.`}
+              </Feedback>
             )}
           </section>
         ) : (
@@ -5682,9 +6119,13 @@ export default function CreateTemplatesApp() {
               <div className="ember-modal-header">
                 <div>
                   <h2 id="bot-picker-title">
-                    Builder de {botPicker === "source" ? "origem" : "destino"}
+                    {cloneMode === "router" ? "Router" : "Builder"} de{" "}
+                    {botPicker === "source" ? "origem" : "destino"}
                   </h2>
-                  <p>Selecione um builder do contrato atual ao qual você tem acesso.</p>
+                  <p>
+                    Selecione um {cloneMode === "router" ? "router" : "builder"} do contrato atual
+                    ao qual você tem acesso.
+                  </p>
                 </div>
                 <Button
                   variant="secondary"
@@ -5700,7 +6141,7 @@ export default function CreateTemplatesApp() {
                 {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
                 <div className="router-picker-toolbar">
                   <label className="blip-native-field" htmlFor="builderPickerSearch">
-                    Buscar builder
+                    Buscar {cloneMode === "router" ? "router" : "builder"}
                     <input
                       id="builderPickerSearch"
                       autoFocus
@@ -5710,13 +6151,21 @@ export default function CreateTemplatesApp() {
                           ? setBotSourceSearch(event.target.value)
                           : setBotTargetSearch(event.target.value)
                       }
-                      placeholder="Nome ou ID do builder"
+                      placeholder={`Nome ou ID do ${cloneMode === "router" ? "router" : "builder"}`}
                     />
                   </label>
                   <Button
                     variant="secondary"
-                    onClick={() => void loadBotApplications()}
-                    loading={isLoadingBotApplications}
+                    onClick={() =>
+                      void (cloneMode === "router"
+                        ? loadRouterApplications()
+                        : loadBotApplications())
+                    }
+                    loading={
+                      cloneMode === "router"
+                        ? isLoadingRouterApplications
+                        : isLoadingBotApplications
+                    }
                   >
                     <Search size={18} aria-hidden="true" /> Atualizar
                   </Button>
@@ -5728,20 +6177,27 @@ export default function CreateTemplatesApp() {
                       : filteredBotTargetApplications
                     ).length
                   }{" "}
-                  builders disponíveis
+                  {cloneMode === "router" ? "routers" : "builders"} disponíveis
                 </div>
                 <div className="router-application-list">
-                  {isLoadingBotApplications ? (
+                  {(
+                    cloneMode === "router" ? isLoadingRouterApplications : isLoadingBotApplications
+                  ) ? (
                     <div className="router-picker-empty">
-                      <LoaderCircle className="spin" size={18} /> Carregando builders…
+                      <LoaderCircle className="spin" size={18} /> Carregando{" "}
+                      {cloneMode === "router" ? "routers" : "builders"}…
                     </div>
-                  ) : botApplicationsError ? (
-                    <Feedback>{botApplicationsError}</Feedback>
+                  ) : (cloneMode === "router" ? routerApplicationsError : botApplicationsError) ? (
+                    <Feedback>
+                      {cloneMode === "router" ? routerApplicationsError : botApplicationsError}
+                    </Feedback>
                   ) : (botPicker === "source"
                       ? filteredBotSourceApplications
                       : filteredBotTargetApplications
                     ).length === 0 ? (
-                    <div className="router-picker-empty">Nenhum builder encontrado.</div>
+                    <div className="router-picker-empty">
+                      Nenhum {cloneMode === "router" ? "router" : "builder"} encontrado.
+                    </div>
                   ) : (
                     (botPicker === "source"
                       ? filteredBotSourceApplications

@@ -1269,6 +1269,9 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
+.router-directory-card-actions.builders {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .router-directory-card-actions .blip-button {
   min-width: 0;
   width: 100%;
@@ -1285,6 +1288,29 @@
   margin: 0;
   color: var(--blip-content-soft);
   font-size: 12px;
+}
+.router-clone-preview {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--blip-border-soft);
+  padding-top: 20px;
+}
+.router-clone-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.router-clone-table td,
+.router-clone-table th {
+  vertical-align: middle;
+}
+.router-clone-access-ok {
+  color: var(--blip-success, #16834a);
+  font-weight: 700;
+}
+.router-clone-access-unknown {
+  color: var(--blip-content-soft);
+  font-weight: 700;
 }
 
 .create-flow-modal {
