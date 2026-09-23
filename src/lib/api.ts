@@ -42,3 +42,95 @@ export async function postJson<TResponse>(path: string, body: unknown): Promise<
   }
   return data as TResponse;
 }
+
+export type OperationProgress = {
+  processed: number;
+  total: number;
+  stage: string;
+};
+
+/** Read acknowledged item counts; never infer completion from elapsed time. */
+export async function postJsonWithProgress<TResponse>(
+  path: string,
+  body: unknown,
+  onProgress: (progress: OperationProgress) => void,
+): Promise<TResponse> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Conexão interrompida. Confira o resultado nos destinos antes de repetir.");
+  }
+  if (!response.ok || !response.body) {
+    throw new Error(`Não foi possível iniciar a operação (HTTP ${response.status}).`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: TResponse | undefined;
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      throw new Error("O servidor enviou uma atualização de progresso inválida.");
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("O servidor enviou uma atualização de progresso inválida.");
+    }
+    if (event.kind === "error") {
+      throw new Error(typeof event.message === "string" ? event.message : "Operação interrompida.");
+    }
+    if (event.kind === "progress") {
+      const processed = Number(event.processed);
+      const total = Number(event.total);
+      if (
+        !Number.isInteger(processed) ||
+        !Number.isInteger(total) ||
+        processed < 0 ||
+        total < 0 ||
+        processed > total
+      ) {
+        throw new Error("O servidor enviou uma contagem de progresso inválida.");
+      }
+      onProgress({ processed, total, stage: String(event.stage ?? "Processando") });
+    }
+    if (event.kind === "result") result = event.data as TResponse;
+  };
+
+  try {
+    while (true) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch {
+        throw new Error("Conexão interrompida. Confira o resultado nos destinos antes de repetir.");
+      }
+      const { value, done } = chunk;
+      buffer += decoder.decode(value, { stream: !done });
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        consume(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf("\n");
+      }
+      if (done) break;
+    }
+    consume(buffer);
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error("Conexão interrompida. Confira o resultado nos destinos antes de repetir.");
+  } finally {
+    reader.releaseLock();
+  }
+  if (result === undefined) {
+    throw new Error("A conexão terminou sem resultado. Confira os destinos antes de repetir.");
+  }
+  return result;
+}

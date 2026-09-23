@@ -521,7 +521,7 @@ async function createTemplateOnTargetRouter({ template, targetRouterKey, targetI
   };
 }
 
-async function replicateTemplates(params) {
+async function replicateTemplates(params, onProgress) {
   const {
     sourceRouterKey,
     templateNames,
@@ -573,6 +573,9 @@ async function replicateTemplates(params) {
     errors: [...loadResults.errors],
   };
 
+  let processed = 0;
+  onProgress?.(0, createJobs.length, "Criando templates");
+
   await runInBatches(createJobs, batchSize, async (job) => {
     try {
       const createResult = await createTemplateOnTargetRouter({
@@ -594,6 +597,9 @@ async function replicateTemplates(params) {
       results.errors.push(errorInfo);
 
       return errorInfo;
+    } finally {
+      processed += 1;
+      onProgress?.(processed, createJobs.length, "Criando templates");
     }
   });
 

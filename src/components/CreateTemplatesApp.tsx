@@ -49,7 +49,8 @@ import { StatusBadge } from "./ui/StatusBadge";
 import { SelectionBar } from "./ui/SelectionBar";
 import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
-import { postJson } from "../lib/api";
+import { OperationProgress } from "./ui/OperationProgress";
+import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
 import {
   getAccessibleApplicationUri,
   getActiveTenantId,
@@ -677,7 +678,7 @@ export default function CreateTemplatesApp() {
   const [flowsLoaded, setFlowsLoaded] = useState(false);
   const [startupError, setStartupError] = useState("");
   const [startupAttempt, setStartupAttempt] = useState(0);
-  const [activeView, setActiveView] = useState<ActiveView>("templates");
+  const [activeView, setActiveView] = useState<ActiveView>("routers");
   const [devsTab, setDevsTab] = useState<DevsTab>("commands");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [sourceRouterShortName, setSourceRouterShortName] = useState("");
@@ -755,19 +756,23 @@ export default function CreateTemplatesApp() {
   const [copyNotice, setCopyNotice] = useState("");
   const [isSearchingTemplates, setIsSearchingTemplates] = useState(false);
   const [isReplicatingTemplates, setIsReplicatingTemplates] = useState(false);
+  const [templateReplicateProgress, setTemplateReplicateProgress] = useState<Progress | null>(null);
   const [isComparingTemplates, setIsComparingTemplates] = useState(false);
   const [isInspectingTemplateDeletion, setIsInspectingTemplateDeletion] = useState(false);
   const [isDeletingTemplates, setIsDeletingTemplates] = useState(false);
   const [isLoadingFlows, setIsLoadingFlows] = useState(false);
   const [isReplicatingFlows, setIsReplicatingFlows] = useState(false);
+  const [flowReplicateProgress, setFlowReplicateProgress] = useState<Progress | null>(null);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [isLoadingEditFlowJson, setIsLoadingEditFlowJson] = useState(false);
   const [isUpdatingFlow, setIsUpdatingFlow] = useState(false);
   const [isBulkUpdatingFlows, setIsBulkUpdatingFlows] = useState(false);
+  const [flowBulkProgress, setFlowBulkProgress] = useState<Progress | null>(null);
   const [flowActionId, setFlowActionId] = useState("");
   const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isSavingPlugin, setIsSavingPlugin] = useState(false);
   const [isCopyingPlugins, setIsCopyingPlugins] = useState(false);
+  const [pluginReplicateProgress, setPluginReplicateProgress] = useState<Progress | null>(null);
   const [pluginActionId, setPluginActionId] = useState("");
   const [botSourceRouterKey, setBotSourceRouterKey] = useState("");
   const [botTargetRouterKey, setBotTargetRouterKey] = useState("");
@@ -776,14 +781,14 @@ export default function CreateTemplatesApp() {
   const [botSourceKeyInvalid, setBotSourceKeyInvalid] = useState(false);
   const [botTargetKeyInvalid, setBotTargetKeyInvalid] = useState(false);
   const [botApplications, setBotApplications] = useState<PortalApplicationAccount[]>([]);
+  const [hasLoadedBotApplications, setHasLoadedBotApplications] = useState(false);
   const [isLoadingBotApplications, setIsLoadingBotApplications] = useState(false);
   const [botApplicationsError, setBotApplicationsError] = useState("");
   const [botSourceShortName, setBotSourceShortName] = useState("");
   const [botTargetShortName, setBotTargetShortName] = useState("");
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
-  const [isBotSourcePickerOpen, setIsBotSourcePickerOpen] = useState(false);
-  const [isBotTargetPickerOpen, setIsBotTargetPickerOpen] = useState(false);
+  const [botPicker, setBotPicker] = useState<"source" | "target" | null>(null);
   const [isResolvingBotSourceKey, setIsResolvingBotSourceKey] = useState(false);
   const [isResolvingBotTargetKey, setIsResolvingBotTargetKey] = useState(false);
   const [botCloneOptions, setBotCloneOptions] =
@@ -803,24 +808,26 @@ export default function CreateTemplatesApp() {
   const [canAccessDevs, setCanAccessDevs] = useState(false);
 
   const isEmbedded = useIframeAutoHeight(shellRef);
-  const visibleActiveView = activeView === "devs" && !canAccessDevs ? "templates" : activeView;
+  const visibleActiveView = activeView === "devs" && !canAccessDevs ? "routers" : activeView;
   const pageOperationResult =
     visibleActiveView !== "devs" && operationResult?.view === visibleActiveView
       ? operationResult
       : null;
-  const activeModalId = routerModal
-    ? "router"
-    : isBulkFlowMappingModalOpen
-      ? "bulk-flow-mapping"
-      : isEditFlowModalOpen
-        ? "edit-flow"
-        : isCreateFlowModalOpen
-          ? "create-flow"
-          : isTemplateDeleteModalOpen
-            ? "template-delete"
-            : isTemplateCompareModalOpen
-              ? "template-compare"
-              : null;
+  const activeModalId = botPicker
+    ? "bot-picker"
+    : routerModal
+      ? "router"
+      : isBulkFlowMappingModalOpen
+        ? "bulk-flow-mapping"
+        : isEditFlowModalOpen
+          ? "edit-flow"
+          : isCreateFlowModalOpen
+            ? "create-flow"
+            : isTemplateDeleteModalOpen
+              ? "template-delete"
+              : isTemplateCompareModalOpen
+                ? "template-compare"
+                : null;
 
   useEffect(() => {
     if (!isEmbedded) return;
@@ -847,9 +854,14 @@ export default function CreateTemplatesApp() {
 
   useEffect(() => {
     if (activeView === "devs" && !canAccessDevs) {
-      setActiveView("templates");
+      setActiveView("routers");
     }
   }, [activeView, canAccessDevs]);
+
+  useEffect(() => {
+    if (isEmbedded) void loadRouterApplications(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once when the iframe becomes available.
+  }, [isEmbedded]);
 
   useEffect(() => {
     if (!isEmbedded) return;
@@ -1046,6 +1058,9 @@ export default function CreateTemplatesApp() {
     });
   }, [botApplications, botTargetSearch, botSourceShortName]);
 
+  const selectedBotSource = botApplications.find((item) => item.shortName === botSourceShortName);
+  const selectedBotTarget = botApplications.find((item) => item.shortName === botTargetShortName);
+
   const sourceRouterApplication = useMemo(() => {
     const selectedShortName = sourceRouterShortName.trim();
     if (!selectedShortName) return null;
@@ -1110,12 +1125,15 @@ export default function CreateTemplatesApp() {
     try {
       const account = await getAccount();
       if (account.identity) {
-        const roleResponse = await sendBlipCommand({
-          id: createCommandId(),
-          method: COMMAND_METHODS.GET,
-          to: DEFAULT_DEV_COMMAND_TO,
-          uri: `/tenants/${tenantId}/users/${encodeURIComponent(account.identity)}`,
-        }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 });
+        const roleResponse = await sendBlipCommand(
+          {
+            id: createCommandId(),
+            method: COMMAND_METHODS.GET,
+            to: DEFAULT_DEV_COMMAND_TO,
+            uri: `/tenants/${tenantId}/users/${encodeURIComponent(account.identity)}`,
+          },
+          { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 },
+        );
         const roleResource = extractCommandResource(roleResponse);
         if (isRecord(roleResource) && typeof roleResource.roleId === "string") {
           roleId = roleResource.roleId;
@@ -1126,12 +1144,15 @@ export default function CreateTemplatesApp() {
     }
 
     const readList = async (uri: string) => {
-      const response = await sendBlipCommand({
-        id: createCommandId(),
-        method: COMMAND_METHODS.GET,
-        to: DEFAULT_DEV_COMMAND_TO,
-        uri,
-      }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 });
+      const response = await sendBlipCommand(
+        {
+          id: createCommandId(),
+          method: COMMAND_METHODS.GET,
+          to: DEFAULT_DEV_COMMAND_TO,
+          uri,
+        },
+        { destination: PORTAL_COMMAND_DESTINATION, timeout: 30000 },
+      );
       extractCommandResource(response);
       return response;
     };
@@ -1149,8 +1170,10 @@ export default function CreateTemplatesApp() {
     currentRouter: CurrentApplicationRouter,
     requestId: number,
   ) {
-    const ordered = [...applications].sort((a, b) =>
-      Number(b.shortName === currentRouter.shortName) - Number(a.shortName === currentRouter.shortName),
+    const ordered = [...applications].sort(
+      (a, b) =>
+        Number(b.shortName === currentRouter.shortName) -
+        Number(a.shortName === currentRouter.shortName),
     );
     let nextIndex = 0;
     const worker = async () => {
@@ -1159,12 +1182,15 @@ export default function CreateTemplatesApp() {
         let result: RouterPhone | { status: "unavailable"; phoneNumber: null };
         try {
           if (application.shortName === currentRouter.shortName) {
-            const response = await sendBlipCommand({
-              id: createCommandId(),
-              method: COMMAND_METHODS.GET,
-              to: "postmaster@configurations.msging.net",
-              uri: "/configuration/gateways",
-            }, { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 });
+            const response = await sendBlipCommand(
+              {
+                id: createCommandId(),
+                method: COMMAND_METHODS.GET,
+                to: "postmaster@configurations.msging.net",
+                uri: "/configuration/gateways",
+              },
+              { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 },
+            );
             result = readWhatsAppPhone(extractCommandResource(response));
           } else {
             const router = await loadRouterKey(application.shortName);
@@ -1209,10 +1235,14 @@ export default function CreateTemplatesApp() {
       setCurrentApplicationRouter(currentRouter);
       setRouterApplications(applications);
       if (withPhoneNumbers && applications.length) {
-        setRouterPhoneNumbers(Object.fromEntries(applications.map((application) => [
-          application.shortName,
-          { phoneNumber: null, status: "loading" },
-        ])));
+        setRouterPhoneNumbers(
+          Object.fromEntries(
+            applications.map((application) => [
+              application.shortName,
+              { phoneNumber: null, status: "loading" },
+            ]),
+          ),
+        );
         void loadRouterPhoneNumbers(applications, currentRouter, requestId);
       }
     } catch (caughtError) {
@@ -1235,25 +1265,26 @@ export default function CreateTemplatesApp() {
     setIsLoadingBotApplications(true);
     setBotApplicationsError("");
 
-
     try {
       const tenantId = getActiveTenantId(await getCurrentApplication());
       const response = await getContractApplicationList(tenantId);
 
-      setBotApplications(extractPortalApplications(response, { templateFilter: "non-master" })
-        .filter((application) => application.tenantId?.toLowerCase() === tenantId));
+      setBotApplications(
+        extractPortalApplications(response, { templateFilter: "non-master" }).filter(
+          (application) => application.tenantId?.toLowerCase() === tenantId,
+        ),
+      );
     } catch (caughtError) {
       setBotApplications([]);
       setBotApplicationsError(getErrorMessage(caughtError, "Erro ao carregar builders."));
     } finally {
       setIsLoadingBotApplications(false);
+      setHasLoadedBotApplications(true);
     }
   }
 
   async function handleSelectBotSourceApplication(application: PortalApplicationAccount) {
     setBotSourceShortName(application.shortName);
-    setBotSourceSearch(application.name);
-    setIsBotSourcePickerOpen(false);
     setBotSourceKeyInvalid(false);
     setIsResolvingBotSourceKey(true);
     setError("");
@@ -1261,6 +1292,7 @@ export default function CreateTemplatesApp() {
       const router = await loadRouterKey(application.shortName);
 
       setBotSourceRouterKey(router.key);
+      setBotPicker(null);
     } catch (caughtError) {
       setBotSourceShortName("");
       setBotSourceRouterKey("");
@@ -1272,8 +1304,6 @@ export default function CreateTemplatesApp() {
 
   async function handleSelectBotTargetApplication(application: PortalApplicationAccount) {
     setBotTargetShortName(application.shortName);
-    setBotTargetSearch(application.name);
-    setIsBotTargetPickerOpen(false);
     setBotTargetKeyInvalid(false);
     setIsResolvingBotTargetKey(true);
     setError("");
@@ -1281,6 +1311,7 @@ export default function CreateTemplatesApp() {
       const router = await loadRouterKey(application.shortName);
 
       setBotTargetRouterKey(router.key);
+      setBotPicker(null);
     } catch (caughtError) {
       setBotTargetShortName("");
       setBotTargetRouterKey("");
@@ -1516,6 +1547,7 @@ export default function CreateTemplatesApp() {
   async function handleReplicateTemplates() {
     setError("");
     setOperationResult(null);
+    setTemplateReplicateProgress(null);
     if (selectedTemplates.length === 0) {
       setError("Selecione pelo menos um template.");
       return;
@@ -1528,11 +1560,15 @@ export default function CreateTemplatesApp() {
     setIsReplicatingTemplates(true);
     try {
       const targets = await ensureTargetRouterKeys();
-      const data = await postJson<TemplateReplicateResponse>("/api/templates/replicate", {
-        targetRouterKeys: targets,
-        templates: selectedTemplates,
-        ...DEFAULT_TEMPLATE_OPTIONS,
-      });
+      const data = await postJsonWithProgress<TemplateReplicateResponse>(
+        "/api/templates/replicate/progress",
+        {
+          targetRouterKeys: targets,
+          templates: selectedTemplates,
+          ...DEFAULT_TEMPLATE_OPTIONS,
+        },
+        setTemplateReplicateProgress,
+      );
       setOperationResult({
         summary: buildTemplateReplicateSummary(data),
         payload: data,
@@ -2002,6 +2038,7 @@ export default function CreateTemplatesApp() {
     setIsBulkFlowMappingModalOpen(false);
     setBulkFlowPreflight(null);
     setBulkFlowSelections({});
+    setFlowBulkProgress(null);
     setIsLoadingEditFlowJson(false);
     setError("");
   }
@@ -2230,6 +2267,7 @@ export default function CreateTemplatesApp() {
 
     setError("");
     setOperationResult(null);
+    setFlowBulkProgress(null);
 
     const editedMetadata = getEditedFlowMetadata();
     if (!editedMetadata) return;
@@ -2292,6 +2330,7 @@ export default function CreateTemplatesApp() {
 
     setIsBulkUpdatingFlows(true);
     setFlowActionId("bulk-update");
+    setFlowBulkProgress({ processed: 0, total: 0, stage: "Preparando alteração" });
 
     try {
       const targets = await ensureTargetRouterKeys();
@@ -2389,10 +2428,14 @@ export default function CreateTemplatesApp() {
       }
       const data =
         effectivePreflight.totals.matched > 0
-          ? await postJson<FlowBulkUpdateResponse>("/api/flows/bulk-update-json", {
-              ...requestBody,
-              dryRun: false,
-            })
+          ? await postJsonWithProgress<FlowBulkUpdateResponse>(
+              "/api/flows/bulk-update-json/progress",
+              {
+                ...requestBody,
+                dryRun: false,
+              },
+              setFlowBulkProgress,
+            )
           : {
               ...effectivePreflight,
               options: {
@@ -2572,6 +2615,7 @@ export default function CreateTemplatesApp() {
   async function handleReplicateFlows() {
     setError("");
     setOperationResult(null);
+    setFlowReplicateProgress(null);
     if (!hasSourceRouterSelection()) {
       setError("Informe o router de origem.");
       openSourceModal();
@@ -2594,15 +2638,19 @@ export default function CreateTemplatesApp() {
     try {
       const sourceKey = await ensureSourceRouterKey();
       const targets = await ensureTargetRouterKeys();
-      const data = await postJson<FlowReplicateResponse>("/api/flows/replicate", {
-        sourceRouterKey: sourceKey,
-        targetRouterKeys: targets,
-        flows: selectedFlows,
-        ...(selectedFlowsIncludeApi
-          ? { businessPublicKey: replicateFlowBusinessPublicKey.trim() }
-          : {}),
-        ...DEFAULT_FLOW_OPTIONS,
-      });
+      const data = await postJsonWithProgress<FlowReplicateResponse>(
+        "/api/flows/replicate/progress",
+        {
+          sourceRouterKey: sourceKey,
+          targetRouterKeys: targets,
+          flows: selectedFlows,
+          ...(selectedFlowsIncludeApi
+            ? { businessPublicKey: replicateFlowBusinessPublicKey.trim() }
+            : {}),
+          ...DEFAULT_FLOW_OPTIONS,
+        },
+        setFlowReplicateProgress,
+      );
       setOperationResult({
         summary: buildFlowReplicateSummary(data),
         payload: data,
@@ -2917,6 +2965,7 @@ export default function CreateTemplatesApp() {
   async function handleReplicatePlugins() {
     setError("");
     setOperationResult(null);
+    setPluginReplicateProgress(null);
 
     if (selectedPlugins.length === 0) {
       setError("Selecione pelo menos um plugin.");
@@ -2966,13 +3015,17 @@ export default function CreateTemplatesApp() {
         }
       }
 
-      const data = await postJson<PluginReplicateResponse>("/api/plugins/replicate", {
-        targetRouterKeys: targets,
-        plugins: selectedPlugins,
-        mode: pluginCopyMode,
-        replaceDuplicates,
-        ...DEFAULT_PLUGIN_OPTIONS,
-      });
+      const data = await postJsonWithProgress<PluginReplicateResponse>(
+        "/api/plugins/replicate/progress",
+        {
+          targetRouterKeys: targets,
+          plugins: selectedPlugins,
+          mode: pluginCopyMode,
+          replaceDuplicates,
+          ...DEFAULT_PLUGIN_OPTIONS,
+        },
+        setPluginReplicateProgress,
+      );
 
       setOperationResult({
         summary: `${data.totals.copied} destinos atualizados, ${data.totals.errors} erros`,
@@ -2987,11 +3040,11 @@ export default function CreateTemplatesApp() {
 
   useEffect(() => {
     if (visibleActiveView !== "bots" || !isEmbedded) return;
-    if (botApplications.length > 0 || isLoadingBotApplications) return;
+    if (hasLoadedBotApplications || isLoadingBotApplications) return;
 
     void loadBotApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBotApplications is redefined every render; the guards above already prevent refetching.
-  }, [visibleActiveView, isEmbedded, botApplications.length, isLoadingBotApplications]);
+  }, [visibleActiveView, isEmbedded, hasLoadedBotApplications, isLoadingBotApplications]);
 
   useEffect(() => {
     const routerKey = botSourceRouterKey.trim();
@@ -3323,11 +3376,14 @@ export default function CreateTemplatesApp() {
     setPluginFilter("");
     setSelectedPluginIds(new Set());
     setPluginsLoaded(false);
+    setPluginReplicateProgress(null);
     resetPluginDraft();
   }
   function clearTemplateAndFlowResults() {
     setTemplatesLoaded(false);
     setFlowsLoaded(false);
+    setTemplateReplicateProgress(null);
+    setFlowReplicateProgress(null);
     setTemplateSearchResult(emptyTemplateSearch);
     setSelectedTemplateKeys(new Set());
     setFlowSearchResult(emptyFlowSearch);
@@ -3365,6 +3421,9 @@ export default function CreateTemplatesApp() {
 
   function closeActiveModal() {
     switch (activeModalId) {
+      case "bot-picker":
+        if (!isResolvingBotSourceKey && !isResolvingBotTargetKey) setBotPicker(null);
+        return;
       case "router":
         closeRouterModal();
         return;
@@ -3728,7 +3787,7 @@ export default function CreateTemplatesApp() {
           </Feedback>
         )}
 
-        {visibleActiveView === "routers" && copyNotice && (
+        {(visibleActiveView === "routers" || visibleActiveView === "bots") && copyNotice && (
           <Feedback tone="success" onDismiss={() => setCopyNotice("")}>
             {copyNotice}
           </Feedback>
@@ -3866,7 +3925,8 @@ export default function CreateTemplatesApp() {
                               <span>{application.shortName}</span>
                               {application.tenantId && <small>{application.tenantId}</small>}
                               <small className="router-directory-phone">
-                                WhatsApp: {phone?.status === "connected"
+                                WhatsApp:{" "}
+                                {phone?.status === "connected"
                                   ? phone.phoneNumber
                                   : phone?.status === "not-connected"
                                     ? "não conectado"
@@ -3882,25 +3942,28 @@ export default function CreateTemplatesApp() {
                               variant="ghost"
                               size="sm"
                               type="button"
+                              aria-label={`Copiar número de ${application.name}`}
                               onClick={() => void handleCopyRouterPhone(application)}
                               disabled={phone?.status !== "connected"}
                             >
                               <Clipboard size={16} aria-hidden="true" />
-                              Copiar número
+                              Número
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
                               type="button"
+                              aria-label={`Copiar ID de ${application.name}`}
                               onClick={() => void handleCopyRouterId(application)}
                             >
                               <Clipboard size={16} aria-hidden="true" />
-                              Copiar ID
+                              ID
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
                               type="button"
+                              aria-label={`Copiar key de ${application.name}`}
                               onClick={() => void handleCopyRouterKey(application)}
                               disabled={Boolean(routerKeyActionId)}
                             >
@@ -3909,7 +3972,7 @@ export default function CreateTemplatesApp() {
                               ) : (
                                 <KeyRound size={16} aria-hidden="true" />
                               )}
-                              Copiar key
+                              Key
                             </Button>
                           </div>
                         </article>
@@ -4009,6 +4072,12 @@ export default function CreateTemplatesApp() {
                 ]}
               />
             </SelectionBar>
+            {templateReplicateProgress && (
+              <OperationProgress
+                progress={templateReplicateProgress}
+                label="templates processados"
+              />
+            )}
             <TemplateTable
               templates={templateSearchResult.templates}
               selected={selectedTemplateKeys}
@@ -4084,6 +4153,9 @@ export default function CreateTemplatesApp() {
               onReplicate={handleReplicateFlows}
               onClear={() => setSelectedFlowIds(new Set())}
             />
+            {flowReplicateProgress && (
+              <OperationProgress progress={flowReplicateProgress} label="flows processados" />
+            )}
 
             {selectedFlowsIncludeApi && (
               <label
@@ -4124,8 +4196,7 @@ export default function CreateTemplatesApp() {
               <div>
                 <h2>Clone Builder</h2>
                 <p>
-                  Copia configuração de um builder BLiP para outro, usando a builder key de cada um
-                  — não precisa estar na sua lista de routers do Portal.
+                  Selecione dois builders do contrato atual e escolha quais configurações copiar.
                 </p>
               </div>
             </div>
@@ -4134,65 +4205,33 @@ export default function CreateTemplatesApp() {
               <div className="bot-clone-routers">
                 <div className="bot-clone-router-field">
                   <span className="bot-clone-field-label">Builder de Origem</span>
-                  <div className="bot-clone-combobox">
-                    <input
-                      type="text"
-                      role="combobox"
-                      aria-expanded={isBotSourcePickerOpen}
-                      aria-autocomplete="list"
-                      aria-invalid={botSourceKeyInvalid || undefined}
-                      className={botSourceKeyInvalid ? "invalid" : undefined}
-                      value={botSourceSearch}
-                      onChange={(event) => {
-                        setBotSourceSearch(event.target.value);
-                        setIsBotSourcePickerOpen(true);
-                        if (botSourceShortName) {
-                          setBotSourceShortName("");
-                          setBotSourceRouterKey("");
-                        }
-                        if (botSourceKeyInvalid) {
-                          setBotSourceKeyInvalid(false);
-                          setError("");
-                        }
-                      }}
-                      onFocus={() => setIsBotSourcePickerOpen(true)}
-                      onBlur={() => window.setTimeout(() => setIsBotSourcePickerOpen(false), 150)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") setIsBotSourcePickerOpen(false);
-                        if (event.key === "Enter" && filteredBotSourceApplications.length === 1) {
-                          event.preventDefault();
-                          void handleSelectBotSourceApplication(filteredBotSourceApplications[0]);
-                        }
-                      }}
-                      placeholder={
-                        isEmbedded ? "Buscar builder por nome..." : "Não disponível fora do Portal"
-                      }
-                      disabled={!isEmbedded || isResolvingBotSourceKey}
-                    />
-                    {isBotSourcePickerOpen && isEmbedded && (
-                      <ul className="bot-clone-combobox-list" role="listbox">
-                        {isLoadingBotApplications ? (
-                          <li className="bot-clone-combobox-empty">Carregando builders...</li>
-                        ) : botApplicationsError ? (
-                          <li className="bot-clone-combobox-empty">{botApplicationsError}</li>
-                        ) : filteredBotSourceApplications.length === 0 ? (
-                          <li className="bot-clone-combobox-empty">Nenhum builder encontrado.</li>
+                  <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
+                    <span className="router-summary-main">
+                      <span className="router-summary-avatar" aria-hidden="true">
+                        {selectedBotSource?.imageUri ? (
+                          <img src={selectedBotSource.imageUri} alt="" />
                         ) : (
-                          filteredBotSourceApplications.map((application) => (
-                            <li key={application.shortName}>
-                              <button
-                                type="button"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => void handleSelectBotSourceApplication(application)}
-                              >
-                                {application.name}
-                                <span>({application.shortName})</span>
-                              </button>
-                            </li>
-                          ))
+                          <Bot size={16} />
                         )}
-                      </ul>
-                    )}
+                      </span>
+                      <span className="router-summary-copy">
+                        <strong>{selectedBotSource?.name || "Nenhum builder selecionado"}</strong>
+                        <span>{botSourceShortName || "Selecione a origem"}</span>
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setBotSourceSearch("");
+                        setBotPicker("source");
+                      }}
+                      disabled={!isEmbedded || isCloningBot}
+                    >
+                      <Pencil size={15} aria-hidden="true" />
+                      {botSourceShortName ? "Alterar" : "Selecionar"}
+                    </Button>
                   </div>
                   <BotIdentityHint
                     lookup={botSourceIdentity}
@@ -4202,65 +4241,33 @@ export default function CreateTemplatesApp() {
                 </div>
                 <div className="bot-clone-router-field">
                   <span className="bot-clone-field-label">Builder de Destino</span>
-                  <div className="bot-clone-combobox">
-                    <input
-                      type="text"
-                      role="combobox"
-                      aria-expanded={isBotTargetPickerOpen}
-                      aria-autocomplete="list"
-                      aria-invalid={botTargetKeyInvalid || undefined}
-                      className={botTargetKeyInvalid ? "invalid" : undefined}
-                      value={botTargetSearch}
-                      onChange={(event) => {
-                        setBotTargetSearch(event.target.value);
-                        setIsBotTargetPickerOpen(true);
-                        if (botTargetShortName) {
-                          setBotTargetShortName("");
-                          setBotTargetRouterKey("");
-                        }
-                        if (botTargetKeyInvalid) {
-                          setBotTargetKeyInvalid(false);
-                          setError("");
-                        }
-                      }}
-                      onFocus={() => setIsBotTargetPickerOpen(true)}
-                      onBlur={() => window.setTimeout(() => setIsBotTargetPickerOpen(false), 150)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") setIsBotTargetPickerOpen(false);
-                        if (event.key === "Enter" && filteredBotTargetApplications.length === 1) {
-                          event.preventDefault();
-                          void handleSelectBotTargetApplication(filteredBotTargetApplications[0]);
-                        }
-                      }}
-                      placeholder={
-                        isEmbedded ? "Buscar builder por nome..." : "Não disponível fora do Portal"
-                      }
-                      disabled={!isEmbedded || isResolvingBotTargetKey}
-                    />
-                    {isBotTargetPickerOpen && isEmbedded && (
-                      <ul className="bot-clone-combobox-list" role="listbox">
-                        {isLoadingBotApplications ? (
-                          <li className="bot-clone-combobox-empty">Carregando builders...</li>
-                        ) : botApplicationsError ? (
-                          <li className="bot-clone-combobox-empty">{botApplicationsError}</li>
-                        ) : filteredBotTargetApplications.length === 0 ? (
-                          <li className="bot-clone-combobox-empty">Nenhum builder encontrado.</li>
+                  <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
+                    <span className="router-summary-main">
+                      <span className="router-summary-avatar" aria-hidden="true">
+                        {selectedBotTarget?.imageUri ? (
+                          <img src={selectedBotTarget.imageUri} alt="" />
                         ) : (
-                          filteredBotTargetApplications.map((application) => (
-                            <li key={application.shortName}>
-                              <button
-                                type="button"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => void handleSelectBotTargetApplication(application)}
-                              >
-                                {application.name}
-                                <span>({application.shortName})</span>
-                              </button>
-                            </li>
-                          ))
+                          <Bot size={16} />
                         )}
-                      </ul>
-                    )}
+                      </span>
+                      <span className="router-summary-copy">
+                        <strong>{selectedBotTarget?.name || "Nenhum builder selecionado"}</strong>
+                        <span>{botTargetShortName || "Selecione o destino"}</span>
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setBotTargetSearch("");
+                        setBotPicker("target");
+                      }}
+                      disabled={!isEmbedded || isCloningBot}
+                    >
+                      <Pencil size={15} aria-hidden="true" />
+                      {botTargetShortName ? "Alterar" : "Selecionar"}
+                    </Button>
                   </div>
                   <BotIdentityHint
                     lookup={botTargetIdentity}
@@ -4494,9 +4501,15 @@ export default function CreateTemplatesApp() {
                     <Button
                       variant="secondary"
                       type="button"
-                      onClick={() => setDevCommandUri(currentApplicationRouter?.tenantId
-                        ? getAccessibleApplicationUri(getActiveTenantId(currentApplicationRouter))
-                        : DEFAULT_DEV_COMMAND_URI)}
+                      onClick={() =>
+                        setDevCommandUri(
+                          currentApplicationRouter?.tenantId
+                            ? getAccessibleApplicationUri(
+                                getActiveTenantId(currentApplicationRouter),
+                              )
+                            : DEFAULT_DEV_COMMAND_URI,
+                        )
+                      }
                     >
                       <Clipboard size={18} aria-hidden="true" />
                       Padrão
@@ -4679,6 +4692,12 @@ export default function CreateTemplatesApp() {
                     Copiar
                   </Button>
                 </form>
+                {pluginReplicateProgress && (
+                  <OperationProgress
+                    progress={pluginReplicateProgress}
+                    label="destinos processados"
+                  />
+                )}
 
                 <div className="ember-table-wrap template-table-wrap">
                   <table className="ember-table plugins-table">
@@ -5505,6 +5524,10 @@ export default function CreateTemplatesApp() {
                   </Feedback>
                 )}
 
+                {flowBulkProgress && (
+                  <OperationProgress progress={flowBulkProgress} label="flows processados" />
+                )}
+
                 <div className="ember-table-wrap bulk-flow-table-wrap">
                   <table className="ember-table flow-mapping-table">
                     <thead>
@@ -5640,6 +5663,124 @@ export default function CreateTemplatesApp() {
                     <FileJson size={18} aria-hidden="true" />
                   )}
                   {editFlowPublishAfterSave ? "Alterar e publicar" : "Alterar"}
+                </Button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {botPicker && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal router-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bot-picker-title"
+              data-modal-id="bot-picker"
+              tabIndex={-1}
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="bot-picker-title">
+                    Builder de {botPicker === "source" ? "origem" : "destino"}
+                  </h2>
+                  <p>Selecione um builder do contrato atual ao qual você tem acesso.</p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
+                  onClick={() => setBotPicker(null)}
+                  disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
+                >
+                  <X size={18} aria-hidden="true" />
+                </Button>
+              </div>
+              <div className="ember-modal-body router-application-picker">
+                {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
+                <div className="router-picker-toolbar">
+                  <label className="blip-native-field" htmlFor="builderPickerSearch">
+                    Buscar builder
+                    <input
+                      id="builderPickerSearch"
+                      autoFocus
+                      value={botPicker === "source" ? botSourceSearch : botTargetSearch}
+                      onChange={(event) =>
+                        botPicker === "source"
+                          ? setBotSourceSearch(event.target.value)
+                          : setBotTargetSearch(event.target.value)
+                      }
+                      placeholder="Nome ou ID do builder"
+                    />
+                  </label>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void loadBotApplications()}
+                    loading={isLoadingBotApplications}
+                  >
+                    <Search size={18} aria-hidden="true" /> Atualizar
+                  </Button>
+                </div>
+                <div className="router-picker-meta">
+                  {
+                    (botPicker === "source"
+                      ? filteredBotSourceApplications
+                      : filteredBotTargetApplications
+                    ).length
+                  }{" "}
+                  builders disponíveis
+                </div>
+                <div className="router-application-list">
+                  {isLoadingBotApplications ? (
+                    <div className="router-picker-empty">
+                      <LoaderCircle className="spin" size={18} /> Carregando builders…
+                    </div>
+                  ) : botApplicationsError ? (
+                    <Feedback>{botApplicationsError}</Feedback>
+                  ) : (botPicker === "source"
+                      ? filteredBotSourceApplications
+                      : filteredBotTargetApplications
+                    ).length === 0 ? (
+                    <div className="router-picker-empty">Nenhum builder encontrado.</div>
+                  ) : (
+                    (botPicker === "source"
+                      ? filteredBotSourceApplications
+                      : filteredBotTargetApplications
+                    ).map((application) => (
+                      <button
+                        key={application.shortName}
+                        type="button"
+                        className="router-application-option bot-clone-picker-option"
+                        onClick={() =>
+                          void (botPicker === "source"
+                            ? handleSelectBotSourceApplication(application)
+                            : handleSelectBotTargetApplication(application))
+                        }
+                        disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
+                      >
+                        <span className="router-application-avatar">
+                          {application.imageUri ? (
+                            <img src={application.imageUri} alt="" loading="lazy" />
+                          ) : (
+                            application.name.slice(0, 1).toUpperCase()
+                          )}
+                        </span>
+                        <span className="router-application-copy">
+                          <strong>{application.name}</strong>
+                          <span>{application.shortName}</span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="ember-modal-footer">
+                <Button
+                  variant="secondary"
+                  onClick={() => setBotPicker(null)}
+                  disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
+                >
+                  Cancelar
                 </Button>
               </div>
             </section>

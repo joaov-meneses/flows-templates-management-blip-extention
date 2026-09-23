@@ -718,7 +718,7 @@ function stripTargetRouterKey(match) {
   return publicMatch;
 }
 
-async function bulkUpdateFlowJson(params) {
+async function bulkUpdateFlowJson(params, onProgress) {
   const { flowJson, publishAfterUpdate = false, dryRun = false } = params || {};
   const batchSize = normalizeBatchSize(params?.batchSize);
   const continueOnError = true;
@@ -746,6 +746,9 @@ async function bulkUpdateFlowJson(params) {
     ...inspection,
     updated: [],
   };
+
+  if (!dryRun) onProgress?.(0, inspection.matches.length, "Atualizando flows");
+  let processed = 0;
 
   if (!dryRun && inspection.matches.length > 0) {
     await runInBatches(inspection.matches, batchSize, async (match) => {
@@ -809,6 +812,9 @@ async function bulkUpdateFlowJson(params) {
         results.errors.push(errorInfo);
 
         return errorInfo;
+      } finally {
+        processed += 1;
+        onProgress?.(processed, inspection.matches.length, "Atualizando flows");
       }
     });
   }
@@ -946,7 +952,7 @@ async function loadFlowPayload(sourceRouterKey, flow) {
   };
 }
 
-async function replicateFlows(params) {
+async function replicateFlows(params, onProgress) {
   const { sourceRouterKey, flows } = params || {};
 
   validateSourceRouterKey(sourceRouterKey);
@@ -967,6 +973,7 @@ async function replicateFlows(params) {
   };
 
   const payloads = [];
+  onProgress?.(0, 0, "Preparando flows");
   await runInBatches(selectedFlows, batchSize, async (flow) => {
     try {
       const payload = await loadFlowPayload(sourceRouterKey, flow);
@@ -1037,6 +1044,9 @@ async function replicateFlows(params) {
     }
   }
 
+  let processed = 0;
+  onProgress?.(0, createJobs.length, "Copiando flows");
+
   await runInBatches(createJobs, batchSize, async (job) => {
     try {
       const copyResult = await createFlowOnTarget(job);
@@ -1053,6 +1063,9 @@ async function replicateFlows(params) {
       results.errors.push(errorInfo);
 
       return errorInfo;
+    } finally {
+      processed += 1;
+      onProgress?.(processed, createJobs.length, "Copiando flows");
     }
   });
 

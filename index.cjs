@@ -40,6 +40,7 @@ const {
   InputError: RouterDirectoryInputError,
   getRouterPhoneNumber,
 } = require("./server/routerDirectoryService.cjs");
+const { streamOperation } = require("./server/progressStream.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -80,6 +81,9 @@ app.post("/api/templates/replicate", async (req, res, next) => {
     next(error);
   }
 });
+app.post("/api/templates/replicate/progress", (req, res) =>
+  streamOperation(res, (onProgress) => replicateTemplates(req.body, onProgress)),
+);
 
 app.post("/api/templates/compare", async (req, res, next) => {
   try {
@@ -170,6 +174,9 @@ app.post("/api/flows/bulk-update-json", async (req, res, next) => {
     next(error);
   }
 });
+app.post("/api/flows/bulk-update-json/progress", (req, res) =>
+  streamOperation(res, (onProgress) => bulkUpdateFlowJson(req.body, onProgress)),
+);
 
 app.post("/api/flows/publish", async (req, res, next) => {
   try {
@@ -197,6 +204,9 @@ app.post("/api/flows/replicate", async (req, res, next) => {
     next(error);
   }
 });
+app.post("/api/flows/replicate/progress", (req, res) =>
+  streamOperation(res, (onProgress) => replicateFlows(req.body, onProgress)),
+);
 
 app.post("/api/plugins/search", async (req, res, next) => {
   try {
@@ -233,6 +243,9 @@ app.post("/api/plugins/replicate", async (req, res, next) => {
     next(error);
   }
 });
+app.post("/api/plugins/replicate/progress", (req, res) =>
+  streamOperation(res, (onProgress) => replicatePlugins(req.body, onProgress)),
+);
 
 app.post("/api/bots/clone", async (req, res, next) => {
   try {

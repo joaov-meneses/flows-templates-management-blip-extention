@@ -350,7 +350,7 @@ async function getPluginConflicts(params) {
   };
 }
 
-async function replicatePlugins(params) {
+async function replicatePlugins(params, onProgress) {
   const targetRouterKeys = Array.from(
     new Set(normalizeStringList(params?.targetRouterKeys, "targetRouterKeys")),
   );
@@ -369,6 +369,9 @@ async function replicatePlugins(params) {
     copied: [],
     errors: [],
   };
+
+  let processed = 0;
+  onProgress?.(0, targetRouterKeys.length, "Copiando plugins");
 
   await runInBatches(targetRouterKeys, batchSize, async (targetRouterKey, targetIndex) => {
     try {
@@ -413,6 +416,9 @@ async function replicatePlugins(params) {
       }
 
       return errorInfo;
+    } finally {
+      processed += 1;
+      onProgress?.(processed, targetRouterKeys.length, "Copiando plugins");
     }
   });
 

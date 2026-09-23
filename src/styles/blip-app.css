@@ -535,94 +535,68 @@
 }
 .bot-clone-form {
   display: grid;
-  gap: 14px;
-  max-width: 640px;
+  gap: 22px;
+  width: 100%;
 }
 .bot-clone-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 8px;
+  flex-wrap: wrap;
 }
-.bot-clone-submit {
-  width: fit-content;
+.bot-clone-form > .form-group {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius);
+  padding: 18px;
+  background: var(--blip-surface-1);
+}
+.bot-clone-form > .form-group h3 {
+  margin: 0;
 }
 .bot-clone-routers {
   display: grid;
-  grid-template-columns: repeat(2, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
   align-items: start;
 }
 .bot-clone-router-field {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
 }
 .bot-clone-field-label {
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--blip-content);
 }
-.bot-clone-combobox {
-  position: relative;
-}
-.bot-clone-combobox > input {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--blip-radius-sm);
-  border: 1px solid var(--blip-border);
-  background: var(--blip-surface-0);
-  color: var(--blip-content);
-  font-size: 0.88rem;
-}
-.bot-clone-combobox > input:focus {
-  outline: 2px solid var(--blip-primary);
-  outline-offset: 1px;
-}
-.bot-clone-combobox > input:disabled {
-  opacity: 0.6;
-}
-.bot-clone-combobox-list {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  max-height: 240px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  border-radius: var(--blip-radius-sm);
-  border: 1px solid var(--blip-border);
-  background: var(--blip-surface-0);
-  box-shadow: var(--blip-shadow-2);
-}
-.bot-clone-combobox-list button {
-  display: flex;
+.bot-clone-selector {
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
+  gap: 12px;
+  border: 1px solid var(--blip-border-soft);
   border-radius: var(--blip-radius-sm);
-  background: transparent;
-  color: var(--blip-content);
-  font-size: 0.86rem;
+  padding: 12px;
+  background: var(--blip-summary-bg);
+}
+.bot-clone-selector.invalid {
+  border-color: var(--blip-danger);
+}
+.bot-clone-selector .router-summary-main {
+  min-width: 0;
+}
+.bot-clone-picker-option {
+  grid-template-columns: 44px minmax(0, 1fr);
+  width: 100%;
   text-align: left;
-  cursor: pointer;
-}
-.bot-clone-combobox-list button:hover,
-.bot-clone-combobox-list button:focus-visible {
-  background: var(--blip-row-hover);
-}
-.bot-clone-combobox-list button span {
-  color: var(--blip-content-soft);
-  font-size: 0.78rem;
-}
-.bot-clone-combobox-empty {
-  padding: 8px 9px;
-  font-size: 0.85rem;
-  color: var(--blip-content-soft);
+  color: var(--blip-content);
 }
 .bot-identity-row {
   display: inline-flex;
@@ -711,11 +685,12 @@
     transform: scale(1);
   }
 }
-.bot-clone-router-field input.invalid {
-  border-color: var(--blip-danger);
-}
 .bot-clone-option-group {
-  margin-top: 14px;
+  min-width: 0;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 14px;
+  background: var(--blip-surface-0);
 }
 .bot-clone-option-group-label {
   display: flex;
@@ -736,7 +711,21 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
+  min-height: 40px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 8px 10px;
+  background: var(--blip-surface-1);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bot-clone-option:has(input:checked) {
+  border-color: var(--blip-border-strong);
+  background: var(--blip-row-selected);
+}
+.bot-clone-option input {
+  accent-color: var(--blip-primary);
 }
 .bot-clone-result-section {
   margin-top: 28px;
@@ -1156,9 +1145,12 @@
 }
 .router-directory-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 520px) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
+}
+.router-directory-toolbar .blip-native-field {
+  min-width: 0;
 }
 .router-directory-count {
   min-height: 44px;
@@ -1181,6 +1173,7 @@
 }
 .router-directory-card {
   display: grid;
+  grid-template-rows: minmax(84px, 1fr) auto;
   gap: 12px;
   min-width: 0;
   border: 1px solid var(--blip-border-soft);
@@ -1265,9 +1258,15 @@
   font-weight: 700;
 }
 .router-directory-card-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+.router-directory-card-actions .blip-button {
+  min-width: 0;
+  width: 100%;
+  justify-content: center;
+  padding-inline: 5px;
 }
 
 .router-directory-phone {
@@ -1420,6 +1419,46 @@
   transform-origin: left center;
   transition: transform 180ms ease;
 }
+.operation-progress {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  padding: 12px 14px;
+  background: var(--blip-summary-bg);
+}
+.operation-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--blip-content-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+.operation-progress-copy strong {
+  color: var(--blip-content);
+  font-size: 14px;
+}
+.operation-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--blip-surface-2);
+}
+.operation-progress-track span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blip-primary);
+  transform-origin: left center;
+  transition: transform 180ms ease;
+}
+.operation-progress.danger .operation-progress-track span {
+  background: var(--blip-danger);
+}
 .status-spinner {
   margin-right: 4px;
 }
@@ -1547,6 +1586,9 @@
 }
 
 @media (max-width: 980px) {
+  .bot-clone-routers {
+    grid-template-columns: 1fr;
+  }
   .replication-grid {
     grid-template-columns: 1fr;
   }
