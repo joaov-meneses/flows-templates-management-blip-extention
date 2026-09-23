@@ -1,4 +1,5 @@
 import { BLIP_ACTIONS } from "./blipActions";
+import { finishActivity, startActivity } from "./activityLog.ts";
 
 type IframeMessageProxyModule = typeof import("iframe-message-proxy");
 
@@ -102,23 +103,50 @@ export async function sendPortalMessage(
   content: unknown = null,
   options: PortalMessageOptions = {},
 ) {
-  const iframeMessageProxy = await getIframeMessageProxy();
-  if (!iframeMessageProxy) {
-    throw new Error("Comandos do Portal BLiP só estão disponíveis dentro do iframe.");
-  }
+  const commandContent =
+    content && typeof content === "object" && "command" in content
+      ? (content as { command?: unknown }).command
+      : null;
+  const command =
+    commandContent && typeof commandContent === "object"
+      ? (commandContent as Record<string, unknown>)
+      : null;
+  const safeUri = typeof command?.uri === "string" ? command.uri.split("?")[0] : "";
+  const label = command
+    ? `${String(command.method || "command").toUpperCase()} ${safeUri || "(sem URI)"} · ${action}`
+    : action;
+  const activityId = startActivity("request", label);
+  try {
+    const iframeMessageProxy = await getIframeMessageProxy();
+    if (!iframeMessageProxy) {
+      throw new Error("Comandos do Portal BLiP só estão disponíveis dentro do iframe.");
+    }
 
-  const { responseTimeout, ...messageOptions } = options;
-  const result = await withResponseTimeout(
-    iframeMessageProxy.sendMessage({
+    const { responseTimeout, ...messageOptions } = options;
+    const result = await withResponseTimeout(
+      iframeMessageProxy.sendMessage({
+        action,
+        content,
+        ...messageOptions,
+      }),
+      responseTimeout,
       action,
-      content,
-      ...messageOptions,
-    }),
-    responseTimeout,
-    action,
-  );
-
-  return unwrapPortalResponse(result);
+    );
+    const response = unwrapPortalResponse(result);
+    const status =
+      response && typeof response === "object" && "status" in response
+        ? (response as { status?: unknown }).status
+        : undefined;
+    finishActivity(
+      activityId,
+      status === "failure" ? "error" : "success",
+      String(status || "Resposta recebida"),
+    );
+    return response;
+  } catch (error) {
+    finishActivity(activityId, "error", error instanceof Error ? error.message : "Falha no Portal");
+    throw error;
+  }
 }
 
 export function notifyPortalMessage(action: string, content: unknown) {

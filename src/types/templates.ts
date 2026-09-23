@@ -1,7 +1,13 @@
 import type { COMMAND_METHODS } from "../lib/blipActions";
 
-export type ActiveView = "routers" | "templates" | "flows" | "bots" | "devs";
-export type DevsTab = "commands" | "plugins";
+export type ActiveView =
+  | "routers"
+  | "templates"
+  | "flows"
+  | "bots"
+  | "commands"
+  | "plugins"
+  | "logs";
 export type RouterModal = "source" | "targets" | null;
 export type SortDirection = "asc" | "desc";
 export type CommandDestination = "BlipService" | "MessagingHubService";

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AlertCircle,
   ArrowDownAZ,
@@ -19,6 +19,7 @@ import {
   MessageSquareText,
   Moon,
   Network,
+  ScrollText,
   Pencil,
   Plus,
   Search,
@@ -54,6 +55,13 @@ import { FlowTable } from "./FlowTable";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
 import {
+  clearActivityLog,
+  getActivityEntries,
+  recordActivityResult,
+  setActivityView,
+  subscribeActivityLog,
+} from "../lib/activityLog";
+import {
   getAccessibleApplicationUri,
   getActiveTenantId,
   getApplicationListUri,
@@ -72,7 +80,6 @@ import {
 
 import type {
   ActiveView,
-  DevsTab,
   RouterModal,
   SortDirection,
   CommandDestination,
@@ -143,6 +150,15 @@ const DEFAULT_TEMPLATE_OPTIONS = {
 };
 const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
 const DEFAULT_PLUGIN_OPTIONS = { continueOnError: true, batchSize: 15 };
+const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
+  routers: "Bots",
+  templates: "Templates",
+  flows: "Flows",
+  bots: "Clone Bots",
+  plugins: "Plugins Manager",
+  commands: "Commands",
+  logs: "Logs",
+};
 const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
   flow: false,
   queues: false,
@@ -256,12 +272,6 @@ function buildDevCommandResource(type: DevCommandContentType, rawResource: strin
 
   return rawResource;
 }
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
-}
-const DEV_ALLOWED_EMAILS = new Set(
-  splitLines(import.meta.env.VITE_DEV_ALLOWED_EMAILS ?? "").map(normalizeEmail),
-);
 function templateKey(t: Template) {
   return `${t.name}|${t.language}`;
 }
@@ -714,7 +724,6 @@ export default function CreateTemplatesApp() {
   const [activeView, setActiveView] = useState<ActiveView>("routers");
   const [directoryTab, setDirectoryTab] = useState<"routers" | "builders">("routers");
   const [cloneMode, setCloneMode] = useState<CloneMode>("builder");
-  const [devsTab, setDevsTab] = useState<DevsTab>("commands");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [sourceRouterShortName, setSourceRouterShortName] = useState("");
   const [targetRouterKeys, setTargetRouterKeys] = useState("");
@@ -787,7 +796,14 @@ export default function CreateTemplatesApp() {
   const [pluginDraftUrl, setPluginDraftUrl] = useState("");
   const [editingPluginId, setEditingPluginId] = useState<string | null>(null);
   const [pluginCopyMode, setPluginCopyMode] = useState<PluginCopyMode>("add");
-  const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
+  const [operationResult, setOperationResultState] = useState<OperationResult | null>(null);
+  const activityEntries = useSyncExternalStore(
+    subscribeActivityLog,
+    getActivityEntries,
+    getActivityEntries,
+  );
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [activityFilter, setActivityFilter] = useState<ActiveView | "all">("all");
   const [error, setError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
   const [isSearchingTemplates, setIsSearchingTemplates] = useState(false);
@@ -809,7 +825,6 @@ export default function CreateTemplatesApp() {
   const [isSavingPlugin, setIsSavingPlugin] = useState(false);
   const [isCopyingPlugins, setIsCopyingPlugins] = useState(false);
   const [pluginReplicateProgress, setPluginReplicateProgress] = useState<Progress | null>(null);
-  const [pluginActionId, setPluginActionId] = useState("");
   const [botSourceRouterKey, setBotSourceRouterKey] = useState("");
   const [botTargetRouterKey, setBotTargetRouterKey] = useState("");
   const [botSourceIdentity, setBotSourceIdentity] = useState<BotIdentityLookup>(IDLE_BOT_IDENTITY);
@@ -875,14 +890,34 @@ export default function CreateTemplatesApp() {
   const [devCommandUri, setDevCommandUri] = useState(DEFAULT_DEV_COMMAND_URI);
   const [isRunningDevCommand, setIsRunningDevCommand] = useState(false);
   const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
-  const [canAccessDevs, setCanAccessDevs] = useState(false);
-
   const isEmbedded = useIframeAutoHeight(shellRef);
-  const visibleActiveView = activeView === "devs" && !canAccessDevs ? "routers" : activeView;
-  const pageOperationResult =
-    visibleActiveView !== "devs" && operationResult?.view === visibleActiveView
-      ? operationResult
-      : null;
+  const visibleActiveView = activeView;
+  const visibleActivityEntries = activityEntries.filter(
+    (entry) => activityFilter === "all" || entry.view === activityFilter,
+  );
+  const selectedActivity =
+    visibleActivityEntries.find((entry) => entry.id === selectedActivityId) ||
+    visibleActivityEntries[0];
+  function setOperationResult(result: OperationResult | null) {
+    setOperationResultState(result);
+    if (
+      result &&
+      !(
+        result.payload &&
+        typeof result.payload === "object" &&
+        "status" in result.payload &&
+        result.payload.status === "loading"
+      )
+    ) {
+      recordActivityResult(
+        result.summary,
+        result.payload,
+        result.status || (/^(falha|erro)/i.test(result.summary) ? "error" : "success"),
+        result.view,
+      );
+    }
+  }
+  const pageOperationResult = operationResult?.view === visibleActiveView ? operationResult : null;
   const activeModalId = botPicker
     ? "bot-picker"
     : isBulkBotPickerOpen
@@ -904,33 +939,12 @@ export default function CreateTemplatesApp() {
                     : null;
 
   useEffect(() => {
-    if (!isEmbedded) return;
-
-    let cancelled = false;
-
-    async function verifyDevAccess() {
-      try {
-        const account = await getAccount();
-        if (cancelled) return;
-
-        setCanAccessDevs(DEV_ALLOWED_EMAILS.has(normalizeEmail(account.email || "")));
-      } catch {
-        if (!cancelled) setCanAccessDevs(false);
-      }
-    }
-
-    void verifyDevAccess();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isEmbedded]);
+    setActivityView(visibleActiveView);
+  }, [visibleActiveView]);
 
   useEffect(() => {
-    if (activeView === "devs" && !canAccessDevs) {
-      setActiveView("routers");
-    }
-  }, [activeView, canAccessDevs]);
+    if (error) recordActivityResult(error, { message: error }, "error");
+  }, [error]);
 
   useEffect(() => {
     if (isEmbedded) void loadRouterApplications(true);
@@ -1217,15 +1231,20 @@ export default function CreateTemplatesApp() {
                 description:
                   "Copie configurações de builders ou de routers entre bots do contrato atual",
               }
-            : devsTab === "plugins"
+            : visibleActiveView === "plugins"
               ? {
-                  title: "Devs",
+                  title: "Plugins Manager",
                   description: "Gerenciamento e cópia de plugins entre routers BLiP",
                 }
-              : {
-                  title: "Devs",
-                  description: "Testes de commands no iframe do Portal BLiP",
-                };
+              : visibleActiveView === "logs"
+                ? {
+                    title: "Logs",
+                    description: "Requisições e resultados desta sessão da extensão",
+                  }
+                : {
+                    title: "Commands",
+                    description: "Testes de commands no iframe do Portal BLiP",
+                  };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -2982,7 +3001,6 @@ export default function CreateTemplatesApp() {
     }
 
     setIsSavingPlugin(true);
-    setPluginActionId(`save:${id}`);
     try {
       const latestData = await loadPluginsFromSource();
       const plugins = [...latestData.plugins];
@@ -3034,7 +3052,6 @@ export default function CreateTemplatesApp() {
       setError(e instanceof Error ? e.message : "Erro ao salvar plugin.");
     } finally {
       setIsSavingPlugin(false);
-      setPluginActionId("");
     }
   }
 
@@ -3064,7 +3081,6 @@ export default function CreateTemplatesApp() {
     if (!confirmed) return;
 
     setIsSavingPlugin(true);
-    setPluginActionId(`delete:${plugin.id}`);
     try {
       const latestData = await loadPluginsFromSource();
       if (!latestData.plugins.some((item) => item.id === plugin.id)) {
@@ -3089,7 +3105,6 @@ export default function CreateTemplatesApp() {
       setError(e instanceof Error ? e.message : "Erro ao remover plugin.");
     } finally {
       setIsSavingPlugin(false);
-      setPluginActionId("");
     }
   }
 
@@ -3118,7 +3133,6 @@ export default function CreateTemplatesApp() {
     if (!confirmed) return;
 
     setIsSavingPlugin(true);
-    setPluginActionId("delete:selected");
     try {
       const latestData = await loadPluginsFromSource();
       const existingSelectedPlugins = latestData.plugins.filter((plugin) =>
@@ -3145,7 +3159,6 @@ export default function CreateTemplatesApp() {
       setError(e instanceof Error ? e.message : "Erro ao remover plugins selecionados.");
     } finally {
       setIsSavingPlugin(false);
-      setPluginActionId("");
     }
   }
 
@@ -3965,10 +3978,6 @@ export default function CreateTemplatesApp() {
     setError("");
     setOperationResult(null);
 
-    if (!canAccessDevs) {
-      return;
-    }
-
     if (!uri) {
       setError("Informe a URI do command.");
       return;
@@ -4007,14 +4016,18 @@ export default function CreateTemplatesApp() {
         destination: devCommandDestination,
         timeout: 30000,
       });
+      const commandFailed = isRecord(response) && response.status === "failure";
 
       setOperationResult({
-        summary: `Command executado em ${devCommandDestination}.`,
+        summary: commandFailed
+          ? `Command retornou falha em ${devCommandDestination}.`
+          : `Command executado em ${devCommandDestination}.`,
         payload: {
           destination: devCommandDestination,
           command,
           response,
         },
+        status: commandFailed ? "warning" : "success",
       });
     } catch (caughtError) {
       const message =
@@ -4458,17 +4471,36 @@ export default function CreateTemplatesApp() {
             <Bot size={18} aria-hidden="true" />
             Clone Bots
           </button>
-          {canAccessDevs && (
-            <button
-              className={visibleActiveView === "devs" ? "active" : ""}
-              type="button"
-              onClick={() => setActiveView("devs")}
-              aria-current={visibleActiveView === "devs" ? "page" : undefined}
-            >
-              <Terminal size={18} aria-hidden="true" />
-              Devs
-            </button>
-          )}
+          <button
+            className={visibleActiveView === "plugins" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("plugins")}
+            aria-current={visibleActiveView === "plugins" ? "page" : undefined}
+          >
+            <Layers3 size={18} aria-hidden="true" />
+            Plugins Manager
+          </button>
+          <button
+            className={visibleActiveView === "commands" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("commands")}
+            aria-current={visibleActiveView === "commands" ? "page" : undefined}
+          >
+            <Terminal size={18} aria-hidden="true" />
+            Commands
+          </button>
+          <button
+            className={visibleActiveView === "logs" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setError("");
+              setActiveView("logs");
+            }}
+            aria-current={visibleActiveView === "logs" ? "page" : undefined}
+          >
+            <ScrollText size={18} aria-hidden="true" />
+            Logs
+          </button>
         </nav>
       </aside>
 
@@ -4481,41 +4513,47 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            {visibleActiveView !== "bots" && visibleActiveView !== "routers" && (
-              <div className="router-summary">
-                <span className="router-summary-label">Router de origem</span>
-                <div className="router-summary-main">
-                  {hasSourceRouterSelection() && (
-                    <span className="router-summary-avatar" aria-hidden="true">
-                      {sourceRouterApplication?.imageUri ? (
-                        <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
-                      ) : (
-                        <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
-                      )}
+            {visibleActiveView !== "bots" &&
+              visibleActiveView !== "routers" &&
+              visibleActiveView !== "logs" && (
+                <div className="router-summary">
+                  <span className="router-summary-label">Router de origem</span>
+                  <div className="router-summary-main">
+                    {hasSourceRouterSelection() && (
+                      <span className="router-summary-avatar" aria-hidden="true">
+                        {sourceRouterApplication?.imageUri ? (
+                          <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
+                        ) : (
+                          <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
+                        )}
+                      </span>
+                    )}
+                    <span className="router-summary-copy">
+                      <strong>{sourceRouterDisplayName}</strong>
+                      <span>{sourceRouterDisplayId}</span>
                     </span>
+                  </div>
+                  {hasSourceRouterSelection() ? (
+                    <button
+                      className="router-summary-action icon-action"
+                      type="button"
+                      aria-label="Editar router de origem"
+                      title="Editar router de origem"
+                      onClick={openSourceModal}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <button
+                      className="router-summary-action"
+                      type="button"
+                      onClick={openSourceModal}
+                    >
+                      Selecionar
+                    </button>
                   )}
-                  <span className="router-summary-copy">
-                    <strong>{sourceRouterDisplayName}</strong>
-                    <span>{sourceRouterDisplayId}</span>
-                  </span>
                 </div>
-                {hasSourceRouterSelection() ? (
-                  <button
-                    className="router-summary-action icon-action"
-                    type="button"
-                    aria-label="Editar router de origem"
-                    title="Editar router de origem"
-                    onClick={openSourceModal}
-                  >
-                    <Pencil size={14} aria-hidden="true" />
-                  </button>
-                ) : (
-                  <button className="router-summary-action" type="button" onClick={openSourceModal}>
-                    Selecionar
-                  </button>
-                )}
-              </div>
-            )}
+              )}
 
             <button
               className="theme-toggle-button"
@@ -4556,7 +4594,7 @@ export default function CreateTemplatesApp() {
           </Feedback>
         )}
 
-        {error && !activeModalId && (
+        {error && !activeModalId && visibleActiveView !== "logs" && (
           <Feedback title="Não foi possível concluir" onDismiss={() => setError("")}>
             {error}
           </Feedback>
@@ -6072,36 +6110,118 @@ export default function CreateTemplatesApp() {
               </div>
             )}
           </section>
+        ) : visibleActiveView === "logs" ? (
+          <section className="ember-panel results-panel activity-panel">
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Logs da sessão</h2>
+                <p>{activityEntries.length} registro(s) desde a abertura desta extensão.</p>
+              </div>
+              <div className="activity-toolbar">
+                <label className="blip-native-field" htmlFor="activityFilter">
+                  Área
+                  <select
+                    id="activityFilter"
+                    value={activityFilter}
+                    onChange={(event) =>
+                      setActivityFilter(event.target.value as ActiveView | "all")
+                    }
+                  >
+                    <option value="all">Todas</option>
+                    <option value="routers">Bots</option>
+                    <option value="templates">Templates</option>
+                    <option value="flows">Flows</option>
+                    <option value="bots">Clone Bots</option>
+                    <option value="plugins">Plugins Manager</option>
+                    <option value="commands">Commands</option>
+                  </select>
+                </label>
+                <ActionsMenu
+                  label="Mais opções de logs"
+                  compact
+                  actions={[
+                    {
+                      label: "Limpar logs da sessão",
+                      icon: <Eraser size={16} aria-hidden="true" />,
+                      onSelect: () => {
+                        clearActivityLog();
+                        setSelectedActivityId(null);
+                      },
+                      disabled: activityEntries.length === 0,
+                    },
+                  ]}
+                />
+              </div>
+            </div>
+            {visibleActivityEntries.length === 0 ? (
+              <div className="router-picker-empty">
+                Nenhum registro nesta sessão para esta área.
+              </div>
+            ) : (
+              <div className="activity-layout">
+                <div className="activity-list" aria-label="Registros da sessão">
+                  {visibleActivityEntries.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      className={`activity-item ${selectedActivity?.id === entry.id ? "selected" : ""}`}
+                      onClick={() => setSelectedActivityId(entry.id)}
+                    >
+                      <span className={`activity-status ${entry.status}`} aria-hidden="true" />
+                      <span className="activity-item-copy">
+                        <strong>{entry.title}</strong>
+                        <small>
+                          {ACTIVITY_VIEW_LABELS[entry.view]} ·{" "}
+                          {entry.kind === "request" ? "Requisição" : "Resultado"} ·{" "}
+                          {new Date(entry.startedAt).toLocaleTimeString("pt-BR")}
+                        </small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {selectedActivity && (
+                  <div className="activity-detail">
+                    <div className="ember-panel-title">
+                      <div>
+                        <h3>{selectedActivity.title}</h3>
+                        <p>
+                          {selectedActivity.status === "running"
+                            ? "Em andamento"
+                            : selectedActivity.status === "error"
+                              ? "Falha"
+                              : selectedActivity.status === "warning"
+                                ? "Atenção"
+                                : "Concluído"}
+                          {selectedActivity.detail ? ` · ${selectedActivity.detail}` : ""}
+                        </p>
+                      </div>
+                      <FileJson size={18} aria-hidden="true" />
+                    </div>
+                    <pre className="code">
+                      {JSON.stringify(
+                        selectedActivity.payload ?? {
+                          area: selectedActivity.view,
+                          inicio: selectedActivity.startedAt,
+                          fim: selectedActivity.finishedAt || null,
+                          status: selectedActivity.status,
+                          detalhe: selectedActivity.detail || null,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         ) : (
           <section className="ember-panel results-panel devs-panel">
-            <div className="dev-tabs" role="tablist" aria-label="Ferramentas de dev">
-              <button
-                className={devsTab === "commands" ? "active" : ""}
-                type="button"
-                role="tab"
-                aria-selected={devsTab === "commands"}
-                onClick={() => setDevsTab("commands")}
-              >
-                <Terminal size={16} aria-hidden="true" />
-                Commands
-              </button>
-              <button
-                className={devsTab === "plugins" ? "active" : ""}
-                type="button"
-                role="tab"
-                aria-selected={devsTab === "plugins"}
-                onClick={() => setDevsTab("plugins")}
-              >
-                <FileJson size={16} aria-hidden="true" />
-                Plugins Manager
-              </button>
-            </div>
-
-            {devsTab === "commands" ? (
+            {visibleActiveView === "commands" ? (
               <>
                 <div className="ember-panel-title results-title">
                   <div>
-                    <h2>Devs</h2>
+                    <h2>Commands</h2>
                     <p>Envie commands pelo proxy do Portal BLiP sem metadata.</p>
                   </div>
                   <Terminal size={18} aria-hidden="true" />
@@ -6195,35 +6315,29 @@ export default function CreateTemplatesApp() {
                     </label>
                   )}
                   <div className="dev-command-actions">
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() =>
-                        setDevCommandUri(
-                          currentApplicationRouter?.tenantId
-                            ? getAccessibleApplicationUri(
-                                getActiveTenantId(currentApplicationRouter),
-                              )
-                            : DEFAULT_DEV_COMMAND_URI,
-                        )
-                      }
-                    >
-                      <Clipboard size={18} aria-hidden="true" />
-                      Padrão
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() => void handleGetCurrentApplication()}
-                      disabled={isLoadingCurrentApplication || !isEmbedded}
-                    >
-                      {isLoadingCurrentApplication ? (
-                        <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                      ) : (
-                        <FileJson size={18} aria-hidden="true" />
-                      )}
-                      Get application
-                    </Button>
+                    <ActionsMenu
+                      label="Mais opções de commands"
+                      actions={[
+                        {
+                          label: "Usar URI padrão",
+                          icon: <Clipboard size={16} aria-hidden="true" />,
+                          onSelect: () =>
+                            setDevCommandUri(
+                              currentApplicationRouter?.tenantId
+                                ? getAccessibleApplicationUri(
+                                    getActiveTenantId(currentApplicationRouter),
+                                  )
+                                : DEFAULT_DEV_COMMAND_URI,
+                            ),
+                        },
+                        {
+                          label: "Get application",
+                          icon: <FileJson size={16} aria-hidden="true" />,
+                          onSelect: () => void handleGetCurrentApplication(),
+                          disabled: isLoadingCurrentApplication || !isEmbedded,
+                        },
+                      ]}
+                    />
                     <Button
                       variant="primary"
                       type="submit"
@@ -6249,19 +6363,30 @@ export default function CreateTemplatesApp() {
                       {selectedPlugins.length} selecionados
                     </p>
                   </div>
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={toggleVisiblePlugins}
-                    disabled={filteredPlugins.length === 0}
-                  >
-                    {allVisiblePluginsSelected ? (
-                      <CheckSquare size={18} aria-hidden="true" />
-                    ) : (
-                      <Square size={18} aria-hidden="true" />
-                    )}
-                    Selecionar
-                  </Button>
+                  <ActionsMenu
+                    label="Mais opções de plugins"
+                    actions={[
+                      {
+                        label: allVisiblePluginsSelected
+                          ? "Limpar seleção visível"
+                          : "Selecionar visíveis",
+                        icon: allVisiblePluginsSelected ? (
+                          <Square size={16} aria-hidden="true" />
+                        ) : (
+                          <CheckSquare size={16} aria-hidden="true" />
+                        ),
+                        onSelect: toggleVisiblePlugins,
+                        disabled: filteredPlugins.length === 0,
+                      },
+                      {
+                        label: "Remover selecionados",
+                        icon: <Trash2 size={16} aria-hidden="true" />,
+                        onSelect: () => void handleDeleteSelectedPlugins(),
+                        disabled: isSavingPlugin || selectedPlugins.length === 0,
+                        danger: true,
+                      },
+                    ]}
+                  />
                 </div>
 
                 <form className="plugin-editor-form" onSubmit={handleSavePlugin}>
@@ -6277,12 +6402,14 @@ export default function CreateTemplatesApp() {
                   </label>
                   <Button
                     variant="secondary"
+                    className="icon-only"
                     type="button"
+                    aria-label="Gerar ID do plugin"
+                    title="Gerar ID"
                     onClick={() => setPluginDraftId(createCommandId())}
                     disabled={Boolean(editingPluginId)}
                   >
                     <Plus size={18} aria-hidden="true" />
-                    Gerar ID
                   </Button>
                   <label className="blip-native-field" htmlFor="pluginDraftName">
                     Nome
@@ -6356,19 +6483,6 @@ export default function CreateTemplatesApp() {
                     )}
                     Buscar
                   </Button>
-                  <Button
-                    variant="danger"
-                    type="button"
-                    onClick={() => void handleDeleteSelectedPlugins()}
-                    disabled={isSavingPlugin || selectedPlugins.length === 0}
-                  >
-                    {pluginActionId === "delete:selected" ? (
-                      <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                    ) : (
-                      <Trash2 size={18} aria-hidden="true" />
-                    )}
-                    Remover selecionados
-                  </Button>
                   <Button variant="secondary" type="button" onClick={openTargetsModal}>
                     <Plus size={18} aria-hidden="true" />
                     {targetCount
@@ -6438,38 +6552,24 @@ export default function CreateTemplatesApp() {
                               </td>
                               <td>
                                 <div className="table-actions">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="icon-only"
-                                    type="button"
-                                    aria-label={`Editar ${plugin.name}`}
-                                    title="Editar"
-                                    onClick={() => handleEditPlugin(plugin)}
+                                  <ActionsMenu
+                                    label={`Mais opções de ${plugin.name}`}
+                                    compact
                                     disabled={isSavingPlugin}
-                                  >
-                                    {pluginActionId === `save:${plugin.id}` ? (
-                                      <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                    ) : (
-                                      <Pencil size={16} aria-hidden="true" />
-                                    )}
-                                  </Button>
-                                  <Button
-                                    variant="danger"
-                                    size="sm"
-                                    className="icon-only"
-                                    type="button"
-                                    aria-label={`Remover ${plugin.name}`}
-                                    title="Remover"
-                                    onClick={() => void handleDeletePlugin(plugin)}
-                                    disabled={isSavingPlugin}
-                                  >
-                                    {pluginActionId === `delete:${plugin.id}` ? (
-                                      <LoaderCircle className="spin" size={16} aria-hidden="true" />
-                                    ) : (
-                                      <Trash2 size={16} aria-hidden="true" />
-                                    )}
-                                  </Button>
+                                    actions={[
+                                      {
+                                        label: "Editar",
+                                        icon: <Pencil size={16} aria-hidden="true" />,
+                                        onSelect: () => handleEditPlugin(plugin),
+                                      },
+                                      {
+                                        label: "Remover",
+                                        icon: <Trash2 size={16} aria-hidden="true" />,
+                                        onSelect: () => void handleDeletePlugin(plugin),
+                                        danger: true,
+                                      },
+                                    ]}
+                                  />
                                 </div>
                               </td>
                             </tr>
@@ -6481,33 +6581,6 @@ export default function CreateTemplatesApp() {
                 </div>
               </>
             )}
-          </section>
-        )}
-
-        {visibleActiveView === "devs" && (
-          <section className="ember-panel output-panel">
-            <div className="ember-panel-title">
-              <div>
-                <h2>Resultado</h2>
-                <p>{operationResult?.summary || "Aguardando execução"}</p>
-              </div>
-              <div className="output-actions">
-                {operationResult?.previewFlow && (
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => handlePreviewFlow(operationResult.previewFlow!)}
-                  >
-                    <Eye size={18} aria-hidden="true" />
-                    Visualizar
-                  </Button>
-                )}
-                <FileJson size={18} aria-hidden="true" />
-              </div>
-            </div>
-            <pre className="code">
-              {operationResult ? JSON.stringify(operationResult.payload, null, 2) : "{}"}
-            </pre>
           </section>
         )}
 

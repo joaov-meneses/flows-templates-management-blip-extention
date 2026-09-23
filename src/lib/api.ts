@@ -1,5 +1,7 @@
+import { finishActivity, startActivity } from "./activityLog.ts";
+
 /** Shared transport: reject proxy HTML and empty responses with actionable feedback. */
-export async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+async function postJsonInternal<TResponse>(path: string, body: unknown): Promise<TResponse> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -43,6 +45,22 @@ export async function postJson<TResponse>(path: string, body: unknown): Promise<
   return data as TResponse;
 }
 
+export async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+  const activityId = startActivity("request", `POST ${path}`);
+  try {
+    const result = await postJsonInternal<TResponse>(path, body);
+    finishActivity(activityId, "success", "Resposta recebida");
+    return result;
+  } catch (error) {
+    finishActivity(
+      activityId,
+      "error",
+      error instanceof Error ? error.message : "Falha na requisição",
+    );
+    throw error;
+  }
+}
+
 export type OperationProgress = {
   processed: number;
   total: number;
@@ -50,7 +68,7 @@ export type OperationProgress = {
 };
 
 /** Read acknowledged item counts; never infer completion from elapsed time. */
-export async function postJsonWithProgress<TResponse>(
+async function postJsonWithProgressInternal<TResponse>(
   path: string,
   body: unknown,
   onProgress: (progress: OperationProgress) => void,
@@ -133,4 +151,24 @@ export async function postJsonWithProgress<TResponse>(
     throw new Error("A conexão terminou sem resultado. Confira os destinos antes de repetir.");
   }
   return result;
+}
+
+export async function postJsonWithProgress<TResponse>(
+  path: string,
+  body: unknown,
+  onProgress: (progress: OperationProgress) => void,
+): Promise<TResponse> {
+  const activityId = startActivity("request", `POST ${path}`);
+  try {
+    const result = await postJsonWithProgressInternal<TResponse>(path, body, onProgress);
+    finishActivity(activityId, "success", "Operação concluída");
+    return result;
+  } catch (error) {
+    finishActivity(
+      activityId,
+      "error",
+      error instanceof Error ? error.message : "Falha na operação",
+    );
+    throw error;
+  }
 }
