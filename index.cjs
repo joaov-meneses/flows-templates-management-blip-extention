@@ -42,6 +42,7 @@ const {
 } = require("./server/routerDirectoryService.cjs");
 const {
   RouterCloneInputError,
+  getRouterServices,
   previewRouterClone,
   prepareRouterClone,
   verifyRouterClone,
@@ -266,6 +267,14 @@ app.post("/api/bots/clone", async (req, res, next) => {
 app.post("/api/routers/clone/preview", async (req, res, next) => {
   try {
     res.json(await previewRouterClone(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/services", async (req, res, next) => {
+  try {
+    res.json(await getRouterServices(req.body));
   } catch (error) {
     next(error);
   }

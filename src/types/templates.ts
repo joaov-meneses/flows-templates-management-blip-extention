@@ -299,9 +299,10 @@ export type BotCloneOptions = {
   configVariables: boolean;
   priorityRules: boolean;
 };
+export type BotCloneStepKey = keyof BotCloneOptions | "publish" | "setup";
 export type BotCloneStepStatus = "success" | "partial" | "error";
 export type BotCloneStep = {
-  key: keyof BotCloneOptions;
+  key: BotCloneStepKey;
   label: string;
   status: BotCloneStepStatus;
   detail?: Record<string, unknown>;
@@ -347,6 +348,21 @@ export type RouterClonePrepared = {
   application: string;
   expectedHash: string;
   previousHash: string;
+};
+export type RouterServicesResponse = RouterCloneConfiguration;
+export type BulkBotCreationStatus = "ready" | "creating" | "success" | "partial" | "error";
+export type BulkBotCreationItem = {
+  sourceShortName: string;
+  sourceName: string;
+  sourceTag: string | null;
+  targetShortName: string;
+  targetName: string;
+  imageUri?: string;
+  sourceAccess: boolean;
+  selected: boolean;
+  status: BulkBotCreationStatus;
+  message?: string;
+  cloneResult?: BotCloneResponse;
 };
 export type OperationResult = {
   summary: string;

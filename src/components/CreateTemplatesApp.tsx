@@ -14,6 +14,7 @@ import {
   FileJson,
   Headset,
   KeyRound,
+  Layers3,
   LoaderCircle,
   MessageSquareText,
   Moon,
@@ -22,6 +23,7 @@ import {
   Plus,
   Search,
   Send,
+  Rocket,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -59,6 +61,12 @@ import {
   readWhatsAppPhone,
   type RouterPhone,
 } from "../lib/routerDirectory";
+import {
+  buildBulkBotNamePlan,
+  formatEnvironmentTag,
+  suggestTargetEnvironmentTag,
+  validateBulkTargetShortName,
+} from "../lib/bulkBotCreation";
 
 import type {
   ActiveView,
@@ -110,9 +118,11 @@ import type {
   BotCloneOptions,
   BotCloneResponse,
   BotCloneStep,
+  BulkBotCreationItem,
   RouterClonePreview,
   RouterCloneResponse,
   RouterClonePrepared,
+  RouterServicesResponse,
   OperationResult,
   PortalApplicationAccount,
   ResolvedRouterKey,
@@ -171,6 +181,7 @@ const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
   "attendanceRules",
   "priorityRules",
 ];
+type CloneMode = "builder" | "router" | "bulk";
 type BotIdentityLookup = {
   status: "idle" | "loading" | "success" | "error";
   identity: string;
@@ -570,6 +581,12 @@ function describeBotCloneStep(step: BotCloneStep) {
   if (detail.empty) return "Nada para clonar (vazio na origem).";
 
   switch (step.key) {
+    case "setup":
+      return step.status === "success"
+        ? "Builder e Desk ativados no novo bot."
+        : step.message || "Builder ativado; a ativação do Desk ficou parcial.";
+    case "publish":
+      return `${Number(detail.states) || 0} estado(s) ativado(s), runtime confirmado por nova leitura.`;
     case "tags":
       return `${Number(detail.tags) || 0} tag(s) clonada(s).`;
     case "queues":
@@ -687,7 +704,7 @@ export default function CreateTemplatesApp() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>("routers");
   const [directoryTab, setDirectoryTab] = useState<"routers" | "builders">("routers");
-  const [cloneMode, setCloneMode] = useState<"builder" | "router">("builder");
+  const [cloneMode, setCloneMode] = useState<CloneMode>("builder");
   const [devsTab, setDevsTab] = useState<DevsTab>("commands");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [sourceRouterShortName, setSourceRouterShortName] = useState("");
@@ -810,6 +827,11 @@ export default function CreateTemplatesApp() {
   const [selectedRouterServices, setSelectedRouterServices] = useState<Set<string>>(new Set());
   const [isPreviewingRouterClone, setIsPreviewingRouterClone] = useState(false);
   const [isCloningRouter, setIsCloningRouter] = useState(false);
+  const [bulkTargetTag, setBulkTargetTag] = useState("");
+  const [bulkBotItems, setBulkBotItems] = useState<BulkBotCreationItem[]>([]);
+  const [bulkPublishAfterClone, setBulkPublishAfterClone] = useState(true);
+  const [isLoadingBulkBots, setIsLoadingBulkBots] = useState(false);
+  const [isBulkCreatingBots, setIsBulkCreatingBots] = useState(false);
   const [visibleBotStepCount, setVisibleBotStepCount] = useState(0);
   const [devCommandDestination, setDevCommandDestination] =
     useState<CommandDestination>("BlipService");
@@ -1058,34 +1080,42 @@ export default function CreateTemplatesApp() {
   const filteredBotSourceApplications = useMemo(() => {
     const q = botSourceSearch.trim().toLowerCase();
 
-    return (cloneMode === "router" ? routerApplications : botApplications).filter((application) => {
-      if (application.shortName === botTargetShortName) return false;
-      if (!q) return true;
+    return (cloneMode === "builder" ? botApplications : routerApplications).filter(
+      (application) => {
+        if (application.shortName === botTargetShortName) return false;
+        if (!q) return true;
 
-      return (
-        application.name.toLowerCase().includes(q) ||
-        application.shortName.toLowerCase().includes(q)
-      );
-    });
+        return (
+          application.name.toLowerCase().includes(q) ||
+          application.shortName.toLowerCase().includes(q)
+        );
+      },
+    );
   }, [botApplications, routerApplications, cloneMode, botSourceSearch, botTargetShortName]);
 
   const filteredBotTargetApplications = useMemo(() => {
     const q = botTargetSearch.trim().toLowerCase();
 
-    return (cloneMode === "router" ? routerApplications : botApplications).filter((application) => {
-      if (application.shortName === botSourceShortName) return false;
-      if (!q) return true;
+    return (cloneMode === "builder" ? botApplications : routerApplications).filter(
+      (application) => {
+        if (application.shortName === botSourceShortName) return false;
+        if (!q) return true;
 
-      return (
-        application.name.toLowerCase().includes(q) ||
-        application.shortName.toLowerCase().includes(q)
-      );
-    });
+        return (
+          application.name.toLowerCase().includes(q) ||
+          application.shortName.toLowerCase().includes(q)
+        );
+      },
+    );
   }, [botApplications, routerApplications, cloneMode, botTargetSearch, botSourceShortName]);
 
-  const cloneApplications = cloneMode === "router" ? routerApplications : botApplications;
+  const cloneApplications = cloneMode === "builder" ? botApplications : routerApplications;
   const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
   const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
+  const selectedBulkBots = bulkBotItems.filter((item) => item.selected);
+  const processedBulkBots = selectedBulkBots.filter((item) =>
+    ["success", "partial", "error"].includes(item.status),
+  ).length;
 
   const sourceRouterApplication = useMemo(() => {
     const selectedShortName = sourceRouterShortName.trim();
@@ -1286,7 +1316,7 @@ export default function CreateTemplatesApp() {
   // Bots "master" são routers; o que queremos clonar aqui são os builders
   // (tudo que não é master).
   async function loadBotApplications() {
-    if (!isEmbedded) return;
+    if (!isEmbedded) return [];
 
     setIsLoadingBotApplications(true);
     setBotApplicationsError("");
@@ -1295,14 +1325,15 @@ export default function CreateTemplatesApp() {
       const tenantId = getActiveTenantId(await getCurrentApplication());
       const response = await getContractApplicationList(tenantId);
 
-      setBotApplications(
-        extractPortalApplications(response, { templateFilter: "non-master" }).filter(
-          (application) => application.tenantId?.toLowerCase() === tenantId,
-        ),
-      );
+      const applications = extractPortalApplications(response, {
+        templateFilter: "non-master",
+      }).filter((application) => application.tenantId?.toLowerCase() === tenantId);
+      setBotApplications(applications);
+      return applications;
     } catch (caughtError) {
       setBotApplications([]);
       setBotApplicationsError(getErrorMessage(caughtError, "Erro ao carregar builders."));
+      return [];
     } finally {
       setIsLoadingBotApplications(false);
       setHasLoadedBotApplications(true);
@@ -1312,6 +1343,7 @@ export default function CreateTemplatesApp() {
   async function handleSelectBotSourceApplication(application: PortalApplicationAccount) {
     setRouterClonePreview(null);
     setRouterCloneResult(null);
+    setBulkBotItems([]);
     setBotSourceShortName(application.shortName);
     setBotSourceKeyInvalid(false);
     setIsResolvingBotSourceKey(true);
@@ -1382,7 +1414,7 @@ export default function CreateTemplatesApp() {
     void loadRouterApplications(true);
   }
 
-  function changeCloneMode(mode: "builder" | "router") {
+  function changeCloneMode(mode: CloneMode) {
     setCloneMode(mode);
     setBotSourceShortName("");
     setBotTargetShortName("");
@@ -1392,8 +1424,15 @@ export default function CreateTemplatesApp() {
     setRouterClonePreview(null);
     setRouterCloneResult(null);
     setSelectedRouterServices(new Set());
+    setBulkBotItems([]);
+    setBulkTargetTag("");
     setError("");
-    if (mode === "router" && !routerApplications.length) void loadRouterApplications();
+    if (mode !== "builder" && !routerApplications.length) void loadRouterApplications();
+    if (mode === "bulk") {
+      setBotCloneOptions(
+        Object.fromEntries(BOT_CLONE_OPTION_KEYS.map((key) => [key, true])) as BotCloneOptions,
+      );
+    }
   }
 
   async function handleCopyRouterId(application: PortalApplicationAccount) {
@@ -3247,6 +3286,194 @@ export default function CreateTemplatesApp() {
     }
   }
 
+  function updateBulkBotItem(sourceShortName: string, patch: Partial<BulkBotCreationItem>) {
+    setBulkBotItems((current) =>
+      current.map((item) =>
+        item.sourceShortName === sourceShortName ? { ...item, ...patch } : item,
+      ),
+    );
+  }
+
+  function applyBulkTargetTag(value: string) {
+    setBulkTargetTag(value);
+    setBulkBotItems((current) =>
+      current.map((item) => ({
+        ...item,
+        ...buildBulkBotNamePlan({ shortName: item.sourceShortName, name: item.sourceName }, value),
+        status: "ready",
+        message: undefined,
+      })),
+    );
+  }
+
+  async function handleLoadBulkBots() {
+    setError("");
+    setBulkBotItems([]);
+    if (!botSourceShortName || !botSourceRouterKey) {
+      setError("Selecione o router que contém os Builders de origem.");
+      return;
+    }
+    setIsLoadingBulkBots(true);
+    try {
+      const accessibleBots =
+        hasLoadedBotApplications && !botApplicationsError
+          ? botApplications
+          : await loadBotApplications();
+      const services = await postJson<RouterServicesResponse>("/api/routers/services", {
+        routerShortName: botSourceShortName,
+        routerKey: botSourceRouterKey,
+      });
+      const names = services.services.map((service) => {
+        return (
+          accessibleBots.find((application) => application.shortName === service.shortName)?.name ||
+          service.name
+        );
+      });
+      const suggestedTag = suggestTargetEnvironmentTag(names);
+      setBulkTargetTag(suggestedTag);
+      setBulkBotItems(
+        services.services.map((service) => {
+          const application = accessibleBots.find(
+            (candidate) => candidate.shortName === service.shortName,
+          );
+          return {
+            ...buildBulkBotNamePlan(
+              { shortName: service.shortName, name: application?.name || service.name },
+              suggestedTag,
+            ),
+            imageUri: application?.imageUri,
+            sourceAccess: Boolean(application),
+            selected: Boolean(application),
+            status: "ready",
+          };
+        }),
+      );
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, "Não foi possível carregar os Builders desse router."));
+    } finally {
+      setIsLoadingBulkBots(false);
+    }
+  }
+
+  async function handleBulkCreateBots() {
+    setError("");
+    setOperationResult(null);
+    const selected = bulkBotItems.filter((item) => item.selected);
+    if (!selected.length) {
+      setError("Selecione pelo menos um Builder para criar.");
+      return;
+    }
+    if (!formatEnvironmentTag(bulkTargetTag)) {
+      setError("Informe a tag do novo ambiente, por exemplo DEV, HMG ou PRD.");
+      return;
+    }
+    const selectedOptions = BOT_CLONE_OPTION_KEYS.filter((key) => botCloneOptions[key]);
+    if (!selectedOptions.length) {
+      setError("Selecione pelo menos uma propriedade para clonar.");
+      return;
+    }
+    if (bulkPublishAfterClone && !botCloneOptions.flow) {
+      setError("Marque Fluxo para publicar automaticamente os novos Builders.");
+      return;
+    }
+    const allExistingIds = new Set(
+      [...routerApplications, ...botApplications].map((application) => application.shortName),
+    );
+    const selectedIds = selected.map((item) => item.targetShortName);
+    const duplicateIds = new Set(
+      selectedIds.filter((shortName, index) => selectedIds.indexOf(shortName) !== index),
+    );
+    const invalid = selected.find(
+      (item) =>
+        !item.targetName.trim() ||
+        validateBulkTargetShortName(item.targetShortName) ||
+        allExistingIds.has(item.targetShortName) ||
+        duplicateIds.has(item.targetShortName),
+    );
+    if (invalid) {
+      setError(
+        `Revise o destino de ${invalid.sourceName}: nome/ID inválido, duplicado ou já existente no contrato.`,
+      );
+      return;
+    }
+    const tenantId = getActiveTenantId(await getCurrentApplication());
+    const confirmed = await confirmFlowAction(
+      "Criar bots em massa",
+      `Serão criados <b>${selected.length} novos Builders</b> no contrato <b>${tenantId}</b>, com a tag <b>${formatEnvironmentTag(bulkTargetTag)}</b>. Cada bot será ativado e receberá as propriedades selecionadas.${bulkPublishAfterClone ? " O runtime publicado também será clonado e verificado." : " Os fluxos ficarão somente como rascunho."} Falhas não apagam bots já criados. Deseja continuar?`,
+      `Criar ${selected.length} bots`,
+    );
+    if (!confirmed) return;
+
+    setIsBulkCreatingBots(true);
+    let succeeded = 0;
+    let partial = 0;
+    let failed = 0;
+    for (const item of selected) {
+      updateBulkBotItem(item.sourceShortName, { status: "creating", message: "Criando bot…" });
+      try {
+        const createResponse = await sendBlipCommand(
+          {
+            id: createCommandId(),
+            to: DEFAULT_DEV_COMMAND_TO,
+            method: COMMAND_METHODS.SET,
+            uri: "/applications",
+            type: "application/vnd.iris.portal.application-account+json",
+            resource: {
+              description: `Criado em massa a partir de ${item.sourceShortName}`,
+              imageUri: item.imageUri,
+              name: item.targetName.trim(),
+              shortName: item.targetShortName.trim(),
+              template: "builder",
+              tenantId,
+            },
+          },
+          { destination: PORTAL_COMMAND_DESTINATION, timeout: 60000 },
+        );
+        const target = extractRouterKey(createResponse, item.targetShortName.trim());
+        const source = await loadRouterKey(item.sourceShortName);
+        updateBulkBotItem(item.sourceShortName, {
+          status: "creating",
+          message: bulkPublishAfterClone ? "Clonando e publicando…" : "Clonando propriedades…",
+        });
+        const cloneResult = await postJson<BotCloneResponse>("/api/bots/clone", {
+          sourceRouterKey: source.key,
+          targetRouterKey: target.key,
+          options: botCloneOptions,
+          activateBuilder: true,
+          publishAfterClone: bulkPublishAfterClone,
+        });
+        const hasErrors = cloneResult.totals.failed > 0 || cloneResult.totals.partial > 0;
+        if (hasErrors) partial += 1;
+        else succeeded += 1;
+        updateBulkBotItem(item.sourceShortName, {
+          status: hasErrors ? "partial" : "success",
+          message: hasErrors
+            ? `${cloneResult.totals.failed} etapa(s) falharam e ${cloneResult.totals.partial} ficaram parciais.`
+            : bulkPublishAfterClone
+              ? "Criado, publicado e verificado."
+              : "Criado e clonado como rascunho.",
+          cloneResult,
+        });
+      } catch (caughtError) {
+        failed += 1;
+        const failureMessage = getErrorMessage(caughtError, "Falha ao criar ou clonar o bot.");
+        updateBulkBotItem(item.sourceShortName, {
+          status: "error",
+          message: `${failureMessage} Confira a lista de bots antes de tentar novamente; a criação pode ter sido concluída antes da falha.`,
+        });
+      }
+    }
+    setIsBulkCreatingBots(false);
+    setOperationResult({
+      summary: `Criação em massa concluída: ${succeeded} sucesso(s), ${partial} parcial(is), ${failed} falha(s).`,
+      payload: { requested: selected.length, succeeded, partial, failed },
+      status: partial || failed ? "warning" : "success",
+      view: "bots",
+    });
+    setHasLoadedBotApplications(false);
+    void loadBotApplications();
+  }
+
   async function handlePreviewRouterClone() {
     setError("");
     setRouterClonePreview(null);
@@ -4455,51 +4682,238 @@ export default function CreateTemplatesApp() {
                 {" "}
                 <Network size={16} aria-hidden="true" /> Router{" "}
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cloneMode === "bulk"}
+                className={cloneMode === "bulk" ? "active" : ""}
+                onClick={() => changeCloneMode("bulk")}
+              >
+                <Layers3 size={16} aria-hidden="true" /> Criação em massa
+              </button>
             </div>
             <div className="ember-panel-title results-title">
               <div>
-                <h2>Clone Bots · {cloneMode === "builder" ? "Builder" : "Router"}</h2>
+                <h2>
+                  Clone Bots ·{" "}
+                  {cloneMode === "builder"
+                    ? "Builder"
+                    : cloneMode === "router"
+                      ? "Router"
+                      : "Criação em massa"}
+                </h2>
                 <p>
                   {cloneMode === "builder"
                     ? "Selecione dois builders do contrato atual e escolha quais configurações copiar."
-                    : "Selecione dois routers do contrato atual, confira os serviços da origem e escolha quais conectar ao destino."}
+                    : cloneMode === "router"
+                      ? "Selecione dois routers do contrato atual, confira os serviços da origem e escolha quais conectar ao destino."
+                      : "Use um router como origem, revise a nova nomenclatura e crie vários Builders em uma única operação."}
                 </p>
               </div>
             </div>
 
-            <form
-              className="bot-clone-form"
-              onSubmit={
-                cloneMode === "builder"
-                  ? handleCloneBot
-                  : (event) => {
-                      event.preventDefault();
-                      void handlePreviewRouterClone();
+            {cloneMode !== "bulk" && (
+              <form
+                className="bot-clone-form"
+                onSubmit={
+                  cloneMode === "builder"
+                    ? handleCloneBot
+                    : (event) => {
+                        event.preventDefault();
+                        void handlePreviewRouterClone();
+                      }
+                }
+              >
+                <div className="bot-clone-routers">
+                  <div className="bot-clone-router-field">
+                    <span className="bot-clone-field-label">
+                      {cloneMode === "builder" ? "Builder" : "Router"} de origem
+                    </span>
+                    <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
+                      <span className="router-summary-main">
+                        <span className="router-summary-avatar" aria-hidden="true">
+                          {selectedBotSource?.imageUri ? (
+                            <img src={selectedBotSource.imageUri} alt="" />
+                          ) : cloneMode === "router" ? (
+                            <Network size={16} />
+                          ) : (
+                            <Bot size={16} />
+                          )}
+                        </span>
+                        <span className="router-summary-copy">
+                          <strong>
+                            {selectedBotSource?.name ||
+                              `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
+                          </strong>
+                          <span>{botSourceShortName || "Selecione a origem"}</span>
+                        </span>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setBotSourceSearch("");
+                          setBotPicker("source");
+                        }}
+                        disabled={!isEmbedded || isCloningBot || isCloningRouter}
+                      >
+                        <Pencil size={15} aria-hidden="true" />
+                        {botSourceShortName ? "Alterar" : "Selecionar"}
+                      </Button>
+                    </div>
+                    {cloneMode === "builder" && (
+                      <BotIdentityHint
+                        lookup={botSourceIdentity}
+                        onCopyId={(identity) => void handleCopyBotId(identity, "origem")}
+                        onCopyKey={() => void handleCopyBotKey(botSourceRouterKey, "origem")}
+                      />
+                    )}
+                  </div>
+                  <div className="bot-clone-router-field">
+                    <span className="bot-clone-field-label">
+                      {cloneMode === "builder" ? "Builder" : "Router"} de destino
+                    </span>
+                    <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
+                      <span className="router-summary-main">
+                        <span className="router-summary-avatar" aria-hidden="true">
+                          {selectedBotTarget?.imageUri ? (
+                            <img src={selectedBotTarget.imageUri} alt="" />
+                          ) : cloneMode === "router" ? (
+                            <Network size={16} />
+                          ) : (
+                            <Bot size={16} />
+                          )}
+                        </span>
+                        <span className="router-summary-copy">
+                          <strong>
+                            {selectedBotTarget?.name ||
+                              `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
+                          </strong>
+                          <span>{botTargetShortName || "Selecione o destino"}</span>
+                        </span>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setBotTargetSearch("");
+                          setBotPicker("target");
+                        }}
+                        disabled={!isEmbedded || isCloningBot || isCloningRouter}
+                      >
+                        <Pencil size={15} aria-hidden="true" />
+                        {botTargetShortName ? "Alterar" : "Selecionar"}
+                      </Button>
+                    </div>
+                    {cloneMode === "builder" && (
+                      <BotIdentityHint
+                        lookup={botTargetIdentity}
+                        onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
+                        onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {cloneMode === "builder" && (
+                  <div className="form-group">
+                    <h3>O que clonar?</h3>
+                    {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
+                      <div key={group} className="bot-clone-option-group">
+                        <span className="bot-clone-option-group-label">
+                          <GroupIcon size={14} aria-hidden="true" />
+                          {group}
+                        </span>
+                        <div className="action-grid bot-clone-options">
+                          {fields.map(({ key, label }) => (
+                            <label key={key} className="bot-clone-option">
+                              <input
+                                type="checkbox"
+                                checked={botCloneOptions[key]}
+                                onChange={(event) =>
+                                  setBotCloneOptions((current) => ({
+                                    ...current,
+                                    [key]: event.target.checked,
+                                  }))
+                                }
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="bot-clone-actions">
+                  <Button
+                    type="submit"
+                    className="bot-clone-submit"
+                    loading={
+                      cloneMode === "router"
+                        ? isPreviewingRouterClone
+                        : isCloningBot ||
+                          (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
                     }
-              }
-            >
-              <div className="bot-clone-routers">
+                  >
+                    {cloneMode === "router" ? (
+                      <Search size={18} aria-hidden="true" />
+                    ) : (
+                      <CopyPlus size={18} aria-hidden="true" />
+                    )}
+                    {cloneMode === "router" ? "Consultar serviços" : "Clonar Builder"}
+                  </Button>
+                  {cloneMode === "builder" && (
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      onClick={() => {
+                        const nextValue = !BOT_CLONE_OPTION_KEYS.every(
+                          (key) => botCloneOptions[key],
+                        );
+                        setBotCloneOptions(
+                          Object.fromEntries(
+                            BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
+                          ) as BotCloneOptions,
+                        );
+                      }}
+                    >
+                      {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
+                        <>
+                          <Eraser size={16} aria-hidden="true" />
+                          Limpar seleção
+                        </>
+                      ) : (
+                        <>
+                          <CheckSquare size={16} aria-hidden="true" />
+                          Selecionar tudo
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </form>
+            )}
+
+            {cloneMode === "bulk" && (
+              <div className="bot-clone-form bulk-bot-create">
                 <div className="bot-clone-router-field">
-                  <span className="bot-clone-field-label">
-                    {cloneMode === "builder" ? "Builder" : "Router"} de origem
-                  </span>
+                  <span className="bot-clone-field-label">Router com os Builders de origem</span>
                   <div className={`bot-clone-selector ${botSourceKeyInvalid ? "invalid" : ""}`}>
                     <span className="router-summary-main">
                       <span className="router-summary-avatar" aria-hidden="true">
                         {selectedBotSource?.imageUri ? (
                           <img src={selectedBotSource.imageUri} alt="" />
-                        ) : cloneMode === "router" ? (
-                          <Network size={16} />
                         ) : (
-                          <Bot size={16} />
+                          <Network size={16} />
                         )}
                       </span>
                       <span className="router-summary-copy">
-                        <strong>
-                          {selectedBotSource?.name ||
-                            `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
-                        </strong>
-                        <span>{botSourceShortName || "Selecione a origem"}</span>
+                        <strong>{selectedBotSource?.name || "Nenhum router selecionado"}</strong>
+                        <span>{botSourceShortName || "Selecione o router de origem"}</span>
                       </span>
                     </span>
                     <Button
@@ -4510,144 +4924,281 @@ export default function CreateTemplatesApp() {
                         setBotSourceSearch("");
                         setBotPicker("source");
                       }}
-                      disabled={!isEmbedded || isCloningBot || isCloningRouter}
+                      disabled={!isEmbedded || isBulkCreatingBots || isLoadingBulkBots}
                     >
                       <Pencil size={15} aria-hidden="true" />
                       {botSourceShortName ? "Alterar" : "Selecionar"}
                     </Button>
                   </div>
-                  {cloneMode === "builder" && (
-                    <BotIdentityHint
-                      lookup={botSourceIdentity}
-                      onCopyId={(identity) => void handleCopyBotId(identity, "origem")}
-                      onCopyKey={() => void handleCopyBotKey(botSourceRouterKey, "origem")}
-                    />
-                  )}
-                </div>
-                <div className="bot-clone-router-field">
-                  <span className="bot-clone-field-label">
-                    {cloneMode === "builder" ? "Builder" : "Router"} de destino
-                  </span>
-                  <div className={`bot-clone-selector ${botTargetKeyInvalid ? "invalid" : ""}`}>
-                    <span className="router-summary-main">
-                      <span className="router-summary-avatar" aria-hidden="true">
-                        {selectedBotTarget?.imageUri ? (
-                          <img src={selectedBotTarget.imageUri} alt="" />
-                        ) : cloneMode === "router" ? (
-                          <Network size={16} />
-                        ) : (
-                          <Bot size={16} />
-                        )}
-                      </span>
-                      <span className="router-summary-copy">
-                        <strong>
-                          {selectedBotTarget?.name ||
-                            `Nenhum ${cloneMode === "builder" ? "builder" : "router"} selecionado`}
-                        </strong>
-                        <span>{botTargetShortName || "Selecione o destino"}</span>
-                      </span>
-                    </span>
+                  <div className="bot-clone-actions">
                     <Button
                       type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setBotTargetSearch("");
-                        setBotPicker("target");
-                      }}
-                      disabled={!isEmbedded || isCloningBot || isCloningRouter}
+                      onClick={() => void handleLoadBulkBots()}
+                      loading={isLoadingBulkBots}
+                      disabled={!botSourceShortName || isBulkCreatingBots}
                     >
-                      <Pencil size={15} aria-hidden="true" />
-                      {botTargetShortName ? "Alterar" : "Selecionar"}
+                      <Search size={18} aria-hidden="true" /> Carregar Builders
                     </Button>
                   </div>
-                  {cloneMode === "builder" && (
-                    <BotIdentityHint
-                      lookup={botTargetIdentity}
-                      onCopyId={(identity) => void handleCopyBotId(identity, "destino")}
-                      onCopyKey={() => void handleCopyBotKey(botTargetRouterKey, "destino")}
-                    />
-                  )}
                 </div>
-              </div>
 
-              {cloneMode === "builder" && (
-                <div className="form-group">
-                  <h3>O que clonar?</h3>
-                  {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
-                    <div key={group} className="bot-clone-option-group">
-                      <span className="bot-clone-option-group-label">
-                        <GroupIcon size={14} aria-hidden="true" />
-                        {group}
-                      </span>
-                      <div className="action-grid bot-clone-options">
-                        {fields.map(({ key, label }) => (
-                          <label key={key} className="bot-clone-option">
-                            <input
-                              type="checkbox"
-                              checked={botCloneOptions[key]}
-                              onChange={(event) =>
-                                setBotCloneOptions((current) => ({
-                                  ...current,
-                                  [key]: event.target.checked,
-                                }))
-                              }
-                            />
-                            {label}
-                          </label>
-                        ))}
+                {bulkBotItems.length > 0 && (
+                  <>
+                    <div className="form-group bulk-bot-settings">
+                      <div className="bulk-bot-settings-header">
+                        <div>
+                          <h3>Nova nomenclatura</h3>
+                          <p>
+                            A tag atual é detectada pelo nome e pelo prefixo do ID. Todos os
+                            destinos podem ser revisados antes da criação.
+                          </p>
+                        </div>
+                        <label
+                          className="blip-native-field bulk-bot-tag-field"
+                          htmlFor="bulkBotTag"
+                        >
+                          Tag de destino
+                          <input
+                            id="bulkBotTag"
+                            value={bulkTargetTag}
+                            onChange={(event) => applyBulkTargetTag(event.target.value)}
+                            placeholder="PRD"
+                            maxLength={18}
+                            disabled={isBulkCreatingBots}
+                          />
+                        </label>
+                      </div>
+                      <label className="flow-publish-switch">
+                        <input
+                          type="checkbox"
+                          checked={bulkPublishAfterClone}
+                          onChange={(event) => setBulkPublishAfterClone(event.target.checked)}
+                          disabled={isBulkCreatingBots}
+                        />
+                        <span className="flow-switch-track" aria-hidden="true">
+                          <span className="flow-switch-thumb" />
+                        </span>
+                        <span className="flow-switch-copy">
+                          <strong>Publicar automaticamente</strong>
+                          <span>
+                            Copia o runtime publicado da origem e confirma o destino por nova
+                            leitura.
+                          </span>
+                        </span>
+                      </label>
+                      {bulkPublishAfterClone && (
+                        <Feedback tone="warning">
+                          A publicação ativa o mesmo runtime da origem no novo ID. O histórico de
+                          versões do Builder não é copiado; o resultado é validado pela configuração
+                          publicada do destino.
+                        </Feedback>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <h3>O que clonar em cada Builder?</h3>
+                      {BOT_CLONE_OPTION_GROUPS.map(({ group, icon: GroupIcon, fields }) => (
+                        <div key={group} className="bot-clone-option-group">
+                          <span className="bot-clone-option-group-label">
+                            <GroupIcon size={14} aria-hidden="true" /> {group}
+                          </span>
+                          <div className="action-grid bot-clone-options">
+                            {fields.map(({ key, label }) => (
+                              <label key={key} className="bot-clone-option">
+                                <input
+                                  type="checkbox"
+                                  checked={botCloneOptions[key]}
+                                  onChange={(event) =>
+                                    setBotCloneOptions((current) => ({
+                                      ...current,
+                                      [key]: event.target.checked,
+                                    }))
+                                  }
+                                  disabled={isBulkCreatingBots}
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="bulk-bot-review">
+                      <div className="ember-panel-title results-title">
+                        <div>
+                          <h3>Revisar {bulkBotItems.length} destino(s)</h3>
+                          <p>{selectedBulkBots.length} selecionado(s) para criação</p>
+                        </div>
+                        <div className="router-clone-selection-actions">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setBulkBotItems((current) =>
+                                current.map((item) => ({
+                                  ...item,
+                                  selected: item.sourceAccess,
+                                })),
+                              )
+                            }
+                            disabled={isBulkCreatingBots}
+                          >
+                            Selecionar todos
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setBulkBotItems((current) =>
+                                current.map((item) => ({ ...item, selected: false })),
+                              )
+                            }
+                            disabled={isBulkCreatingBots}
+                          >
+                            Limpar seleção
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="ember-table-wrap">
+                        <table className="ember-table bulk-bot-table">
+                          <thead>
+                            <tr>
+                              <th>Criar</th>
+                              <th>Origem</th>
+                              <th>Novo nome</th>
+                              <th>Novo ID</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bulkBotItems.map((item) => {
+                              const exists = [...routerApplications, ...botApplications].some(
+                                (application) => application.shortName === item.targetShortName,
+                              );
+                              const duplicated =
+                                bulkBotItems.filter(
+                                  (candidate) =>
+                                    candidate.selected &&
+                                    candidate.targetShortName === item.targetShortName,
+                                ).length > 1;
+                              const validation = validateBulkTargetShortName(item.targetShortName);
+                              const issue = exists
+                                ? "ID já existe"
+                                : duplicated
+                                  ? "ID duplicado"
+                                  : validation;
+                              return (
+                                <tr key={item.sourceShortName}>
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      checked={item.selected}
+                                      onChange={(event) =>
+                                        updateBulkBotItem(item.sourceShortName, {
+                                          selected: event.target.checked,
+                                        })
+                                      }
+                                      disabled={isBulkCreatingBots || !item.sourceAccess}
+                                      aria-label={`Criar ${item.sourceName}`}
+                                    />
+                                  </td>
+                                  <td>
+                                    <strong>{item.sourceName}</strong>
+                                    <span className="bulk-bot-source-id">
+                                      {item.sourceShortName}
+                                    </span>
+                                    <span
+                                      className={
+                                        item.sourceAccess
+                                          ? "router-clone-access-ok"
+                                          : "router-clone-access-unknown"
+                                      }
+                                    >
+                                      {item.sourceAccess
+                                        ? "Acesso confirmado"
+                                        : "Acesso não confirmado"}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <input
+                                      value={item.targetName}
+                                      onChange={(event) =>
+                                        updateBulkBotItem(item.sourceShortName, {
+                                          targetName: event.target.value,
+                                        })
+                                      }
+                                      disabled={isBulkCreatingBots || !item.selected}
+                                      aria-label={`Novo nome para ${item.sourceName}`}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className={issue ? "invalid" : ""}
+                                      value={item.targetShortName}
+                                      onChange={(event) =>
+                                        updateBulkBotItem(item.sourceShortName, {
+                                          targetShortName: event.target.value.toLowerCase(),
+                                        })
+                                      }
+                                      disabled={isBulkCreatingBots || !item.selected}
+                                      aria-label={`Novo ID para ${item.sourceName}`}
+                                    />
+                                    {item.selected && issue && (
+                                      <small className="bulk-bot-issue">{issue}</small>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <span className={`bulk-bot-status ${item.status}`}>
+                                      {item.status === "ready"
+                                        ? "Pronto"
+                                        : item.status === "creating"
+                                          ? "Processando"
+                                          : item.status === "success"
+                                            ? "Concluído"
+                                            : item.status === "partial"
+                                              ? "Parcial"
+                                              : "Falhou"}
+                                    </span>
+                                    {item.message && (
+                                      <small className="bulk-bot-message">{item.message}</small>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
 
-              <div className="bot-clone-actions">
-                <Button
-                  type="submit"
-                  className="bot-clone-submit"
-                  loading={
-                    cloneMode === "router"
-                      ? isPreviewingRouterClone
-                      : isCloningBot ||
-                        (!!botCloneResult && visibleBotStepCount < botCloneResult.steps.length)
-                  }
-                >
-                  {cloneMode === "router" ? (
-                    <Search size={18} aria-hidden="true" />
-                  ) : (
-                    <CopyPlus size={18} aria-hidden="true" />
-                  )}
-                  {cloneMode === "router" ? "Consultar serviços" : "Clonar Builder"}
-                </Button>
-                {cloneMode === "builder" && (
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => {
-                      const nextValue = !BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]);
-                      setBotCloneOptions(
-                        Object.fromEntries(
-                          BOT_CLONE_OPTION_KEYS.map((key) => [key, nextValue]),
-                        ) as BotCloneOptions,
-                      );
-                    }}
-                  >
-                    {BOT_CLONE_OPTION_KEYS.every((key) => botCloneOptions[key]) ? (
-                      <>
-                        <Eraser size={16} aria-hidden="true" />
-                        Limpar seleção
-                      </>
-                    ) : (
-                      <>
-                        <CheckSquare size={16} aria-hidden="true" />
-                        Selecionar tudo
-                      </>
+                    {isBulkCreatingBots && (
+                      <OperationProgress
+                        progress={{
+                          processed: processedBulkBots,
+                          total: selectedBulkBots.length,
+                          stage: "Criando, clonando e verificando",
+                        }}
+                        label="bots processados"
+                      />
                     )}
-                  </Button>
+                    <div className="bot-clone-actions">
+                      <Button
+                        type="button"
+                        onClick={() => void handleBulkCreateBots()}
+                        loading={isBulkCreatingBots}
+                        disabled={!selectedBulkBots.length || isLoadingBulkBots}
+                      >
+                        <Rocket size={18} aria-hidden="true" /> Criar {selectedBulkBots.length}{" "}
+                        bot(s)
+                      </Button>
+                    </div>
+                  </>
                 )}
               </div>
-            </form>
+            )}
 
             {cloneMode === "builder" && botCloneResult && (
               <div className="bot-clone-result-section">
@@ -6119,11 +6670,11 @@ export default function CreateTemplatesApp() {
               <div className="ember-modal-header">
                 <div>
                   <h2 id="bot-picker-title">
-                    {cloneMode === "router" ? "Router" : "Builder"} de{" "}
+                    {cloneMode === "builder" ? "Builder" : "Router"} de{" "}
                     {botPicker === "source" ? "origem" : "destino"}
                   </h2>
                   <p>
-                    Selecione um {cloneMode === "router" ? "router" : "builder"} do contrato atual
+                    Selecione um {cloneMode === "builder" ? "builder" : "router"} do contrato atual
                     ao qual você tem acesso.
                   </p>
                 </div>
@@ -6141,7 +6692,7 @@ export default function CreateTemplatesApp() {
                 {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
                 <div className="router-picker-toolbar">
                   <label className="blip-native-field" htmlFor="builderPickerSearch">
-                    Buscar {cloneMode === "router" ? "router" : "builder"}
+                    Buscar {cloneMode === "builder" ? "builder" : "router"}
                     <input
                       id="builderPickerSearch"
                       autoFocus
@@ -6151,20 +6702,20 @@ export default function CreateTemplatesApp() {
                           ? setBotSourceSearch(event.target.value)
                           : setBotTargetSearch(event.target.value)
                       }
-                      placeholder={`Nome ou ID do ${cloneMode === "router" ? "router" : "builder"}`}
+                      placeholder={`Nome ou ID do ${cloneMode === "builder" ? "builder" : "router"}`}
                     />
                   </label>
                   <Button
                     variant="secondary"
                     onClick={() =>
-                      void (cloneMode === "router"
-                        ? loadRouterApplications()
-                        : loadBotApplications())
+                      void (cloneMode === "builder"
+                        ? loadBotApplications()
+                        : loadRouterApplications())
                     }
                     loading={
-                      cloneMode === "router"
-                        ? isLoadingRouterApplications
-                        : isLoadingBotApplications
+                      cloneMode === "builder"
+                        ? isLoadingBotApplications
+                        : isLoadingRouterApplications
                     }
                   >
                     <Search size={18} aria-hidden="true" /> Atualizar
@@ -6177,26 +6728,26 @@ export default function CreateTemplatesApp() {
                       : filteredBotTargetApplications
                     ).length
                   }{" "}
-                  {cloneMode === "router" ? "routers" : "builders"} disponíveis
+                  {cloneMode === "builder" ? "builders" : "routers"} disponíveis
                 </div>
                 <div className="router-application-list">
                   {(
-                    cloneMode === "router" ? isLoadingRouterApplications : isLoadingBotApplications
+                    cloneMode === "builder" ? isLoadingBotApplications : isLoadingRouterApplications
                   ) ? (
                     <div className="router-picker-empty">
                       <LoaderCircle className="spin" size={18} /> Carregando{" "}
-                      {cloneMode === "router" ? "routers" : "builders"}…
+                      {cloneMode === "builder" ? "builders" : "routers"}…
                     </div>
-                  ) : (cloneMode === "router" ? routerApplicationsError : botApplicationsError) ? (
+                  ) : (cloneMode === "builder" ? botApplicationsError : routerApplicationsError) ? (
                     <Feedback>
-                      {cloneMode === "router" ? routerApplicationsError : botApplicationsError}
+                      {cloneMode === "builder" ? botApplicationsError : routerApplicationsError}
                     </Feedback>
                   ) : (botPicker === "source"
                       ? filteredBotSourceApplications
                       : filteredBotTargetApplications
                     ).length === 0 ? (
                     <div className="router-picker-empty">
-                      Nenhum {cloneMode === "router" ? "router" : "builder"} encontrado.
+                      Nenhum {cloneMode === "builder" ? "builder" : "router"} encontrado.
                     </div>
                   ) : (
                     (botPicker === "source"

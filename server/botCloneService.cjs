@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 
 const MSGING_COMMANDS_URL = "https://msging.net/commands";
+const CORE_POSTMASTER_TO = "postmaster@msging.net";
 const DESK_TO = "postmaster@desk.msging.net";
 const DESK_PAGE_SIZE = 500;
 const DESK_WRITE_DELAY_MS = 120;
@@ -110,22 +111,127 @@ async function getBucket(routerKey, key) {
   return data?.resource;
 }
 
-async function setBucket(routerKey, key, resource) {
+async function setBucket(routerKey, key, resource, type = "application/json") {
   await sendBlipCommand(
     routerKey,
-    buildCommand({ method: "set", uri: `/buckets/${key}`, resource }),
+    buildCommand({ method: "set", uri: `/buckets/${key}`, type, resource }),
   );
 }
 
 /* ---------------- Fluxo ---------------- */
 
 async function cloneFlow(sourceRouterKey, targetRouterKey) {
-  const flow = await getBucket(sourceRouterKey, "blip_portal:builder_working_flow");
+  const documents = [
+    { key: "blip_portal:builder_working_flow", type: "application/json" },
+    { key: "blip_portal:builder_working_configuration", type: "application/json" },
+    { key: "blip_portal:builder_working_global_actions", type: "application/json" },
+    { key: "blip_portal:builder_working_flow_id", type: "text/plain" },
+  ];
+  const copied = [];
+  const flow = await getBucket(sourceRouterKey, documents[0].key);
   if (flow === undefined) {
     return { status: "success", empty: true };
   }
-  await setBucket(targetRouterKey, "blip_portal:builder_working_flow", flow);
+  await setBucket(targetRouterKey, documents[0].key, flow, documents[0].type);
+  copied.push(documents[0].key);
+  for (const document of documents.slice(1)) {
+    const resource = await getBucket(sourceRouterKey, document.key);
+    if (resource === undefined) continue;
+    await setBucket(targetRouterKey, document.key, resource, document.type);
+    copied.push(document.key);
+  }
+  return { status: "success", copied };
+}
+
+async function activateBuilder(targetRouterKey) {
+  await setBucket(targetRouterKey, "blip_portal:builder_enabled", "True", "text/plain");
   return { status: "success" };
+}
+
+async function activateAttendance(targetRouterKey) {
+  await sendBlipCommand(
+    targetRouterKey,
+    buildCommand({
+      to: CORE_POSTMASTER_TO,
+      method: "set",
+      uri: "lime://postmaster@desk.msging.net/configuration",
+      type: "application/json",
+      resource: {
+        "Lime.IsActive": true,
+        DefaultProvider: "Lime",
+        DistributionType: "Redis",
+      },
+    }),
+  );
+  return { status: "success" };
+}
+
+async function getBuilderRuntime(routerKey) {
+  const data = await postCommand(
+    routerKey,
+    buildCommand({
+      to: "postmaster@configurations.msging.net",
+      method: "get",
+      uri: "lime://builder.hosting@msging.net/configuration",
+    }),
+  );
+  if (isEmptyResource(data)) return undefined;
+  if (data?.status !== "success") throw new Error(reasonOf(data));
+  if (!data.resource || typeof data.resource.Application !== "string") {
+    throw new Error("A origem não retornou uma configuração publicada do Builder.");
+  }
+  return data.resource;
+}
+
+async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
+  const [sourceIdentity, targetIdentity, sourceRuntime] = await Promise.all([
+    getBotIdentity(sourceRouterKey),
+    getBotIdentity(targetRouterKey),
+    getBuilderRuntime(sourceRouterKey),
+  ]);
+  if (!sourceRuntime) {
+    throw new Error("A origem ainda não possui um fluxo Builder publicado.");
+  }
+  const runtime = JSON.parse(sourceRuntime.Application);
+  if (runtime?.identifier !== sourceIdentity.replace(/@msging\.net$/, "")) {
+    throw new Error("A configuração publicada não pertence ao Builder de origem.");
+  }
+  runtime.identifier = targetIdentity.replace(/@msging\.net$/, "");
+  const application = JSON.stringify(runtime);
+  const publishedDocuments = [
+    ["blip_portal:builder_published_flow", "blip_portal:builder_working_flow"],
+    ["blip_portal:builder_published_configuration", "blip_portal:builder_working_configuration"],
+    ["blip_portal:builder_published_global_actions", "blip_portal:builder_working_global_actions"],
+  ];
+  for (const [publishedKey, workingKey] of publishedDocuments) {
+    const resource =
+      (await getBucket(sourceRouterKey, publishedKey)) ??
+      (await getBucket(sourceRouterKey, workingKey));
+    if (resource !== undefined) await setBucket(targetRouterKey, publishedKey, resource);
+  }
+  const response = await sendBlipCommand(
+    targetRouterKey,
+    buildCommand({
+      to: "postmaster@msging.net",
+      method: "set",
+      uri: "lime://builder.hosting@msging.net/configuration",
+      type: "application/json",
+      resource: {
+        Template: sourceRuntime.Template || "builder",
+        Application: application,
+      },
+    }),
+  );
+  if (response?.status && response.status !== "success") throw new Error(reasonOf(response));
+  const verified = await getBuilderRuntime(targetRouterKey);
+  if (!verified || verified.Application !== application) {
+    throw new Error("A leitura após publicação não confirmou o runtime clonado.");
+  }
+  return {
+    status: "success",
+    verified: true,
+    states: runtime?.settings?.flow?.states?.length || 0,
+  };
 }
 
 /* ---------------- Variáveis de configuração ---------------- */
@@ -833,7 +939,13 @@ const STEP_DEFINITIONS = [
 ];
 
 async function cloneBot(params) {
-  const { sourceRouterKey, targetRouterKey, options } = params || {};
+  const {
+    sourceRouterKey,
+    targetRouterKey,
+    options,
+    activateBuilder: shouldActivateBuilder,
+    publishAfterClone,
+  } = params || {};
   validateRouterKey(sourceRouterKey, "sourceRouterKey");
   validateRouterKey(targetRouterKey, "targetRouterKey");
 
@@ -847,12 +959,60 @@ async function cloneBot(params) {
   }
 
   const steps = [];
+  if (shouldActivateBuilder) {
+    try {
+      await activateBuilder(targetRouterKey);
+    } catch (error) {
+      throw new Error(`Não foi possível ativar o Builder no destino: ${error.message}`);
+    }
+    try {
+      await activateAttendance(targetRouterKey);
+      steps.push({
+        key: "setup",
+        label: "Ativação de recursos",
+        status: "success",
+        detail: { builder: true, desk: true },
+      });
+    } catch (error) {
+      steps.push({
+        key: "setup",
+        label: "Ativação de recursos",
+        status: "partial",
+        detail: { builder: true, desk: false },
+        message: `Builder ativado, mas o Desk não pôde ser ativado: ${error.message}`,
+      });
+    }
+  }
   for (const step of selectedSteps) {
     try {
       const detail = await step.run(sourceRouterKey, targetRouterKey);
       steps.push({ key: step.key, label: step.label, status: detail?.status || "success", detail });
     } catch (error) {
       steps.push({ key: step.key, label: step.label, status: "error", message: error.message });
+    }
+  }
+
+  if (publishAfterClone) {
+    const flowStep = steps.find((step) => step.key === "flow");
+    if (!flowStep || flowStep.status === "error") {
+      steps.push({
+        key: "publish",
+        label: "Publicação do fluxo",
+        status: "error",
+        message: "O fluxo precisa ser clonado com sucesso antes da publicação.",
+      });
+    } else {
+      try {
+        const detail = await publishBuilderClone(sourceRouterKey, targetRouterKey);
+        steps.push({ key: "publish", label: "Publicação do fluxo", status: "success", detail });
+      } catch (error) {
+        steps.push({
+          key: "publish",
+          label: "Publicação do fluxo",
+          status: "error",
+          message: error.message,
+        });
+      }
     }
   }
 

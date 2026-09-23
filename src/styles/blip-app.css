@@ -1312,6 +1312,103 @@
   color: var(--blip-content-soft);
   font-weight: 700;
 }
+.bulk-bot-create {
+  gap: 18px;
+}
+.bulk-bot-settings-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  align-items: end;
+  gap: 20px;
+}
+.bulk-bot-settings-header p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--blip-content-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.bulk-bot-tag-field input {
+  text-transform: uppercase;
+}
+.bulk-bot-review {
+  display: grid;
+  gap: 12px;
+}
+.bulk-bot-table {
+  min-width: 940px;
+}
+.bulk-bot-table th:first-child,
+.bulk-bot-table td:first-child {
+  width: 58px;
+  text-align: center;
+}
+.bulk-bot-table input[type="text"],
+.bulk-bot-table input:not([type]) {
+  width: 100%;
+  min-width: 180px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--blip-content);
+  background: var(--blip-surface-0);
+  font: inherit;
+}
+.bulk-bot-table input.invalid {
+  border-color: var(--blip-danger);
+}
+.bulk-bot-table input:disabled {
+  opacity: 0.62;
+}
+.bulk-bot-source-id,
+.bulk-bot-message,
+.bulk-bot-issue {
+  display: block;
+  margin-top: 4px;
+  color: var(--blip-content-soft);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.bulk-bot-source-id {
+  font-family: "JetBrains Mono", "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+}
+.bulk-bot-table .router-clone-access-ok,
+.bulk-bot-table .router-clone-access-unknown {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+}
+.bulk-bot-issue {
+  color: var(--blip-danger);
+  font-weight: 700;
+}
+.bulk-bot-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--blip-content-soft);
+  background: var(--blip-surface-2);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.bulk-bot-status.creating {
+  color: var(--blip-primary);
+  background: color-mix(in srgb, var(--blip-primary) 12%, transparent);
+}
+.bulk-bot-status.success {
+  color: var(--blip-success);
+  background: color-mix(in srgb, var(--blip-success) 12%, transparent);
+}
+.bulk-bot-status.partial {
+  color: var(--blip-warning, #9a6700);
+  background: rgba(245, 158, 11, 0.12);
+}
+.bulk-bot-status.error {
+  color: var(--blip-danger);
+  background: color-mix(in srgb, var(--blip-danger) 12%, transparent);
+}
 
 .create-flow-modal {
   width: min(860px, 100%);
@@ -1691,6 +1788,9 @@
   .dev-command-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+  .bulk-bot-settings-header {
+    grid-template-columns: 1fr;
   }
 }
 

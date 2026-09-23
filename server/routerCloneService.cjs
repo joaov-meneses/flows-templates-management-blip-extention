@@ -138,6 +138,12 @@ function summarize(config) {
   };
 }
 
+async function getRouterServices(params) {
+  const routerShortName = assertShortName(params?.routerShortName, "Router");
+  const configuration = await readRouterConfiguration(params?.routerKey, routerShortName);
+  return summarize(configuration);
+}
+
 async function previewRouterClone(params) {
   const sourceShortName = assertShortName(params?.sourceShortName, "Router de origem");
   const targetShortName = assertShortName(params?.targetShortName, "Router de destino");
@@ -275,6 +281,7 @@ async function cloneRouter(params) {
 module.exports = {
   RouterCloneInputError,
   readRouterConfiguration,
+  getRouterServices,
   previewRouterClone,
   prepareRouterClone,
   verifyRouterClone,
