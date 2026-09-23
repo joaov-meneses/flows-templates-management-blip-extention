@@ -4,7 +4,11 @@ const path = require("node:path");
 
 const COMMANDS_URL = "https://msging.net/commands";
 const CONFIGURATIONS_TO = "postmaster@configurations.msging.net";
-const CONFIGURATION_HOSTS = ["master.hosting", "business.master.hosting"];
+const CONFIGURATION_HOSTS = [
+  "master.hosting",
+  "business.master.hosting",
+  "enterprise.master.hosting",
+];
 
 class RouterCloneInputError extends Error {
   constructor(message) {
@@ -114,7 +118,7 @@ async function readRouterConfiguration(routerKey, routerShortName) {
     throw new Error(`Router ${routerShortName}: a chave pertence a outro bot.`);
   }
   throw new Error(
-    `Router ${routerShortName}: a chave é válida, mas a Blip retornou código 67 para a configuração avançada em master.hosting e business.master.hosting. Não é seguro listar ou clonar seus serviços por esta API. Confira a aba Serviços e o domínio Application nas configurações avançadas desse router.`,
+    `Router ${routerShortName}: a chave é válida, mas a Blip retornou código 67 para a configuração avançada nos hosts conhecidos (${CONFIGURATION_HOSTS.join(", ")}). Não é seguro listar ou clonar seus serviços por esta API. Confira o domínio Application nas configurações avançadas desse router.`,
   );
 }
 

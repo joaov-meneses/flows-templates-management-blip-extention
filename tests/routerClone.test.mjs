@@ -181,9 +181,43 @@ test("router sem Application identifica a chave válida e bloqueia a clonagem co
       [
         ["get", "lime://master.hosting@msging.net/configuration"],
         ["get", "lime://business.master.hosting@msging.net/configuration"],
+        ["get", "lime://enterprise.master.hosting@msging.net/configuration"],
         ["get", "/account"],
       ],
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("prévia encontra Application no host enterprise após código 67 nos hosts anteriores", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUris = [];
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    requestedUris.push(request.uri);
+    const body = request.uri.startsWith("lime://enterprise.master.hosting@")
+      ? {
+          status: "success",
+          resource: {
+            Template: "master",
+            Application: makeApplication("source", [
+              { identity: "child@msging.net", isDefault: true },
+            ]),
+          },
+        }
+      : { status: "failure", reason: { code: 67, description: "Not found" } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  try {
+    const config = await service.readRouterConfiguration(sourceKey, "source");
+    assert.equal(config.host, "enterprise.master.hosting");
+    assert.equal(config.services.length, 1);
+    assert.deepEqual(requestedUris, [
+      "lime://master.hosting@msging.net/configuration",
+      "lime://business.master.hosting@msging.net/configuration",
+      "lime://enterprise.master.hosting@msging.net/configuration",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
