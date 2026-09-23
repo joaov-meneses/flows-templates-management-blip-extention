@@ -30,6 +30,19 @@ export function normalizeEnvironmentTag(value: string) {
     .toLowerCase();
 }
 
+export function derivePortalShortName(name: string) {
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
+
+export function buildPortalCreateShortName(name: string) {
+  return name.trim().toLowerCase();
+}
+
 export function formatEnvironmentTag(value: string) {
   const normalized = value
     .trim()
@@ -82,12 +95,13 @@ export function buildBulkBotNamePlan(
   source: { shortName: string; name: string },
   targetTag: string,
 ): BulkBotNamePlan {
+  const targetName = replaceEnvironmentName(source.name, targetTag);
   return {
     sourceShortName: source.shortName,
     sourceName: source.name,
     sourceTag: extractEnvironmentTag(source.name),
-    targetShortName: replaceEnvironmentShortName(source.shortName, source.name, targetTag),
-    targetName: replaceEnvironmentName(source.name, targetTag),
+    targetShortName: derivePortalShortName(targetName),
+    targetName,
   };
 }
 

@@ -62,7 +62,9 @@ import {
   type RouterPhone,
 } from "../lib/routerDirectory";
 import {
+  buildPortalCreateShortName,
   buildBulkBotNamePlan,
+  derivePortalShortName,
   formatEnvironmentTag,
   suggestTargetEnvironmentTag,
   validateBulkTargetShortName,
@@ -832,6 +834,8 @@ export default function CreateTemplatesApp() {
   const [bulkSourceMode, setBulkSourceMode] = useState<BulkSourceMode>("router");
   const [bulkDirectSearch, setBulkDirectSearch] = useState("");
   const [bulkBotItems, setBulkBotItems] = useState<BulkBotCreationItem[]>([]);
+  const [isBulkBotPickerOpen, setIsBulkBotPickerOpen] = useState(false);
+  const [bulkBotPickerSelection, setBulkBotPickerSelection] = useState<Set<string>>(new Set());
   const [bulkPublishAfterClone, setBulkPublishAfterClone] = useState(true);
   const [isLoadingBulkBots, setIsLoadingBulkBots] = useState(false);
   const [isBulkCreatingBots, setIsBulkCreatingBots] = useState(false);
@@ -855,19 +859,21 @@ export default function CreateTemplatesApp() {
       : null;
   const activeModalId = botPicker
     ? "bot-picker"
-    : routerModal
-      ? "router"
-      : isBulkFlowMappingModalOpen
-        ? "bulk-flow-mapping"
-        : isEditFlowModalOpen
-          ? "edit-flow"
-          : isCreateFlowModalOpen
-            ? "create-flow"
-            : isTemplateDeleteModalOpen
-              ? "template-delete"
-              : isTemplateCompareModalOpen
-                ? "template-compare"
-                : null;
+    : isBulkBotPickerOpen
+      ? "bulk-bot-picker"
+      : routerModal
+        ? "router"
+        : isBulkFlowMappingModalOpen
+          ? "bulk-flow-mapping"
+          : isEditFlowModalOpen
+            ? "edit-flow"
+            : isCreateFlowModalOpen
+              ? "create-flow"
+              : isTemplateDeleteModalOpen
+                ? "template-delete"
+                : isTemplateCompareModalOpen
+                  ? "template-compare"
+                  : null;
 
   useEffect(() => {
     if (!isEmbedded) return;
@@ -1116,16 +1122,17 @@ export default function CreateTemplatesApp() {
   const selectedBotSource = cloneApplications.find((item) => item.shortName === botSourceShortName);
   const selectedBotTarget = cloneApplications.find((item) => item.shortName === botTargetShortName);
   const selectedBulkBots = bulkBotItems.filter((item) => item.selected);
-  const visibleBulkBotItems = useMemo(() => {
+  const filteredBulkBotPickerItems = useMemo(() => {
     const query = bulkDirectSearch.trim().toLowerCase();
-    if (bulkSourceMode !== "direct" || !query) return bulkBotItems;
+    if (!query) return bulkBotItems;
     return bulkBotItems.filter(
       (item) =>
         item.sourceName.toLowerCase().includes(query) ||
         item.sourceShortName.toLowerCase().includes(query) ||
         item.sourceType.includes(query),
     );
-  }, [bulkBotItems, bulkDirectSearch, bulkSourceMode]);
+  }, [bulkBotItems, bulkDirectSearch]);
+  const reviewedBulkBotItems = bulkSourceMode === "direct" ? selectedBulkBots : bulkBotItems;
   const processedBulkBots = selectedBulkBots.filter((item) =>
     ["success", "partial", "error"].includes(item.status),
   ).length;
@@ -3320,6 +3327,33 @@ export default function CreateTemplatesApp() {
     );
   }
 
+  function openBulkBotPicker() {
+    setBulkDirectSearch("");
+    setBulkBotPickerSelection(
+      new Set(bulkBotItems.filter((item) => item.selected).map((item) => item.sourceShortName)),
+    );
+    setIsBulkBotPickerOpen(true);
+  }
+
+  function toggleBulkBotPickerItem(sourceShortName: string) {
+    setBulkBotPickerSelection((current) => {
+      const next = new Set(current);
+      if (next.has(sourceShortName)) next.delete(sourceShortName);
+      else next.add(sourceShortName);
+      return next;
+    });
+  }
+
+  function confirmBulkBotPicker() {
+    setBulkBotItems((current) =>
+      current.map((item) => ({
+        ...item,
+        selected: item.sourceAccess && bulkBotPickerSelection.has(item.sourceShortName),
+      })),
+    );
+    setIsBulkBotPickerOpen(false);
+  }
+
   async function handleLoadBulkBots() {
     setError("");
     setBulkBotItems([]);
@@ -3372,7 +3406,9 @@ export default function CreateTemplatesApp() {
 
   async function handleLoadBulkApplications() {
     setError("");
-    setBulkBotItems([]);
+    const previousSelection = new Set(
+      bulkBotItems.filter((item) => item.selected).map((item) => item.sourceShortName),
+    );
     setIsLoadingBulkBots(true);
     try {
       const tenantId = getActiveTenantId(await getCurrentApplication());
@@ -3396,16 +3432,20 @@ export default function CreateTemplatesApp() {
         applications.map(({ application }) => application.name),
       );
       setBulkTargetTag(suggestedTag);
-      setBulkBotItems(
-        applications.map(({ application, sourceType }) => ({
-          sourceType,
-          ...buildBulkBotNamePlan(application, suggestedTag),
-          imageUri: application.imageUri,
-          sourceAccess: true,
-          selected: false,
-          status: "ready" as const,
-        })),
+      const nextItems = applications.map(({ application, sourceType }) => ({
+        sourceType,
+        ...buildBulkBotNamePlan(application, suggestedTag),
+        imageUri: application.imageUri,
+        sourceAccess: true,
+        selected: previousSelection.has(application.shortName),
+        status: "ready" as const,
+      }));
+      setBulkBotItems(nextItems);
+      setBulkBotPickerSelection(
+        new Set(nextItems.filter((item) => item.selected).map((item) => item.sourceShortName)),
       );
+      setBulkDirectSearch("");
+      setIsBulkBotPickerOpen(true);
     } catch (caughtError) {
       setError(getErrorMessage(caughtError, "Não foi possível carregar os bots do contrato."));
     } finally {
@@ -3482,14 +3522,15 @@ export default function CreateTemplatesApp() {
               description: `Criado em massa a partir de ${item.sourceShortName}`,
               imageUri: item.imageUri,
               name: item.targetName.trim(),
-              shortName: item.targetShortName.trim(),
+              shortName: buildPortalCreateShortName(item.targetName),
               template: item.sourceType === "router" ? "master" : "builder",
               tenantId,
             },
           },
           { destination: PORTAL_COMMAND_DESTINATION, timeout: 60000 },
         );
-        const target = extractRouterKey(createResponse, item.targetShortName.trim());
+        const target = extractRouterKey(createResponse, derivePortalShortName(item.targetName));
+        updateBulkBotItem(item.sourceShortName, { targetShortName: target.shortName });
         const source = await loadRouterKey(item.sourceShortName);
         if (item.sourceType === "router") {
           updateBulkBotItem(item.sourceShortName, {
@@ -3498,7 +3539,7 @@ export default function CreateTemplatesApp() {
           });
           const routerCloneResult = await postJson<RouterCloneResponse>("/api/routers/clone/new", {
             sourceShortName: item.sourceShortName,
-            targetShortName: item.targetShortName.trim(),
+            targetShortName: target.shortName,
             sourceRouterKey: source.key,
             targetRouterKey: target.key,
           });
@@ -3895,6 +3936,9 @@ export default function CreateTemplatesApp() {
     switch (activeModalId) {
       case "bot-picker":
         if (!isResolvingBotSourceKey && !isResolvingBotTargetKey) setBotPicker(null);
+        return;
+      case "bulk-bot-picker":
+        if (!isBulkCreatingBots) setIsBulkBotPickerOpen(false);
         return;
       case "router":
         closeRouterModal();
@@ -5068,14 +5112,38 @@ export default function CreateTemplatesApp() {
                       Routers são recriados com sua configuração avançada e todos os serviços
                       conectados. O conteúdo desses serviços não é duplicado automaticamente.
                     </p>
-                    <div className="bot-clone-actions">
+                    <div className="bot-clone-selector">
+                      <span className="router-summary-main">
+                        <span className="router-summary-avatar" aria-hidden="true">
+                          <Layers3 size={16} />
+                        </span>
+                        <span className="router-summary-copy">
+                          <strong>
+                            {bulkBotItems.length
+                              ? `${selectedBulkBots.length} bot(s) selecionado(s)`
+                              : "Nenhum bot selecionado"}
+                          </strong>
+                          <span>
+                            {bulkBotItems.length
+                              ? `${bulkBotItems.length} bot(s) acessível(is) no contrato`
+                              : "Abra a lista para pesquisar e selecionar"}
+                          </span>
+                        </span>
+                      </span>
                       <Button
                         type="button"
-                        onClick={() => void handleLoadBulkApplications()}
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          bulkBotItems.length
+                            ? openBulkBotPicker()
+                            : void handleLoadBulkApplications()
+                        }
                         loading={isLoadingBulkBots}
                         disabled={isBulkCreatingBots}
                       >
-                        <Search size={18} aria-hidden="true" /> Carregar bots do contrato
+                        <Pencil size={15} aria-hidden="true" />
+                        {bulkBotItems.length ? "Alterar" : "Selecionar"}
                       </Button>
                     </div>
                   </div>
@@ -5088,8 +5156,8 @@ export default function CreateTemplatesApp() {
                         <div>
                           <h3>Nova nomenclatura</h3>
                           <p>
-                            A tag atual é detectada pelo nome e pelo prefixo do ID. Todos os
-                            destinos podem ser revisados antes da criação.
+                            A tag atual é detectada pelo nome. Você revisa o novo nome e a Blip
+                            define o ID automaticamente na criação.
                           </p>
                         </div>
                         <label
@@ -5165,43 +5233,39 @@ export default function CreateTemplatesApp() {
                     <div className="bulk-bot-review">
                       <div className="ember-panel-title results-title">
                         <div>
-                          <h3>Revisar {bulkBotItems.length} destino(s)</h3>
+                          <h3>Revisar {reviewedBulkBotItems.length} destino(s)</h3>
                           <p>{selectedBulkBots.length} selecionado(s) para criação</p>
                         </div>
                         <div className="router-clone-selection-actions">
                           {bulkSourceMode === "direct" && (
-                            <label className="blip-native-field bulk-bot-search">
-                              Buscar origem
-                              <input
-                                value={bulkDirectSearch}
-                                onChange={(event) => setBulkDirectSearch(event.target.value)}
-                                placeholder="Nome, ID ou tipo"
-                                disabled={isBulkCreatingBots}
-                              />
-                            </label>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={openBulkBotPicker}
+                              disabled={isBulkCreatingBots}
+                            >
+                              <Pencil size={15} aria-hidden="true" /> Alterar seleção
+                            </Button>
                           )}
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              setBulkBotItems((current) =>
-                                current.map((item) => ({
-                                  ...item,
-                                  selected:
-                                    bulkSourceMode !== "direct" ||
-                                    visibleBulkBotItems.some(
-                                      (visible) => visible.sourceShortName === item.sourceShortName,
-                                    )
-                                      ? item.sourceAccess
-                                      : item.selected,
-                                })),
-                              )
-                            }
-                            disabled={isBulkCreatingBots}
-                          >
-                            Selecionar {bulkSourceMode === "direct" ? "visíveis" : "todos"}
-                          </Button>
+                          {bulkSourceMode === "router" && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                setBulkBotItems((current) =>
+                                  current.map((item) => ({
+                                    ...item,
+                                    selected: item.sourceAccess,
+                                  })),
+                                )
+                              }
+                              disabled={isBulkCreatingBots}
+                            >
+                              Selecionar todos
+                            </Button>
+                          )}
                           <Button
                             type="button"
                             variant="secondary"
@@ -5224,12 +5288,11 @@ export default function CreateTemplatesApp() {
                               <th>Criar</th>
                               <th>Origem</th>
                               <th>Novo nome</th>
-                              <th>Novo ID</th>
                               <th>Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {visibleBulkBotItems.map((item) => {
+                            {reviewedBulkBotItems.map((item) => {
                               const exists = [...routerApplications, ...botApplications].some(
                                 (application) => application.shortName === item.targetShortName,
                               );
@@ -5282,27 +5345,18 @@ export default function CreateTemplatesApp() {
                                   </td>
                                   <td>
                                     <input
+                                      className={issue ? "invalid" : ""}
                                       value={item.targetName}
-                                      onChange={(event) =>
+                                      onChange={(event) => {
+                                        const targetName = event.target.value;
                                         updateBulkBotItem(item.sourceShortName, {
-                                          targetName: event.target.value,
-                                        })
-                                      }
+                                          targetName,
+                                          targetShortName: derivePortalShortName(targetName),
+                                        });
+                                      }}
                                       disabled={isBulkCreatingBots || !item.selected}
                                       aria-label={`Novo nome para ${item.sourceName}`}
-                                    />
-                                  </td>
-                                  <td>
-                                    <input
-                                      className={issue ? "invalid" : ""}
-                                      value={item.targetShortName}
-                                      onChange={(event) =>
-                                        updateBulkBotItem(item.sourceShortName, {
-                                          targetShortName: event.target.value.toLowerCase(),
-                                        })
-                                      }
-                                      disabled={isBulkCreatingBots || !item.selected}
-                                      aria-label={`Novo ID para ${item.sourceName}`}
+                                      maxLength={30}
                                     />
                                     {item.selected && issue && (
                                       <small className="bulk-bot-issue">{issue}</small>
@@ -6809,6 +6863,125 @@ export default function CreateTemplatesApp() {
                     <FileJson size={18} aria-hidden="true" />
                   )}
                   {editFlowPublishAfterSave ? "Alterar e publicar" : "Alterar"}
+                </Button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {isBulkBotPickerOpen && (
+          <div className="ember-modal-backdrop" role="presentation">
+            <section
+              className="ember-modal router-modal bulk-bot-picker-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bulk-bot-picker-title"
+              data-modal-id="bulk-bot-picker"
+              tabIndex={-1}
+            >
+              <div className="ember-modal-header">
+                <div>
+                  <h2 id="bulk-bot-picker-title">Selecionar bots do contrato</h2>
+                  <p>Pesquise e escolha vários Builders ou routers para criar em massa.</p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="icon-only"
+                  aria-label="Fechar"
+                  onClick={() => setIsBulkBotPickerOpen(false)}
+                >
+                  <X size={18} aria-hidden="true" />
+                </Button>
+              </div>
+              <div className="ember-modal-body router-application-picker">
+                <label className="blip-native-field" htmlFor="bulkBotPickerSearch">
+                  Buscar bot
+                  <input
+                    id="bulkBotPickerSearch"
+                    autoFocus
+                    value={bulkDirectSearch}
+                    onChange={(event) => setBulkDirectSearch(event.target.value)}
+                    placeholder="Nome, ID ou tipo"
+                  />
+                </label>
+                <div className="router-picker-meta bulk-bot-picker-meta">
+                  <span>
+                    {filteredBulkBotPickerItems.length} bot(s) encontrado(s) ·{" "}
+                    {bulkBotPickerSelection.size} selecionado(s)
+                  </span>
+                  <span className="bulk-bot-picker-actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setBulkBotPickerSelection((current) => {
+                          const next = new Set(current);
+                          filteredBulkBotPickerItems.forEach((item) => {
+                            if (item.sourceAccess) next.add(item.sourceShortName);
+                          });
+                          return next;
+                        })
+                      }
+                    >
+                      Selecionar visíveis
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setBulkBotPickerSelection(new Set())}
+                    >
+                      Limpar
+                    </Button>
+                  </span>
+                </div>
+                <div className="router-application-list">
+                  {filteredBulkBotPickerItems.length === 0 ? (
+                    <div className="router-picker-empty">Nenhum bot encontrado.</div>
+                  ) : (
+                    filteredBulkBotPickerItems.map((item) => {
+                      const selected = bulkBotPickerSelection.has(item.sourceShortName);
+                      return (
+                        <label
+                          key={item.sourceShortName}
+                          className={`router-application-option bulk-bot-picker-option${
+                            selected ? " selected" : ""
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleBulkBotPickerItem(item.sourceShortName)}
+                          />
+                          <span className="router-application-avatar" aria-hidden="true">
+                            {item.imageUri ? (
+                              <img src={item.imageUri} alt="" loading="lazy" />
+                            ) : item.sourceType === "router" ? (
+                              <Network size={18} />
+                            ) : (
+                              <Bot size={18} />
+                            )}
+                          </span>
+                          <span className="router-application-copy">
+                            <strong>{item.sourceName}</strong>
+                            <span>{item.sourceShortName}</span>
+                            <span className={`bulk-bot-type ${item.sourceType}`}>
+                              {item.sourceType === "router" ? "Router" : "Builder"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <div className="ember-modal-footer">
+                <Button variant="secondary" onClick={() => setIsBulkBotPickerOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button variant="primary" onClick={confirmBulkBotPicker}>
+                  <Check size={18} aria-hidden="true" /> Confirmar {bulkBotPickerSelection.size}
                 </Button>
               </div>
             </section>

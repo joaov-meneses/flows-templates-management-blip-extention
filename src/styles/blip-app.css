@@ -1338,6 +1338,32 @@
 .bulk-bot-search {
   min-width: 220px;
 }
+.bulk-bot-picker-modal {
+  width: min(760px, 100%);
+}
+.bulk-bot-picker-meta {
+  flex-wrap: wrap;
+}
+.bulk-bot-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.router-application-option.bulk-bot-picker-option {
+  grid-template-columns: auto 44px minmax(0, 1fr);
+}
+.bulk-bot-picker-option .bulk-bot-type {
+  justify-self: start;
+  width: max-content;
+  margin: 2px 0 0;
+  color: var(--blip-primary);
+  background: color-mix(in srgb, var(--blip-primary) 10%, transparent);
+  font-family: inherit;
+}
+.bulk-bot-picker-option .bulk-bot-type.router {
+  color: var(--blip-warning, #9a6700);
+  background: rgba(245, 158, 11, 0.12);
+}
 .bulk-bot-type {
   display: inline-flex;
   margin: 5px 0 0 8px;
@@ -1374,7 +1400,7 @@
   gap: 12px;
 }
 .bulk-bot-table {
-  min-width: 940px;
+  min-width: 760px;
 }
 .bulk-bot-table th:first-child,
 .bulk-bot-table td:first-child {

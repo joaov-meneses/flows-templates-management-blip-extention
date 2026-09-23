@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildPortalCreateShortName,
   buildBulkBotNamePlan,
+  derivePortalShortName,
   extractEnvironmentTag,
   replaceEnvironmentName,
   replaceEnvironmentShortName,
   suggestTargetEnvironmentTag,
   validateBulkTargetShortName,
 } from "../src/lib/bulkBotCreation.ts";
+
+test("deriva o ID como o Portal e mantém o shortName provisório fora da interface", () => {
+  assert.equal(derivePortalShortName("[VERIFYID] Auto ID 0923"), "verifyidautoid0923");
+  assert.equal(derivePortalShortName("[HMG] Finalização"), "hmgfinalizacao");
+  assert.equal(buildPortalCreateShortName("  [PRD] Menu Ajuda  "), "[prd] menu ajuda");
+});
 
 test("detecta e troca tags DEV/PRD no nome e no ID", () => {
   assert.equal(extractEnvironmentTag("[DEV] Captação"), "DEV");
