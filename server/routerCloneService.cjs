@@ -85,15 +85,37 @@ async function readRouterConfiguration(routerKey, routerShortName) {
       uri: `lime://${host}@msging.net/configuration`,
     });
     if (response.status === "success") {
-      const decoded = decodeConfiguration(response.resource, routerShortName);
+      let decoded;
+      try {
+        decoded = decodeConfiguration(response.resource, routerShortName);
+      } catch (error) {
+        throw new Error(`Router ${routerShortName}: ${error.message}`);
+      }
       return { host, resource: response.resource, ...decoded };
     }
     const reason = reasonOf(response);
     if (response.reason?.code !== 67 && !/not found/i.test(reason)) {
-      throw new Error(`Não foi possível ler a configuração do router: ${reason}`);
+      throw new Error(
+        `Router ${routerShortName}: não foi possível ler a configuração (${reason}).`,
+      );
     }
   }
-  throw new Error("Configuração avançada do router não encontrada.");
+  const account = await command(routerKey, {
+    to: "postmaster@msging.net",
+    method: "get",
+    uri: "/account",
+  });
+  if (account.status !== "success") {
+    throw new Error(
+      `Router ${routerShortName}: a chave não pôde ser validada (${reasonOf(account)}).`,
+    );
+  }
+  if (account.resource?.identity !== `${routerShortName}@msging.net`) {
+    throw new Error(`Router ${routerShortName}: a chave pertence a outro bot.`);
+  }
+  throw new Error(
+    `Router ${routerShortName}: a chave é válida, mas a Blip retornou código 67 para a configuração avançada em master.hosting e business.master.hosting. Não é seguro listar ou clonar seus serviços por esta API. Confira a aba Serviços e o domínio Application nas configurações avançadas desse router.`,
+  );
 }
 
 function summarize(config) {

@@ -152,3 +152,39 @@ test("configuração alterada depois da prévia bloqueia a gravação", async ()
     fake.restore();
   }
 });
+
+test("router sem Application identifica a chave válida e bloqueia a clonagem com diagnóstico específico", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    requests.push(request);
+    const body =
+      request.uri === "/account"
+        ? {
+            status: "success",
+            resource: { identity: "source@msging.net", extras: { template: "master" } },
+          }
+        : {
+            status: "failure",
+            reason: { code: 67, description: "The requested resource was not found" },
+          };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  try {
+    await assert.rejects(
+      service.readRouterConfiguration(sourceKey, "source"),
+      /Router source: a chave é válida, mas a Blip retornou código 67/,
+    );
+    assert.deepEqual(
+      requests.map(({ method, uri }) => [method, uri]),
+      [
+        ["get", "lime://master.hosting@msging.net/configuration"],
+        ["get", "lime://business.master.hosting@msging.net/configuration"],
+        ["get", "/account"],
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
