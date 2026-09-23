@@ -79,7 +79,7 @@ function decodeConfiguration(resource, expectedShortName) {
   return { application, services, applicationHash: hash(resource.Application) };
 }
 
-async function readRouterConfiguration(routerKey, routerShortName) {
+async function readRouterConfigurationIfPresent(routerKey, routerShortName) {
   assertKey(routerKey, "Key do router");
   assertShortName(routerShortName, "ID do router");
   for (const host of CONFIGURATION_HOSTS) {
@@ -117,6 +117,12 @@ async function readRouterConfiguration(routerKey, routerShortName) {
   if (account.resource?.identity !== `${routerShortName}@msging.net`) {
     throw new Error(`Router ${routerShortName}: a chave pertence a outro bot.`);
   }
+  return null;
+}
+
+async function readRouterConfiguration(routerKey, routerShortName) {
+  const configuration = await readRouterConfigurationIfPresent(routerKey, routerShortName);
+  if (configuration) return configuration;
   throw new Error(
     `Router ${routerShortName}: a chave é válida, mas a Blip retornou código 67 para a configuração avançada nos hosts conhecidos (${CONFIGURATION_HOSTS.join(", ")}). Não é seguro listar ou clonar seus serviços por esta API. Confira o domínio Application nas configurações avançadas desse router.`,
   );
@@ -278,6 +284,56 @@ async function cloneRouter(params) {
   return { status: "success", services: prepared.services, backup: prepared.backup };
 }
 
+async function cloneNewRouter(params) {
+  const sourceShortName = assertShortName(params?.sourceShortName, "Router de origem");
+  const targetShortName = assertShortName(params?.targetShortName, "Router de destino");
+  if (sourceShortName === targetShortName) {
+    throw new RouterCloneInputError("Origem e destino precisam ser diferentes.");
+  }
+  const sourceKey = assertKey(params?.sourceRouterKey, "Key de origem");
+  const targetKey = assertKey(params?.targetRouterKey, "Key de destino");
+  const [source, target] = await Promise.all([
+    readRouterConfiguration(sourceKey, sourceShortName),
+    readRouterConfigurationIfPresent(targetKey, targetShortName),
+  ]);
+
+  if (target) {
+    if (
+      source.host !== target.host ||
+      source.resource.Template !== target.resource.Template ||
+      source.application.settingsType !== target.application.settingsType
+    ) {
+      throw new Error("Origem e novo destino usam templates de router incompatíveis.");
+    }
+    return cloneRouter({
+      sourceShortName,
+      targetShortName,
+      sourceRouterKey: sourceKey,
+      targetRouterKey: targetKey,
+      sourceHash: source.applicationHash,
+      targetHash: target.applicationHash,
+      selectedServiceIdentities: source.services.map((service) => service.identity),
+    });
+  }
+
+  const application = structuredClone(source.application);
+  application.identifier = targetShortName;
+  const nextApplication = JSON.stringify(application);
+  const expectedHash = hash(nextApplication);
+  const response = await command(targetKey, {
+    to: "postmaster@msging.net",
+    method: "set",
+    uri: `lime://${source.host}@msging.net/configuration?caller=${targetShortName}@msging.net`,
+    type: "application/json",
+    resource: { Application: nextApplication },
+  });
+  if (response.status !== "success") {
+    throw new Error(`A Blip recusou a primeira configuração do router: ${reasonOf(response)}`);
+  }
+  await verifyRouterClone({ targetRouterKey: targetKey, targetShortName, expectedHash });
+  return { status: "success", services: source.services.length, backup: null };
+}
+
 module.exports = {
   RouterCloneInputError,
   readRouterConfiguration,
@@ -286,4 +342,5 @@ module.exports = {
   prepareRouterClone,
   verifyRouterClone,
   cloneRouter,
+  cloneNewRouter,
 };

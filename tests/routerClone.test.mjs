@@ -222,3 +222,75 @@ test("prévia encontra Application no host enterprise após código 67 nos hosts
     globalThis.fetch = originalFetch;
   }
 });
+
+test("router recém-criado sem Application recebe a primeira configuração e os serviços da origem", async () => {
+  const originalFetch = globalThis.fetch;
+  const sourceApplication = makeApplication(
+    "source",
+    [
+      {
+        identity: "child@msging.net",
+        shortName: "child",
+        longName: "Serviço",
+        isDefault: true,
+      },
+    ],
+    "source-extra",
+  );
+  let targetApplication = null;
+  const writes = [];
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    const key = options.headers.Authorization;
+    let body;
+    if (request.method === "set") {
+      writes.push(request);
+      targetApplication = request.resource.Application;
+      body = { status: "success" };
+    } else if (request.uri === "/account") {
+      body = {
+        status: "success",
+        resource: { identity: "target@msging.net", extras: { template: "master" } },
+      };
+    } else if (key === sourceKey) {
+      body = {
+        status: "success",
+        resource: { Template: "master", Application: sourceApplication },
+      };
+    } else if (targetApplication) {
+      body = {
+        status: "success",
+        resource: { Template: "master", Application: targetApplication },
+      };
+    } else {
+      body = { status: "failure", reason: { code: 67, description: "Not found" } };
+    }
+    return { ok: true, status: 200, json: async () => body };
+  };
+
+  try {
+    const result = await service.cloneNewRouter({
+      sourceShortName: "source",
+      targetShortName: "target",
+      sourceRouterKey: sourceKey,
+      targetRouterKey: targetKey,
+    });
+    assert.equal(result.status, "success");
+    assert.equal(result.services, 1);
+    assert.equal(result.backup, null);
+    assert.equal(writes.length, 1);
+    assert.equal(
+      writes[0].uri,
+      "lime://master.hosting@msging.net/configuration?caller=target@msging.net",
+    );
+    const cloned = JSON.parse(targetApplication);
+    assert.equal(cloned.identifier, "target");
+    assert.equal(cloned.extra, "source-extra");
+    assert.deepEqual(
+      cloned.settings.children.map((child) => child.identity),
+      ["child@msging.net"],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

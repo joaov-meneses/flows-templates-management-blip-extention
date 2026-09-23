@@ -47,6 +47,7 @@ const {
   prepareRouterClone,
   verifyRouterClone,
   cloneRouter,
+  cloneNewRouter,
 } = require("./server/routerCloneService.cjs");
 const { streamOperation } = require("./server/progressStream.cjs");
 
@@ -283,6 +284,14 @@ app.post("/api/routers/services", async (req, res, next) => {
 app.post("/api/routers/clone", async (req, res, next) => {
   try {
     res.json(await cloneRouter(req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/routers/clone/new", async (req, res, next) => {
+  try {
+    res.json(await cloneNewRouter(req.body));
   } catch (error) {
     next(error);
   }

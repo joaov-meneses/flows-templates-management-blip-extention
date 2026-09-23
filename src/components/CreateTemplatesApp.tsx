@@ -3496,23 +3496,11 @@ export default function CreateTemplatesApp() {
             status: "creating",
             message: "Clonando configuração e conectando serviços…",
           });
-          const preview = await postJson<RouterClonePreview>("/api/routers/clone/preview", {
+          const routerCloneResult = await postJson<RouterCloneResponse>("/api/routers/clone/new", {
             sourceShortName: item.sourceShortName,
             targetShortName: item.targetShortName.trim(),
             sourceRouterKey: source.key,
             targetRouterKey: target.key,
-          });
-          if (!preview.compatible) {
-            throw new Error("O novo router não usa um template compatível com a origem.");
-          }
-          const routerCloneResult = await postJson<RouterCloneResponse>("/api/routers/clone", {
-            sourceShortName: item.sourceShortName,
-            targetShortName: item.targetShortName.trim(),
-            sourceRouterKey: source.key,
-            targetRouterKey: target.key,
-            sourceHash: preview.source.applicationHash,
-            targetHash: preview.target.applicationHash,
-            selectedServiceIdentities: preview.source.services.map((service) => service.identity),
           });
           succeeded += 1;
           updateBulkBotItem(item.sourceShortName, {
@@ -4798,7 +4786,7 @@ export default function CreateTemplatesApp() {
                     ? "Selecione dois builders do contrato atual e escolha quais configurações copiar."
                     : cloneMode === "router"
                       ? "Selecione dois routers do contrato atual, confira os serviços da origem e escolha quais conectar ao destino."
-                      : "Use um router como origem, revise a nova nomenclatura e crie vários Builders em uma única operação."}
+                      : "Escolha os serviços de um router ou selecione Builders e routers diretamente para criar o novo ambiente."}
                 </p>
               </div>
             </div>
