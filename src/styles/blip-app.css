@@ -592,12 +592,6 @@
 .bot-clone-selector .router-summary-main {
   min-width: 0;
 }
-.bot-clone-picker-option {
-  grid-template-columns: 44px minmax(0, 1fr);
-  width: 100%;
-  text-align: left;
-  color: var(--blip-content);
-}
 .bot-identity-row {
   display: inline-flex;
   align-items: center;
@@ -1127,6 +1121,19 @@
   color: var(--blip-content-soft);
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
+}
+.router-application-option.bot-clone-picker-option {
+  grid-template-columns: 44px minmax(0, 1fr);
+  width: 100%;
+  text-align: left;
+  color: var(--blip-content);
+}
+.bot-clone-picker-option .router-application-copy strong,
+.bot-clone-picker-option .router-application-copy span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .router-picker-empty {
   display: flex;
