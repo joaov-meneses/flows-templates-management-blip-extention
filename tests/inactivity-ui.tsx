@@ -28,6 +28,54 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path === "/api/flows/search")
+    return Response.json({
+      total: 2,
+      flows: [
+        {
+          id: "flow-api",
+          name: "Flow API fictício",
+          status: "DRAFT",
+          categories: ["OTHER"],
+          isFlowApi: true,
+          endpoint_uri: "https://example.test/endpoint",
+        },
+        {
+          id: "flow-common",
+          name: "Flow comum fictício",
+          status: "DRAFT",
+          categories: ["OTHER"],
+          isFlowApi: false,
+        },
+      ],
+    });
+  if (path === "/api/flows/create") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    return Response.json({
+      flow: { id: "new-flow", name: body.name, status: "DRAFT", isFlowApi: body.isFlowApi },
+      publicKeyUpload: null,
+    });
+  }
+  if (path === "/api/flows/replicate/progress") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    const data = {
+      totals: {
+        foundFlows: body.flows.length,
+        targetRouters: body.targetRouterKeys.length,
+        createJobs: body.flows.length * body.targetRouterKeys.length,
+        copied: body.flows.length * body.targetRouterKeys.length,
+        errors: 0,
+        publicKeyUploads: body.businessPublicKey ? 1 : 0,
+      },
+      copied: [],
+      errors: [],
+      foundFlows: body.flows,
+      publicKeyUploads: [],
+    };
+    return new Response(`${JSON.stringify({ kind: "result", data })}\n`, {
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+  }
   if (path === "/api/builders/export") {
     const body = JSON.parse(String(options?.body || "{}"));
     if (body.builderShortName === "builder_falha")

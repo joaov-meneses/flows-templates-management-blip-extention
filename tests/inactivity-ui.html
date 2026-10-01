@@ -17,6 +17,16 @@
           <option value="">Sem e-mail</option>
         </select>
       </label>
+      <label>
+        Public key fictícia:
+        <select id="fixture-public-key">
+          <option value="per-router">Por router (origem e com_chave cadastrados)</option>
+          <option value="present">Cadastrada</option>
+          <option value="missing">Ausente</option>
+          <option value="error">Falha de consulta</option>
+        </select>
+      </label>
+      <output id="fixture-key-checks">0 consultas de public key</output>
     </p>
     <iframe
       title="Extensão com dados fictícios"
@@ -47,6 +57,7 @@
         document.body.style.width = `${fixtureWidth}px`;
       let saves = 0;
       let publications = 0;
+      let keyChecks = 0;
       const builders = [
         {
           shortName: "builder_agendamento",
@@ -81,6 +92,20 @@
           name: "Sem acesso",
           template: "builder",
           hasPermission: false,
+          tenantId: "test",
+        },
+        {
+          shortName: "router_com_chave",
+          name: "Router com chave",
+          template: "master",
+          hasPermission: true,
+          tenantId: "test",
+        },
+        {
+          shortName: "router_sem_chave",
+          name: "Router sem chave",
+          template: "master",
+          hasPermission: true,
           tenantId: "test",
         },
       ];
@@ -133,7 +158,34 @@
           };
         else if (message?.action === "blipEvent:sendCommand") {
           const uri = message.content.command.uri;
-          if (uri.includes("/users/"))
+          if (uri.endsWith("/whatsapp-flows/public-key/upload")) {
+            keyChecks++;
+            document.querySelector("#fixture-key-checks").textContent =
+              `${keyChecks} consultas de public key · ${message.content.command.from}`;
+            const mode = document.querySelector("#fixture-public-key").value;
+            const present =
+              mode === "present" || (mode === "per-router" && !uri.includes("router_sem_chave"));
+            response =
+              mode === "error"
+                ? {
+                    status: "failure",
+                    reason: { code: 13, description: "Sem permissão (fictício)" },
+                  }
+                : {
+                    status: "success",
+                    resource: {
+                      data: present
+                        ? [
+                            {
+                              business_public_key: "fixture-public-key",
+                              business_public_key_signature_status: "VALID",
+                            },
+                          ]
+                        : [],
+                    },
+                    metadata: { "#command.uri": uri },
+                  };
+          } else if (uri.includes("/users/"))
             response = { status: "success", resource: { roleId: "admin" } };
           else if (uri.endsWith("/applications") || uri.startsWith("/applications?"))
             response = { status: "success", resource: { items: builders } };

@@ -525,6 +525,7 @@
 .flow-public-key-field {
   max-width: 760px;
   margin-top: 14px;
+  overflow-wrap: anywhere;
 }
 .flow-public-key-field textarea,
 .public-key-field textarea {

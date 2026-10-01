@@ -50,6 +50,8 @@ import {
 import { useModalFocus } from "../hooks/useModalFocus";
 import { useTheme } from "../hooks/useTheme";
 import { useRouterBuilderScope } from "../hooks/useRouterBuilderScope";
+import { useFlowPublicKeys } from "../hooks/useFlowPublicKeys";
+import { FlowPublicKeyField } from "./FlowPublicKeyField";
 import {
   filterBuilderPickerApplications,
   selectAllVisibleBuilders,
@@ -1080,6 +1082,30 @@ export default function CreateTemplatesApp() {
   );
   const selectedFlowsIncludeApi = selectedFlows.some(
     (flow) => flow.isFlowApi || Boolean(flow.endpoint_uri),
+  );
+  const flowKeyTargets = isEmbedded
+    ? removeRouterSelection(targetRouterShortNames, sourceRouterShortName).map((shortName) => ({
+        shortName,
+      }))
+    : removeRouterSelection(splitLines(targetRouterKeys), sourceRouterKey).map((key, index) => ({
+        shortName: `Destino ${index + 1}`,
+        key,
+      }));
+  const replicatePublicKeys = useFlowPublicKeys(
+    flowKeyTargets,
+    visibleActiveView === "flows" && selectedFlowsIncludeApi,
+    isEmbedded,
+  );
+  const sourcePublicKeys = useFlowPublicKeys(
+    sourceRouterShortName || sourceRouterKey
+      ? [
+          isEmbedded
+            ? { shortName: sourceRouterShortName }
+            : { shortName: "Router de origem", key: sourceRouterKey },
+        ]
+      : [],
+    isCreateFlowModalOpen && newFlowIsApi,
+    isEmbedded,
   );
   const allVisibleFlowsSelected =
     filteredFlows.length > 0 && filteredFlows.every((f) => selectedFlowIds.has(flowKey(f)));
@@ -2868,10 +2894,6 @@ export default function CreateTemplatesApp() {
       setError("Informe o endpoint_uri para Flow API.");
       return;
     }
-    if (newFlowIsApi && !newFlowBusinessPublicKey.trim()) {
-      setError("Informe a business_public_key para Flow API.");
-      return;
-    }
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(newFlowJson);
@@ -2882,6 +2904,15 @@ export default function CreateTemplatesApp() {
     setIsCreatingFlow(true);
     try {
       const sourceKey = await ensureSourceRouterKey();
+      if (newFlowIsApi) {
+        const statuses = await sourcePublicKeys.verify();
+        if (statuses.some((entry) => !entry.exists) && !newFlowBusinessPublicKey.trim()) {
+          setError(
+            "Este router ainda não tem public key. Informe a business_public_key para criar o Flow API.",
+          );
+          return;
+        }
+      }
       const data = await postJson<FlowCreateResponse>("/api/flows/create", {
         sourceRouterKey: sourceKey,
         name: normalizedName,
@@ -2925,10 +2956,6 @@ export default function CreateTemplatesApp() {
       setError("Selecione pelo menos um flow.");
       return;
     }
-    if (selectedFlowsIncludeApi && !replicateFlowBusinessPublicKey.trim()) {
-      setError("Informe a business_public_key para replicar Flow API.");
-      return;
-    }
     if (!hasTargetRouterSelection()) {
       setError("Informe pelo menos um router de destino.");
       openTargetsModal();
@@ -2938,6 +2965,15 @@ export default function CreateTemplatesApp() {
     try {
       const sourceKey = await ensureSourceRouterKey();
       const targets = await ensureTargetRouterKeys();
+      if (selectedFlowsIncludeApi) {
+        const statuses = await replicatePublicKeys.verify();
+        if (statuses.some((entry) => !entry.exists) && !replicateFlowBusinessPublicKey.trim()) {
+          setError(
+            "Há destinos sem public key. Informe a business_public_key para replicar os Flows API.",
+          );
+          return;
+        }
+      }
       const data = await postJsonWithProgress<FlowReplicateResponse>(
         "/api/flows/replicate/progress",
         {
@@ -2951,6 +2987,10 @@ export default function CreateTemplatesApp() {
         },
         setFlowReplicateProgress,
       );
+      if (selectedFlowsIncludeApi && data.totals.publicKeyUploads > 0) {
+        setReplicateFlowBusinessPublicKey("");
+        void replicatePublicKeys.verify().catch(() => {});
+      }
       setOperationResult({
         summary: buildFlowReplicateSummary(data),
         payload: data,
@@ -5025,7 +5065,14 @@ export default function CreateTemplatesApp() {
               count={selectedFlows.length}
               targets={targetCount}
               loading={isReplicatingFlows}
-              disabled={isLoadingFlows}
+              disabled={
+                isLoadingFlows ||
+                (selectedFlowsIncludeApi &&
+                  targetCount > 0 &&
+                  (replicatePublicKeys.status !== "ready" ||
+                    (replicatePublicKeys.missing.length > 0 &&
+                      !replicateFlowBusinessPublicKey.trim())))
+              }
               onTargets={openTargetsModal}
               onReplicate={handleReplicateFlows}
               onClear={() => setSelectedFlowIds(new Set())}
@@ -5034,23 +5081,19 @@ export default function CreateTemplatesApp() {
               <OperationProgress progress={flowReplicateProgress} label="flows processados" />
             )}
 
-            {selectedFlowsIncludeApi && (
-              <label
-                className="blip-native-field flow-public-key-field"
-                htmlFor="replicateFlowBusinessPublicKey"
-              >
-                business_public_key para Flow API
-                <textarea
+            {selectedFlowsIncludeApi &&
+              (targetCount > 0 ? (
+                <FlowPublicKeyField
                   id="replicateFlowBusinessPublicKey"
                   value={replicateFlowBusinessPublicKey}
-                  onChange={(e) => setReplicateFlowBusinessPublicKey(e.target.value)}
-                  rows={6}
-                  required
-                  spellCheck={false}
-                  placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
+                  onChange={setReplicateFlowBusinessPublicKey}
+                  state={replicatePublicKeys}
+                  onRetry={() => void replicatePublicKeys.verify().catch(() => {})}
+                  disabled={isReplicatingFlows}
                 />
-              </label>
-            )}
+              ) : (
+                <p role="status">Selecione os destinos para verificar se já possuem public key.</p>
+              ))}
 
             <FlowTable
               flows={filteredFlows}
@@ -6967,21 +7010,14 @@ export default function CreateTemplatesApp() {
                       />
                     </label>
 
-                    <label
-                      className="blip-native-field public-key-field"
-                      htmlFor="newFlowBusinessPublicKey"
-                    >
-                      business_public_key
-                      <textarea
-                        id="newFlowBusinessPublicKey"
-                        value={newFlowBusinessPublicKey}
-                        onChange={(e) => setNewFlowBusinessPublicKey(e.target.value)}
-                        rows={6}
-                        required
-                        spellCheck={false}
-                        placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
-                      />
-                    </label>
+                    <FlowPublicKeyField
+                      id="newFlowBusinessPublicKey"
+                      value={newFlowBusinessPublicKey}
+                      onChange={setNewFlowBusinessPublicKey}
+                      state={sourcePublicKeys}
+                      onRetry={() => void sourcePublicKeys.verify().catch(() => {})}
+                      disabled={isCreatingFlow}
+                    />
                   </>
                 )}
 
@@ -7009,7 +7045,12 @@ export default function CreateTemplatesApp() {
                   variant="primary"
                   type="button"
                   onClick={handleCreateFlow}
-                  disabled={isCreatingFlow}
+                  disabled={
+                    isCreatingFlow ||
+                    (newFlowIsApi &&
+                      (sourcePublicKeys.status !== "ready" ||
+                        (sourcePublicKeys.missing.length > 0 && !newFlowBusinessPublicKey.trim())))
+                  }
                 >
                   {isCreatingFlow ? (
                     <LoaderCircle className="spin" size={18} aria-hidden="true" />

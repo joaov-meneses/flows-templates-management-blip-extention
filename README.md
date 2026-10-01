@@ -235,7 +235,17 @@ Publica um flow existente no router de origem.
 
 ### `POST /api/flows/replicate`
 
-Envia a public key uma vez por router de destino, cria o flow, envia o JSON completo para o novo ID e publica o flow.
+Consulta a public key de cada destino antes de copiar Flows API. Mantém as chaves existentes e envia `businessPublicKey` somente aos routers sem chave. Depois cria o flow, envia o JSON completo para o novo ID e publica o flow. Flows comuns não exigem essa consulta.
+
+Na extensão, a verificação é feita pelo iframe do Portal (`sendCommand` via `BlipService`, proprietário indicado no comando e na URI LIME). O campo manual aparece apenas quando a consulta confirma algum router sem chave. Falhas de acesso ou respostas incompletas bloqueiam a ação e permitem tentar novamente. Na criação de Flow API, a mesma verificação é feita para o router de origem.
+
+O backend confere novamente cada router pelo `GET /whatsapp-flows/public-key/upload`, usando sua autenticação, antes de qualquer upload. `businessPublicKey` é opcional quando todos já têm chave; se algum destino confirmado como ausente não receber esse campo, a replicação é interrompida antes de escrever. Falhas de consulta são registradas como `check_public_key`, e os Flows API desse destino não são copiados.
+
+### `POST /api/flows/public-key`
+
+Consulta a chave do router informado em `sourceRouterKey`, para uso fora do iframe. Retorna somente `{ "exists": true, "signatureStatus": "VALID" }` (ou `exists: false` e `signatureStatus: null`), sem devolver o conteúdo da chave. Não faz upload.
+
+### Exemplo de replicação
 
 ```json
 {

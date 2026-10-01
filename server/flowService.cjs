@@ -144,6 +144,18 @@ async function uploadFlowPublicKey(targetRouterKey, targetIndex, businessPublicK
   };
 }
 
+async function getFlowPublicKeyStatus(params) {
+  validateSourceRouterKey(params?.sourceRouterKey);
+  const { FLOW_PUBLIC_KEY_URI, readFlowPublicKeyStatus } =
+    await import("../shared/flowPublicKey.mjs");
+  const response = await sendBlipCommand(
+    params.sourceRouterKey,
+    buildCommand("get", FLOW_PUBLIC_KEY_URI),
+    { commandUrl: HTTP_MSGING_COMMANDS_URL },
+  );
+  return readFlowPublicKeyStatus(response);
+}
+
 function extractFlowsFromResponse(responseBody) {
   const flows = responseBody?.resource?.data;
   return Array.isArray(flows) ? flows : [];
@@ -503,9 +515,17 @@ async function createFlow(params) {
     isFlowApi: normalizedIsFlowApi,
     endpointUri,
   });
-  const publicKeyUpload = normalizedIsFlowApi
-    ? await uploadFlowPublicKey(sourceRouterKey, 0, normalizeBusinessPublicKey(businessPublicKey))
-    : null;
+  let publicKeyUpload = null;
+  if (normalizedIsFlowApi) {
+    const publicKey = await getFlowPublicKeyStatus({ sourceRouterKey });
+    if (!publicKey.exists) {
+      publicKeyUpload = await uploadFlowPublicKey(
+        sourceRouterKey,
+        0,
+        normalizeBusinessPublicKey(businessPublicKey),
+      );
+    }
+  }
 
   const createResponse = await sendBlipCommand(
     sourceRouterKey,
@@ -1000,10 +1020,28 @@ async function replicateFlows(params, onProgress) {
   let targetsReadyForApiFlows = allTargets;
 
   if (hasFlowApi) {
-    const normalizedBusinessPublicKey = normalizeBusinessPublicKey(params?.businessPublicKey);
     targetsReadyForApiFlows = [];
+    const missingTargets = [];
 
-    await runInBatches(allTargets, batchSize, async ({ targetRouterKey, targetIndex }) => {
+    // Read every destination before any writes. A registered key must never be overwritten.
+    await runInBatches(allTargets, batchSize, async (target) => {
+      try {
+        const publicKey = await getFlowPublicKeyStatus({ sourceRouterKey: target.targetRouterKey });
+        if (publicKey.exists) targetsReadyForApiFlows.push(target);
+        else missingTargets.push(target);
+      } catch (error) {
+        results.errors.push({
+          step: "check_public_key",
+          targetIndex: target.targetIndex,
+          message: error.message,
+        });
+      }
+    });
+    const normalizedBusinessPublicKey = missingTargets.length
+      ? normalizeBusinessPublicKey(params?.businessPublicKey)
+      : null;
+
+    await runInBatches(missingTargets, batchSize, async ({ targetRouterKey, targetIndex }) => {
       try {
         const uploadResult = await uploadFlowPublicKey(
           targetRouterKey,
@@ -1089,6 +1127,7 @@ async function replicateFlows(params, onProgress) {
 
 module.exports = {
   InputError,
+  getFlowPublicKeyStatus,
   searchFlows,
   getFlowPreview,
   getFlowJson,

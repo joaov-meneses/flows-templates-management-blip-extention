@@ -13,6 +13,7 @@ const {
 } = require("./server/templateService.cjs");
 const {
   InputError: FlowInputError,
+  getFlowPublicKeyStatus,
   searchFlows,
   getFlowPreview,
   getFlowJson,
@@ -183,6 +184,15 @@ app.post("/api/flows/json", async (req, res, next) => {
   try {
     const result = await getFlowJson(req.body);
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/flows/public-key", async (req, res, next) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json(await getFlowPublicKeyStatus(req.body));
   } catch (error) {
     next(error);
   }
