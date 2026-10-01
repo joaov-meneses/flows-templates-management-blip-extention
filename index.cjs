@@ -56,6 +56,7 @@ const {
 } = require("./server/routerResourceService.cjs");
 const { streamOperation } = require("./server/progressStream.cjs");
 const { analyzeInactivity, applyInactivity } = require("./server/inactivityService.cjs");
+const { publishBuilderDraft } = require("./server/builderPublicationService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -69,6 +70,14 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "create-templates-api",
   });
+});
+
+app.post("/api/builders/publish", async (req, res, next) => {
+  try {
+    res.json(await publishBuilderDraft(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/inactivity/analyze", async (req, res, next) => {

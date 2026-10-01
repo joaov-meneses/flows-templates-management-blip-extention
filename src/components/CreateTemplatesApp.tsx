@@ -59,6 +59,7 @@ import { SelectionBar } from "./ui/SelectionBar";
 import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
+import { BulkPublicationTab } from "./BulkPublicationTab";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
 import {
@@ -210,7 +211,7 @@ const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
   "attendanceRules",
   "priorityRules",
 ];
-type CloneMode = "builder" | "router" | "bulk";
+type CloneMode = "builder" | "router" | "bulk" | "publication";
 type BulkSourceMode = "router" | "direct";
 type RouterCloneOptions = { services: boolean; resources: boolean };
 type BotIdentityLookup = {
@@ -818,7 +819,16 @@ export default function CreateTemplatesApp() {
   );
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
-  const [botPicker, setBotPicker] = useState<"source" | "target" | "inactivity" | null>(null);
+  const [botPicker, setBotPicker] = useState<
+    "source" | "target" | "inactivity" | "publication" | null
+  >(null);
+  const [publicationApplications, setPublicationApplications] = useState<
+    PortalApplicationAccount[]
+  >([]);
+  const [publicationPickerSelection, setPublicationPickerSelection] = useState<Set<string>>(
+    new Set(),
+  );
+  const [isPublishingBuilders, setIsPublishingBuilders] = useState(false);
   const [builderPickerScope, setBuilderPickerScope] = useState<BuilderPickerScope>("router");
   const [inactivityApplications, setInactivityApplications] = useState<PortalApplicationAccount[]>(
     [],
@@ -1188,7 +1198,8 @@ export default function CreateTemplatesApp() {
     (sourceRouterKey.trim() ? "Router configurado" : "Nenhum router selecionado");
   const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
-  const pickerIsBuilder = botPicker === "inactivity" || cloneMode === "builder";
+  const pickerIsBuilder =
+    botPicker === "inactivity" || botPicker === "publication" || cloneMode === "builder";
   const pickerRouterShortName = sourceRouterShortName || currentApplicationRouter?.shortName || "";
   const routerBuilderScope = useRouterBuilderScope(
     pickerRouterShortName,
@@ -1212,22 +1223,26 @@ export default function CreateTemplatesApp() {
       ? filteredBotSourceApplications
       : filteredBotTargetApplications;
   const pickerSelection =
-    botPicker === "inactivity"
-      ? inactivityPickerSelection
-      : pickerIsBuilder
-        ? builderTargetPickerSelection
-        : routerTargetPickerSelection;
+    botPicker === "publication"
+      ? publicationPickerSelection
+      : botPicker === "inactivity"
+        ? inactivityPickerSelection
+        : pickerIsBuilder
+          ? builderTargetPickerSelection
+          : routerTargetPickerSelection;
   const setPickerSelection =
-    botPicker === "inactivity"
-      ? setInactivityPickerSelection
-      : pickerIsBuilder
-        ? setBuilderTargetPickerSelection
-        : setRouterTargetPickerSelection;
+    botPicker === "publication"
+      ? setPublicationPickerSelection
+      : botPicker === "inactivity"
+        ? setInactivityPickerSelection
+        : pickerIsBuilder
+          ? setBuilderTargetPickerSelection
+          : setRouterTargetPickerSelection;
 
   const hiddenPickerSelections = [...pickerSelection].filter(
     (shortName) => !pickerApplications.some((application) => application.shortName === shortName),
   ).length;
-  function openBotPicker(purpose: "source" | "target" | "inactivity") {
+  function openBotPicker(purpose: "source" | "target" | "inactivity" | "publication") {
     setBuilderPickerScope("router");
     setBotPicker(purpose);
   }
@@ -1241,6 +1256,15 @@ export default function CreateTemplatesApp() {
   function confirmInactivityBots() {
     setInactivityApplications(
       botApplications.filter((application) => inactivityPickerSelection.has(application.shortName)),
+    );
+    setBotPicker(null);
+  }
+
+  function confirmPublicationBots() {
+    setPublicationApplications(
+      botApplications.filter((application) =>
+        publicationPickerSelection.has(application.shortName),
+      ),
     );
     setBotPicker(null);
   }
@@ -1573,6 +1597,7 @@ export default function CreateTemplatesApp() {
   }
 
   function changeCloneMode(mode: CloneMode) {
+    if (isPublishingBuilders) return;
     setCloneMode(mode);
     setBotSourceShortName("");
     setBotSourceRouterKey("");
@@ -1595,7 +1620,9 @@ export default function CreateTemplatesApp() {
     setBulkTargetTag("");
     setBulkDirectSearch("");
     setError("");
-    if (mode !== "builder" && !routerApplications.length) void loadRouterApplications();
+    if (mode === "publication" && !botApplications.length) void loadBotApplications();
+    if (mode !== "builder" && mode !== "publication" && !routerApplications.length)
+      void loadRouterApplications();
     if (mode === "bulk") {
       setBotCloneOptions(
         Object.fromEntries(BOT_CLONE_OPTION_KEYS.map((key) => [key, true])) as BotCloneOptions,
@@ -4328,6 +4355,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "routers" ? "active" : ""}
             type="button"
             onClick={openRoutersView}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "routers" ? "page" : undefined}
           >
             <Network size={18} aria-hidden="true" />
@@ -4337,6 +4365,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "templates" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("templates")}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "templates" ? "page" : undefined}
           >
             <MessageSquareText size={18} aria-hidden="true" />
@@ -4346,6 +4375,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "flows" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("flows")}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "flows" ? "page" : undefined}
           >
             <FileJson size={18} aria-hidden="true" />
@@ -4355,6 +4385,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "bots" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("bots")}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "bots" ? "page" : undefined}
           >
             <Bot size={18} aria-hidden="true" />
@@ -4364,6 +4395,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "plugins" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("plugins")}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "plugins" ? "page" : undefined}
           >
             <Layers3 size={18} aria-hidden="true" />
@@ -4377,6 +4409,7 @@ export default function CreateTemplatesApp() {
               setActiveView("logs");
             }}
             aria-current={visibleActiveView === "logs" ? "page" : undefined}
+            disabled={isPublishingBuilders}
           >
             <ScrollText size={18} aria-hidden="true" />
             Logs
@@ -4385,6 +4418,7 @@ export default function CreateTemplatesApp() {
             className={visibleActiveView === "inactivity" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("inactivity")}
+            disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "inactivity" ? "page" : undefined}
           >
             <Clock3 size={18} aria-hidden="true" /> Inatividade
@@ -4993,6 +5027,7 @@ export default function CreateTemplatesApp() {
                 aria-selected={cloneMode === "builder"}
                 className={cloneMode === "builder" ? "active" : ""}
                 onClick={() => changeCloneMode("builder")}
+                disabled={isPublishingBuilders}
               >
                 {" "}
                 <Bot size={16} aria-hidden="true" /> Builder{" "}
@@ -5003,6 +5038,7 @@ export default function CreateTemplatesApp() {
                 aria-selected={cloneMode === "router"}
                 className={cloneMode === "router" ? "active" : ""}
                 onClick={() => changeCloneMode("router")}
+                disabled={isPublishingBuilders}
               >
                 {" "}
                 <Network size={16} aria-hidden="true" /> Router{" "}
@@ -5013,8 +5049,19 @@ export default function CreateTemplatesApp() {
                 aria-selected={cloneMode === "bulk"}
                 className={cloneMode === "bulk" ? "active" : ""}
                 onClick={() => changeCloneMode("bulk")}
+                disabled={isPublishingBuilders}
               >
                 <Layers3 size={16} aria-hidden="true" /> Criação em massa
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cloneMode === "publication"}
+                className={cloneMode === "publication" ? "active" : ""}
+                onClick={() => changeCloneMode("publication")}
+                disabled={isPublishingBuilders}
+              >
+                <Send size={16} aria-hidden="true" /> Publicação em Massa
               </button>
             </div>
             <div className="ember-panel-title results-title">
@@ -5025,19 +5072,45 @@ export default function CreateTemplatesApp() {
                     ? "Builder"
                     : cloneMode === "router"
                       ? "Router"
-                      : "Criação em massa"}
+                      : cloneMode === "bulk"
+                        ? "Criação em massa"
+                        : "Publicação em Massa"}
                 </h2>
                 <p>
                   {cloneMode === "builder"
                     ? "Selecione um builder de origem, um ou mais destinos e escolha quais configurações copiar."
                     : cloneMode === "router"
                       ? "Selecione um router de origem, vários destinos e escolha serviços e recursos para copiar com auditoria."
-                      : "Escolha os serviços de um router ou selecione Builders e routers diretamente para criar o novo ambiente."}
+                      : cloneMode === "bulk"
+                        ? "Escolha os serviços de um router ou selecione Builders e routers diretamente para criar o novo ambiente."
+                        : "Selecione os Builders e publique o fluxo que está salvo no rascunho de cada bot."}
                 </p>
               </div>
             </div>
 
-            {cloneMode !== "bulk" && (
+            <div hidden={cloneMode !== "publication"}>
+              <BulkPublicationTab
+                applications={publicationApplications}
+                embedded={isEmbedded}
+                resolveKey={loadRouterKey}
+                onBusyChange={setIsPublishingBuilders}
+                onRemove={(shortName) =>
+                  setPublicationApplications((current) =>
+                    current.filter((application) => application.shortName !== shortName),
+                  )
+                }
+                onSelect={() => {
+                  setBotTargetSearch("");
+                  setPublicationPickerSelection(
+                    new Set(publicationApplications.map((application) => application.shortName)),
+                  );
+                  openBotPicker("publication");
+                  if (!botApplications.length) void loadBotApplications();
+                }}
+              />
+            </div>
+
+            {(cloneMode === "builder" || cloneMode === "router") && (
               <form
                 className="bot-clone-form"
                 onSubmit={
@@ -7549,7 +7622,9 @@ export default function CreateTemplatesApp() {
               <div className="ember-modal-header">
                 <div>
                   <h2 id="bot-picker-title">
-                    {botPicker === "inactivity" ? (
+                    {botPicker === "publication" ? (
+                      "Selecionar Builders para publicação"
+                    ) : botPicker === "inactivity" ? (
                       "Selecionar Builders para inatividade"
                     ) : (
                       <>
@@ -7559,11 +7634,13 @@ export default function CreateTemplatesApp() {
                     )}
                   </h2>
                   <p>
-                    {botPicker === "inactivity"
-                      ? "Selecione os Builders do contrato. Os rascunhos serão analisados após confirmar."
-                      : botPicker !== "source"
-                        ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
-                        : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
+                    {botPicker === "publication"
+                      ? "Selecione um ou mais Builders do roteador ou todos com acesso no contrato."
+                      : botPicker === "inactivity"
+                        ? "Selecione os Builders do contrato. Os rascunhos serão analisados após confirmar."
+                        : botPicker !== "source"
+                          ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
+                          : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
                   </p>
                 </div>
                 <Button
@@ -7746,11 +7823,13 @@ export default function CreateTemplatesApp() {
                   <Button
                     variant="primary"
                     onClick={() =>
-                      void (botPicker === "inactivity"
-                        ? confirmInactivityBots()
-                        : pickerIsBuilder
-                          ? handleConfirmBuilderTargets()
-                          : handleConfirmRouterTargets())
+                      void (botPicker === "publication"
+                        ? confirmPublicationBots()
+                        : botPicker === "inactivity"
+                          ? confirmInactivityBots()
+                          : pickerIsBuilder
+                            ? handleConfirmBuilderTargets()
+                            : handleConfirmRouterTargets())
                     }
                     loading={isResolvingBotTargetKey}
                     disabled={pickerSelection.size === 0 || pickerLoading || !!pickerError}

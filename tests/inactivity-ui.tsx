@@ -28,6 +28,23 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path === "/api/builders/publish") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    window.parent.postMessage({ fixturePublication: true }, location.origin);
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+    return Response.json({
+      builderShortName: body.builderShortName,
+      published: body.builderShortName !== "builder_falha",
+      states: 7,
+      publicationIndex: 4,
+      ...(body.builderShortName === "builder_falha"
+        ? {
+            error:
+              "Publicação não confirmada: falha simulada de permissão. Confira o Builder antes de repetir.",
+          }
+        : {}),
+    });
+  }
   if (path === "/api/routers/services")
     return Response.json({
       routerShortName: "router_test",

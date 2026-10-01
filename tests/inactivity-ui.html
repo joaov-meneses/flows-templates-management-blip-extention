@@ -76,6 +76,12 @@
       window.addEventListener("message", (event) => {
         const frame = document.querySelector("iframe");
         if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+        if (event.data?.fixturePublication) {
+          publications++;
+          document.querySelector("#fixture-operations").textContent =
+            `${saves} salvamentos · ${publications} publicações solicitadas`;
+          return;
+        }
         if (event.data?.fixtureApply) {
           saves++;
           if (event.data.published) publications++;

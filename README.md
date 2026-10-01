@@ -15,6 +15,16 @@ Os testes exigem Node 22.6 ou superior. `npm run test:ui` disponibiliza fixtures
 
 Ferramenta para buscar templates de mensagem WhatsApp em um router BLiP e replicá-los em um ou mais routers destino.
 
+## Publicação em Massa
+
+Em **Clone Bots → Publicação em Massa**, selecione quantos Builders quiser pelo modal existente. O filtro padrão mostra os Builders do roteador; **Todos os Builders com acesso** mostra os demais Builders acessíveis no contrato. Routers e bots sem acesso são excluídos, e **Selecionar todos** respeita o filtro e a busca. A seleção desta aba é independente da clonagem e da inatividade.
+
+**Publicar N bot(s)** abre a confirmação nativa do Portal Blip e publica o rascunho completo de cada bot, com resultado individual. Cancelar não envia comandos de publicação. Falhas em um destino não interrompem os seguintes. Durante a operação, a seleção e a navegação ficam bloqueadas para preservar os destinos confirmados. Os resultados também ficam em Logs.
+
+A API `POST /api/builders/publish` recebe `builderShortName` e `builderKey` e lê `builder_working_flow`, `builder_working_configuration`, `builder_working_global_actions` e o ID do fluxo. Converte o grafo do rascunho em estados executáveis, preservando a ordem das ações antes/depois da entrada, condições, destinos, ações globais, ferramentas locais e a inatividade. Não copia o runtime antigo como se fosse o rascunho novo. Usa a configuração de hosting do próprio Builder e seu cluster; na primeira publicação, busca o template oficial `/templates/builder`. Verifica novamente os documentos antes de ativar o fluxo, confirma o runtime por leitura e registra os documentos publicados e o histórico. O grafo de trabalho permanece intacto; na primeira publicação, registra o ID gerado caso ele esteja ausente.
+
+Blocos de agente IA com mudanças em configurações externas exigem publicação pelo Builder; a API apresenta a falha nesse bot antes de alterar seu runtime. Um bloco de IA inalterado mantém sua representação compilada anterior. Subflows referenciados não são publicados separadamente por esta operação. Uma falha de registro depois da confirmação do runtime informa **Publicado, com aviso**, pois não há transação entre a ativação e os documentos. Se a resposta for incerta, confira o Builder antes de repetir. A validação automatizada e a fixture usam somente bots fictícios; a integração real requer validação no Portal Blip.
+
 ## Aba Inatividade
 
 Selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.
