@@ -15,6 +15,9 @@ import {
   FileJson,
   Headset,
   KeyRound,
+  Download,
+  LayoutGrid,
+  List,
   Layers3,
   LoaderCircle,
   MessageSquareText,
@@ -61,6 +64,8 @@ import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
 import { BulkPublicationTab } from "./BulkPublicationTab";
+import { BuilderDownloadsTab } from "./BuilderDownloadsTab";
+import "../styles/bot-manager.css";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
 import {
@@ -159,7 +164,8 @@ const DEFAULT_TEMPLATE_OPTIONS = {
 const DEFAULT_FLOW_OPTIONS = { continueOnError: true, batchSize: 15 };
 const DEFAULT_PLUGIN_OPTIONS = { continueOnError: true, batchSize: 15 };
 const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
-  routers: "Bots",
+  routers: "Bot Manager · Resumo",
+  downloads: "Baixar Fluxos",
   templates: "Templates",
   flows: "Flows",
   bots: "Clone Bots",
@@ -213,6 +219,15 @@ const BOT_CLONE_DESTRUCTIVE_KEYS: Array<keyof BotCloneOptions> = [
   "priorityRules",
 ];
 type CloneMode = "builder" | "router" | "bulk" | "publication";
+type ManagerTab = "summary" | "clone" | "bulk" | "publication" | "inactivity" | "downloads";
+const MANAGER_TABS: { id: ManagerTab; label: string; icon: typeof Bot }[] = [
+  { id: "summary", label: "Resumo", icon: LayoutGrid },
+  { id: "clone", label: "Clone Bots", icon: CopyPlus },
+  { id: "bulk", label: "Criação em Massa", icon: Layers3 },
+  { id: "publication", label: "Publicação em Massa", icon: Send },
+  { id: "inactivity", label: "Inatividade", icon: Clock3 },
+  { id: "downloads", label: "Baixar Fluxos", icon: Download },
+];
 type BulkSourceMode = "router" | "direct";
 type RouterCloneOptions = { services: boolean; resources: boolean };
 type BotIdentityLookup = {
@@ -702,7 +717,10 @@ export default function CreateTemplatesApp() {
   const [startupError, setStartupError] = useState("");
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>("routers");
-  const [directoryTab, setDirectoryTab] = useState<"routers" | "builders">("routers");
+  const [directoryTab, setDirectoryTab] = useState<"all" | "routers" | "builders">("all");
+  const [directoryLayout, setDirectoryLayout] = useState<"cards" | "list">("cards");
+  const [managerTab, setManagerTab] = useState<ManagerTab>("summary");
+  const lastCloneMode = useRef<"builder" | "router">("builder");
   const [cloneMode, setCloneMode] = useState<CloneMode>("builder");
   const [sourceRouterKey, setSourceRouterKey] = useState("");
   const [sourceRouterShortName, setSourceRouterShortName] = useState("");
@@ -750,7 +768,6 @@ export default function CreateTemplatesApp() {
   const [routerApplicationsError, setRouterApplicationsError] = useState("");
   const [routerApplicationSearch, setRouterApplicationSearch] = useState("");
   const [routerDirectorySearch, setRouterDirectorySearch] = useState("");
-  const [builderDirectorySearch, setBuilderDirectorySearch] = useState("");
   const [routerPhoneNumbers, setRouterPhoneNumbers] = useState<
     Record<string, RouterPhone | { status: "loading" | "unavailable"; phoneNumber: null }>
   >({});
@@ -880,6 +897,7 @@ export default function CreateTemplatesApp() {
   const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
   const isEmbedded = useIframeAutoHeight(shellRef);
   const visibleActiveView = activeView;
+  const isManagerView = ["routers", "bots", "inactivity", "downloads"].includes(visibleActiveView);
   const visibleActivityEntries = activityEntries.filter(
     (entry) => activityFilter === "all" || entry.view === activityFilter,
   );
@@ -1108,14 +1126,22 @@ export default function CreateTemplatesApp() {
   }, [routerApplications, routerDirectorySearch, routerPhoneNumbers]);
 
   const filteredDirectoryBuilderApplications = useMemo(() => {
-    const query = builderDirectorySearch.trim().toLowerCase();
+    const query = routerDirectorySearch.trim().toLowerCase();
     return botApplications.filter(
       (application) =>
         !query ||
         application.name.toLowerCase().includes(query) ||
         application.shortName.toLowerCase().includes(query),
     );
-  }, [botApplications, builderDirectorySearch]);
+  }, [botApplications, routerDirectorySearch]);
+
+  const directoryApplications = [
+    ...(directoryTab !== "builders" ? filteredDirectoryRouterApplications : []),
+    ...(directoryTab !== "routers" ? filteredDirectoryBuilderApplications : []),
+  ].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const directoryLoading =
+    (directoryTab !== "builders" && isLoadingRouterApplications) ||
+    (directoryTab !== "routers" && isLoadingBotApplications);
 
   const filteredBotSourceApplications = useMemo(() => {
     const q = botSourceSearch.trim().toLowerCase();
@@ -1270,42 +1296,24 @@ export default function CreateTemplatesApp() {
     setBotPicker(null);
   }
 
-  const headerCopy =
-    visibleActiveView === "inactivity"
-      ? {
-          title: "Inatividade",
-          description: "Consulta e atualização da inatividade nos rascunhos dos Builders",
-        }
-      : visibleActiveView === "routers"
+  const headerCopy = isManagerView
+    ? {
+        title: "Bot Manager",
+        description: "Consulte, clone e gerencie os bots do contrato em um só lugar",
+      }
+    : visibleActiveView === "templates"
+      ? { title: "Templates", description: "Replicação de templates entre routers BLiP" }
+      : visibleActiveView === "flows"
         ? {
-            title: "Bots",
-            description: "Routers e builders aos quais você tem acesso no Portal BLiP",
+            title: "Flows",
+            description: "Consulta, visualização e cópia de flows entre routers BLiP",
           }
-        : visibleActiveView === "templates"
+        : visibleActiveView === "plugins"
           ? {
-              title: "Templates",
-              description: "Replicação de templates entre routers BLiP",
+              title: "Plugins Manager",
+              description: "Gerenciamento e cópia de plugins entre routers BLiP",
             }
-          : visibleActiveView === "flows"
-            ? {
-                title: "Flows",
-                description: "Consulta, visualização e cópia de flows entre routers BLiP",
-              }
-            : visibleActiveView === "bots"
-              ? {
-                  title: "Clone Bots",
-                  description:
-                    "Copie configurações de builders ou de routers entre bots do contrato atual",
-                }
-              : visibleActiveView === "plugins"
-                ? {
-                    title: "Plugins Manager",
-                    description: "Gerenciamento e cópia de plugins entre routers BLiP",
-                  }
-                : {
-                    title: "Logs",
-                    description: "Requisições e resultados desta sessão da extensão",
-                  };
+          : { title: "Logs", description: "Requisições e resultados desta sessão da extensão" };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -1591,15 +1599,28 @@ export default function CreateTemplatesApp() {
   }
 
   function openRoutersView() {
-    setActiveView("routers");
+    openManagerTab(managerTab);
+    if (managerTab === "summary") void loadRouterApplications(true);
+  }
+
+  function openManagerTab(tab: ManagerTab) {
+    if (isPublishingBuilders || isCloningBot || isCloningRouter || isBulkCreatingBots) return;
+    setManagerTab(tab);
     setError("");
     setCopyNotice("");
-    void loadRouterApplications(true);
+    if (tab === "summary") setActiveView("routers");
+    else if (tab === "inactivity" || tab === "downloads") setActiveView(tab);
+    else {
+      setActiveView("bots");
+      const mode = tab === "clone" ? lastCloneMode.current : tab;
+      if (cloneMode !== mode) changeCloneMode(mode);
+    }
   }
 
   function changeCloneMode(mode: CloneMode) {
     if (isPublishingBuilders) return;
     setCloneMode(mode);
+    if (mode === "builder" || mode === "router") lastCloneMode.current = mode;
     setBotSourceShortName("");
     setBotSourceRouterKey("");
     setBuilderCloneTargets([]);
@@ -3317,7 +3338,8 @@ export default function CreateTemplatesApp() {
       !(
         visibleActiveView === "bots" ||
         visibleActiveView === "inactivity" ||
-        (visibleActiveView === "routers" && directoryTab === "builders")
+        visibleActiveView === "downloads" ||
+        visibleActiveView === "routers"
       )
     )
       return;
@@ -3325,13 +3347,7 @@ export default function CreateTemplatesApp() {
 
     void loadBotApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBotApplications is redefined every render; the guards above already prevent refetching.
-  }, [
-    visibleActiveView,
-    directoryTab,
-    isEmbedded,
-    hasLoadedBotApplications,
-    isLoadingBotApplications,
-  ]);
+  }, [visibleActiveView, isEmbedded, hasLoadedBotApplications, isLoadingBotApplications]);
 
   useEffect(() => {
     if (cloneMode !== "builder") return;
@@ -4366,14 +4382,14 @@ export default function CreateTemplatesApp() {
         </div>
         <nav className="ember-side-nav">
           <button
-            className={visibleActiveView === "routers" ? "active" : ""}
+            className={isManagerView ? "active" : ""}
             type="button"
             onClick={openRoutersView}
             disabled={isPublishingBuilders}
-            aria-current={visibleActiveView === "routers" ? "page" : undefined}
+            aria-current={isManagerView ? "page" : undefined}
           >
             <Network size={18} aria-hidden="true" />
-            Bots
+            Bot Manager
           </button>
           <button
             className={visibleActiveView === "templates" ? "active" : ""}
@@ -4395,16 +4411,7 @@ export default function CreateTemplatesApp() {
             <FileJson size={18} aria-hidden="true" />
             Flows
           </button>
-          <button
-            className={visibleActiveView === "bots" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("bots")}
-            disabled={isPublishingBuilders}
-            aria-current={visibleActiveView === "bots" ? "page" : undefined}
-          >
-            <Bot size={18} aria-hidden="true" />
-            Clone Bots
-          </button>
+
           <button
             className={visibleActiveView === "plugins" ? "active" : ""}
             type="button"
@@ -4428,15 +4435,6 @@ export default function CreateTemplatesApp() {
             <ScrollText size={18} aria-hidden="true" />
             Logs
           </button>
-          <button
-            className={visibleActiveView === "inactivity" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("inactivity")}
-            disabled={isPublishingBuilders}
-            aria-current={visibleActiveView === "inactivity" ? "page" : undefined}
-          >
-            <Clock3 size={18} aria-hidden="true" /> Inatividade
-          </button>
         </nav>
       </aside>
 
@@ -4449,48 +4447,41 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            {visibleActiveView !== "bots" &&
-              visibleActiveView !== "inactivity" &&
-              visibleActiveView !== "routers" &&
-              visibleActiveView !== "logs" && (
-                <div className="router-summary">
-                  <span className="router-summary-label">Router de origem</span>
-                  <div className="router-summary-main">
-                    {hasSourceRouterSelection() && (
-                      <span className="router-summary-avatar" aria-hidden="true">
-                        {sourceRouterApplication?.imageUri ? (
-                          <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
-                        ) : (
-                          <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
-                        )}
-                      </span>
-                    )}
-                    <span className="router-summary-copy">
-                      <strong>{sourceRouterDisplayName}</strong>
-                      <span>{sourceRouterDisplayId}</span>
+            {!isManagerView && visibleActiveView !== "logs" && (
+              <div className="router-summary">
+                <span className="router-summary-label">Router de origem</span>
+                <div className="router-summary-main">
+                  {hasSourceRouterSelection() && (
+                    <span className="router-summary-avatar" aria-hidden="true">
+                      {sourceRouterApplication?.imageUri ? (
+                        <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
+                      ) : (
+                        <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
+                      )}
                     </span>
-                  </div>
-                  {hasSourceRouterSelection() ? (
-                    <button
-                      className="router-summary-action icon-action"
-                      type="button"
-                      aria-label="Editar router de origem"
-                      title="Editar router de origem"
-                      onClick={openSourceModal}
-                    >
-                      <Pencil size={14} aria-hidden="true" />
-                    </button>
-                  ) : (
-                    <button
-                      className="router-summary-action"
-                      type="button"
-                      onClick={openSourceModal}
-                    >
-                      Selecionar
-                    </button>
                   )}
+                  <span className="router-summary-copy">
+                    <strong>{sourceRouterDisplayName}</strong>
+                    <span>{sourceRouterDisplayId}</span>
+                  </span>
                 </div>
-              )}
+                {hasSourceRouterSelection() ? (
+                  <button
+                    className="router-summary-action icon-action"
+                    type="button"
+                    aria-label="Editar router de origem"
+                    title="Editar router de origem"
+                    onClick={openSourceModal}
+                  >
+                    <Pencil size={14} aria-hidden="true" />
+                  </button>
+                ) : (
+                  <button className="router-summary-action" type="button" onClick={openSourceModal}>
+                    Selecionar
+                  </button>
+                )}
+              </div>
+            )}
 
             <button
               className="theme-toggle-button"
@@ -4558,8 +4549,72 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
-        <div hidden={visibleActiveView !== "inactivity"}>
+        {isManagerView && (
+          <div className="ember-subtabs manager-tabs" role="tablist" aria-label="Bot Manager">
+            {MANAGER_TABS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                id={`manager-tab-${id}`}
+                type="button"
+                role="tab"
+                aria-selected={managerTab === id}
+                tabIndex={managerTab === id ? 0 : -1}
+                aria-controls={`manager-panel-${id}`}
+                className={managerTab === id ? "active" : ""}
+                onClick={() => openManagerTab(id)}
+                onKeyDown={(event) => {
+                  const index = MANAGER_TABS.findIndex((tab) => tab.id === id);
+                  const next =
+                    event.key === "ArrowRight"
+                      ? (index + 1) % MANAGER_TABS.length
+                      : event.key === "ArrowLeft"
+                        ? (index + MANAGER_TABS.length - 1) % MANAGER_TABS.length
+                        : event.key === "Home"
+                          ? 0
+                          : event.key === "End"
+                            ? MANAGER_TABS.length - 1
+                            : -1;
+                  if (next < 0) return;
+                  event.preventDefault();
+                  openManagerTab(MANAGER_TABS[next].id);
+                  document.getElementById(`manager-tab-${MANAGER_TABS[next].id}`)?.focus();
+                }}
+                disabled={
+                  isPublishingBuilders || isCloningBot || isCloningRouter || isBulkCreatingBots
+                }
+              >
+                <Icon size={16} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div
+          id="manager-panel-downloads"
+          role="tabpanel"
+          aria-labelledby="manager-tab-downloads"
+          hidden={visibleActiveView !== "downloads"}
+        >
+          <BuilderDownloadsTab
+            applications={botApplications}
+            routerShortName={pickerRouterShortName}
+            resolveKey={loadRouterKey}
+            embedded={isEmbedded}
+            active={visibleActiveView === "downloads"}
+            loading={isLoadingBotApplications}
+            loadError={botApplicationsError}
+            onRefresh={() => void loadBotApplications()}
+            onBusyChange={setIsPublishingBuilders}
+          />
+        </div>
+        <div
+          id="manager-panel-inactivity"
+          role="tabpanel"
+          aria-labelledby="manager-tab-inactivity"
+          hidden={visibleActiveView !== "inactivity"}
+        >
           <InactivityTab
+            onBusyChange={setIsPublishingBuilders}
             applications={inactivityApplications}
             resolveKey={loadRouterKey}
             embedded={isEmbedded}
@@ -4574,55 +4629,34 @@ export default function CreateTemplatesApp() {
             }}
           />
         </div>
-        {visibleActiveView === "inactivity" ? null : visibleActiveView === "routers" ? (
-          <section className="ember-panel results-panel router-directory-panel">
-            <div className="ember-subtabs" role="tablist" aria-label="Tipos de bots">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={directoryTab === "routers"}
-                className={directoryTab === "routers" ? "active" : ""}
-                onClick={() => setDirectoryTab("routers")}
-              >
-                <Network size={16} aria-hidden="true" /> Routers
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={directoryTab === "builders"}
-                className={directoryTab === "builders" ? "active" : ""}
-                onClick={() => setDirectoryTab("builders")}
-              >
-                <Bot size={16} aria-hidden="true" /> Builders
-              </button>
-            </div>
+        {visibleActiveView === "inactivity" ||
+        visibleActiveView === "downloads" ? null : visibleActiveView === "routers" ? (
+          <section
+            id="manager-panel-summary"
+            role="tabpanel"
+            aria-labelledby="manager-tab-summary"
+            className="ember-panel results-panel router-directory-panel"
+          >
             <div className="ember-panel-title results-title">
               <div>
-                <h2>{directoryTab === "routers" ? "Routers" : "Builders"}</h2>
+                <h2>Resumo</h2>
                 <p>
-                  Consulte os {directoryTab === "routers" ? "routers master" : "builders"} em que
-                  você tem permissão e copie os dados de acesso quando necessário.
+                  Consulte os routers e Builders em que você tem permissão e copie os dados de
+                  acesso quando necessário.
                 </p>
               </div>
               <Button
                 variant="secondary"
                 type="button"
                 onClick={() =>
-                  void (directoryTab === "routers"
-                    ? loadRouterApplications(true)
-                    : loadBotApplications())
+                  void Promise.all([
+                    ...(directoryTab !== "builders" ? [loadRouterApplications(true)] : []),
+                    ...(directoryTab !== "routers" ? [loadBotApplications()] : []),
+                  ])
                 }
-                disabled={
-                  (directoryTab === "routers"
-                    ? isLoadingRouterApplications
-                    : isLoadingBotApplications) || !isEmbedded
-                }
+                disabled={directoryLoading || !isEmbedded}
               >
-                {(
-                  directoryTab === "routers"
-                    ? isLoadingRouterApplications
-                    : isLoadingBotApplications
-                ) ? (
+                {directoryLoading ? (
                   <LoaderCircle className="spin" size={18} aria-hidden="true" />
                 ) : (
                   <Search size={18} aria-hidden="true" />
@@ -4639,94 +4673,92 @@ export default function CreateTemplatesApp() {
               </div>
             ) : (
               <>
-                <div className="router-directory-toolbar">
-                  <label className="blip-native-field" htmlFor="routerDirectorySearch">
-                    Buscar {directoryTab === "routers" ? "router" : "builder"}
+                <div className="manager-filters">
+                  <label
+                    className="blip-native-field manager-search"
+                    htmlFor="routerDirectorySearch"
+                  >
+                    Buscar bot
                     <input
                       id="routerDirectorySearch"
-                      value={
-                        directoryTab === "routers" ? routerDirectorySearch : builderDirectorySearch
-                      }
-                      onChange={(event) =>
-                        directoryTab === "routers"
-                          ? setRouterDirectorySearch(event.target.value)
-                          : setBuilderDirectorySearch(event.target.value)
-                      }
-                      placeholder={
-                        directoryTab === "routers"
-                          ? "Nome, ID ou número com DDI"
-                          : "Nome ou ID do builder"
-                      }
+                      value={routerDirectorySearch}
+                      onChange={(event) => setRouterDirectorySearch(event.target.value)}
+                      placeholder="Nome, ID ou número com DDI"
                     />
                   </label>
-                  <span className="router-directory-count">
-                    {directoryTab === "routers"
-                      ? filteredDirectoryRouterApplications.length
-                      : filteredDirectoryBuilderApplications.length}{" "}
-                    {directoryTab === "routers" ? "router" : "builder"}
-                    {(directoryTab === "routers"
-                      ? filteredDirectoryRouterApplications.length
-                      : filteredDirectoryBuilderApplications.length) === 1
-                      ? ""
-                      : "s"}
-                  </span>
+                  <label className="blip-native-field">
+                    Tipo de bot
+                    <select
+                      value={directoryTab}
+                      onChange={(event) =>
+                        setDirectoryTab(event.target.value as typeof directoryTab)
+                      }
+                    >
+                      <option value="all">Todos os tipos</option>
+                      <option value="routers">Routers</option>
+                      <option value="builders">Builders</option>
+                    </select>
+                  </label>
+                  <div className="manager-layout-field">
+                    <span>Visualização</span>
+                    <div className="manager-layout" role="group" aria-label="Visualização dos bots">
+                      <Button
+                        size="sm"
+                        variant={directoryLayout === "cards" ? "primary" : "secondary"}
+                        aria-pressed={directoryLayout === "cards"}
+                        onClick={() => setDirectoryLayout("cards")}
+                      >
+                        <LayoutGrid size={16} aria-hidden="true" /> Blocos
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={directoryLayout === "list" ? "primary" : "secondary"}
+                        aria-pressed={directoryLayout === "list"}
+                        onClick={() => setDirectoryLayout("list")}
+                      >
+                        <List size={16} aria-hidden="true" /> Lista
+                      </Button>
+                    </div>
+                  </div>
                 </div>
+                <p className="manager-context">
+                  {directoryApplications.length} bot(s)
+                  {routerDirectorySearch ? " encontrados" : " disponíveis"}
+                </p>
 
-                {directoryTab === "routers" &&
+                {directoryTab !== "builders" &&
                   Object.values(routerPhoneNumbers).some((item) => item.status === "loading") && (
                     <p className="router-directory-progress" role="status">
                       Consultando números do WhatsApp em segundo plano…
                     </p>
                   )}
 
-                {(directoryTab === "routers" ? routerApplicationsError : botApplicationsError) && (
-                  <Feedback
-                    title={`Não foi possível carregar os ${directoryTab === "routers" ? "routers" : "builders"}`}
-                    action={
-                      <Button
-                        onClick={() =>
-                          void (directoryTab === "routers"
-                            ? loadRouterApplications(true)
-                            : loadBotApplications())
-                        }
-                        loading={
-                          directoryTab === "routers"
-                            ? isLoadingRouterApplications
-                            : isLoadingBotApplications
-                        }
-                      >
-                        Tentar novamente
-                      </Button>
-                    }
-                  >
-                    {directoryTab === "routers" ? routerApplicationsError : botApplicationsError}
+                {directoryTab !== "builders" && routerApplicationsError && (
+                  <Feedback title="Não foi possível carregar os routers">
+                    {routerApplicationsError} Use Atualizar para tentar novamente.
+                  </Feedback>
+                )}
+                {directoryTab !== "routers" && botApplicationsError && (
+                  <Feedback title="Não foi possível carregar os Builders">
+                    {botApplicationsError} Use Atualizar para tentar novamente.
                   </Feedback>
                 )}
 
-                {(
-                  directoryTab === "routers"
-                    ? isLoadingRouterApplications
-                    : isLoadingBotApplications
-                ) ? (
+                {directoryLoading ? (
                   <div className="router-picker-empty">
                     <LoaderCircle className="spin" size={20} aria-hidden="true" />
-                    <span>Carregando {directoryTab === "routers" ? "routers" : "builders"}...</span>
+                    <span>Carregando bots…</span>
                   </div>
-                ) : (directoryTab === "routers"
-                    ? filteredDirectoryRouterApplications
-                    : filteredDirectoryBuilderApplications
-                  ).length === 0 ? (
+                ) : directoryApplications.length === 0 ? (
                   <div className="router-picker-empty">
-                    <span>
-                      Nenhum {directoryTab === "routers" ? "router" : "builder"} disponível
-                    </span>
+                    <span>Nenhum bot encontrado</span>
                   </div>
                 ) : (
-                  <div className="router-directory-grid">
-                    {(directoryTab === "routers"
-                      ? filteredDirectoryRouterApplications
-                      : filteredDirectoryBuilderApplications
-                    ).map((application) => {
+                  <div
+                    className={`router-directory-grid ${directoryLayout === "list" ? "manager-directory-list" : ""}`}
+                  >
+                    {directoryApplications.map((application) => {
+                      const isRouter = application.template === "master";
                       const routerUrl = buildRouterUrl(application);
                       const isCopyingKey = routerKeyActionId === application.shortName;
                       const phone = routerPhoneNumbers[application.shortName];
@@ -4758,9 +4790,12 @@ export default function CreateTemplatesApp() {
                             </span>
                             <span className="router-directory-copy">
                               <strong>{application.name}</strong>
+                              {directoryLayout === "list" && (
+                                <small>{isRouter ? "Router" : "Builder"}</small>
+                              )}
                               <span>{application.shortName}</span>
                               {application.tenantId && <small>{application.tenantId}</small>}
-                              {directoryTab === "routers" && (
+                              {isRouter && (
                                 <small className="router-directory-phone">
                                   WhatsApp:{" "}
                                   {phone?.status === "connected"
@@ -4776,9 +4811,9 @@ export default function CreateTemplatesApp() {
                             <ExternalLink size={18} aria-hidden="true" />
                           </a>
                           <div
-                            className={`router-directory-card-actions ${directoryTab === "builders" ? "builders" : ""}`}
+                            className={`router-directory-card-actions ${!isRouter ? "builders" : ""}`}
                           >
-                            {directoryTab === "routers" && (
+                            {isRouter && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -5033,8 +5068,18 @@ export default function CreateTemplatesApp() {
             />
           </section>
         ) : visibleActiveView === "bots" ? (
-          <section className="ember-panel results-panel">
-            <div className="ember-subtabs" role="tablist" aria-label="Tipo de bot para clonar">
+          <section
+            id={`manager-panel-${managerTab}`}
+            role="tabpanel"
+            aria-labelledby={`manager-tab-${managerTab}`}
+            className="ember-panel results-panel"
+          >
+            <div
+              className="ember-subtabs"
+              hidden={managerTab !== "clone"}
+              role="tablist"
+              aria-label="Tipo de bot para clonar"
+            >
               <button
                 type="button"
                 role="tab"
@@ -5057,37 +5102,16 @@ export default function CreateTemplatesApp() {
                 {" "}
                 <Network size={16} aria-hidden="true" /> Router{" "}
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={cloneMode === "bulk"}
-                className={cloneMode === "bulk" ? "active" : ""}
-                onClick={() => changeCloneMode("bulk")}
-                disabled={isPublishingBuilders}
-              >
-                <Layers3 size={16} aria-hidden="true" /> Criação em massa
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={cloneMode === "publication"}
-                className={cloneMode === "publication" ? "active" : ""}
-                onClick={() => changeCloneMode("publication")}
-                disabled={isPublishingBuilders}
-              >
-                <Send size={16} aria-hidden="true" /> Publicação em Massa
-              </button>
             </div>
             <div className="ember-panel-title results-title">
               <div>
                 <h2>
-                  Clone Bots ·{" "}
                   {cloneMode === "builder"
-                    ? "Builder"
+                    ? "Clone Bots · Builder"
                     : cloneMode === "router"
-                      ? "Router"
+                      ? "Clone Bots · Router"
                       : cloneMode === "bulk"
-                        ? "Criação em massa"
+                        ? "Criação em Massa"
                         : "Publicação em Massa"}
                 </h2>
                 <p>

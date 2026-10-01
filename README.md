@@ -6,6 +6,7 @@
 - `src/components/FlowTable.tsx` e `TemplateTable.tsx`: listas adaptadas para desktop e celular.
 - `src/styles/tokens.css`: cores e tokens compartilhados dos temas Blip.
 - `src/styles/ui.css`: estilos dos componentes globais; `blip-app.css` mantém os layouts específicos.
+- `src/styles/bot-manager.css`: abas, filtros, visualização em lista e downloads do Bot Manager, com adaptação para celular.
 - `src/hooks/useTheme.ts` e `src/lib/theme.ts`: preferência de tema aplicada antes da primeira pintura, sem depender do acesso ao armazenamento do iframe.
 - `src/hooks/useModalFocus.ts`: foco, Escape e rolagem dos diálogos.
 - `src/lib/api.ts`: tratamento compartilhado de falhas de rede e respostas inválidas.
@@ -15,9 +16,29 @@ Os testes exigem Node 22.6 ou superior. `npm run test:ui` disponibiliza fixtures
 
 Ferramenta para buscar templates de mensagem WhatsApp em um router BLiP e replicá-los em um ou mais routers destino.
 
+## Bot Manager e Resumo
+
+Abra **Bot Manager** no menu principal. As seis abas reúnem **Resumo**, **Clone Bots**, **Criação em Massa**, **Publicação em Massa**, **Inatividade** e **Baixar Fluxos**.
+
+Em **Bot Manager → Resumo**, consulte os bots acessíveis no contrato atual. **Tipo de bot** inicia em **Todos os tipos** e permite filtrar **Routers** ou **Builders**. Busque por nome ou ID; routers também podem ser encontrados pelo número do WhatsApp com DDI. **Atualizar** refaz a consulta dos tipos escolhidos.
+
+Alterne entre **Blocos** (cartões) e **Lista**. As duas visualizações mantêm as ações de abrir o bot no Portal e copiar **ID** e **Key**. Routers também mostram o estado do WhatsApp e permitem copiar **Número** quando conectado. A abertura no Portal depende do tenant disponível no cadastro do bot.
+
+## Baixar Fluxos
+
+Em **Bot Manager → Baixar Fluxos**, o filtro **Builders** inicia em **Somente do roteador**, usando o roteador de origem selecionado. **Todos com acesso** lista os Builders acessíveis no contrato atual. A busca filtra por nome ou ID do Builder. **Versão do fluxo** inicia em **Rascunho** (`working`); escolha **Publicada** (`published`) para ler os documentos da versão publicada.
+
+- **Baixar JSON** baixa um Builder como `shortName.json`.
+- **Selecionar todos** respeita a busca; seleções ocultas pela busca permanecem marcadas. **Limpar seleção** desmarca todos. Trocar o filtro de Builders limpa a seleção.
+- **Baixar selecionados (.zip)** reúne os Builders selecionados; **Baixar todos (.zip)** reúne todos os Builders do filtro escolhido, incluindo os ocultos pela busca. O arquivo é `fluxos-rascunho.zip` ou `fluxos-publicados.zip`, com um `shortName.json` por Builder.
+
+Cada JSON contém somente o documento `{ flow, configuration, globalActions }`; a key usada para autenticação e os metadados de transporte ficam fora do arquivo. Configuração ou ações globais ausentes são exportadas como `{}`. A exportação usa apenas comandos Blip `get`, sem excluir, gravar ou publicar documentos. Se um bot falhar, os demais continuam: o ZIP inclui somente os bem-sucedidos e a interface identifica os bots excluídos e seus erros. Se todos falharem, nenhum arquivo é gerado.
+
+Os testes usam leituras simuladas e validam o conteúdo dos arquivos JSON e ZIP. A fixture da aplicação completa também usa dados fictícios. A importação desses arquivos no Portal Blip e a entrega efetiva no sistema de arquivos do usuário ainda precisam de validação real.
+
 ## Publicação em Massa
 
-Em **Clone Bots → Publicação em Massa**, selecione quantos Builders quiser pelo modal existente. O filtro padrão mostra os Builders do roteador; **Todos os Builders com acesso** mostra os demais Builders acessíveis no contrato. Routers e bots sem acesso são excluídos, e **Selecionar todos** respeita o filtro e a busca. A seleção desta aba é independente da clonagem e da inatividade.
+Em **Bot Manager → Publicação em Massa**, selecione quantos Builders quiser pelo modal existente. O filtro padrão mostra os Builders do roteador; **Todos os Builders com acesso** mostra os demais Builders acessíveis no contrato. Routers e bots sem acesso são excluídos, e **Selecionar todos** respeita o filtro e a busca. A seleção desta aba é independente da clonagem e da inatividade.
 
 **Publicar N bot(s)** abre a confirmação nativa do Portal Blip e publica o rascunho completo de cada bot, com resultado individual. Cancelar não envia comandos de publicação. Falhas em um destino não interrompem os seguintes. Durante a operação, a seleção e a navegação ficam bloqueadas para preservar os destinos confirmados. Os resultados também ficam em Logs.
 
@@ -31,7 +52,7 @@ Nas novas publicações de Builders (em massa, após salvar inatividade e após 
 
 ## Aba Inatividade
 
-Selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.
+Em **Bot Manager → Inatividade**, selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.
 
 O modal de Builders inicia em **Do roteador** (o roteador de origem selecionado, inicialmente o que abriu a extensão). Ele cruza os serviços retornados por `/api/routers/services` com os Builders acessíveis do contrato. **Todos os Builders com acesso** mostra também os Builders fora desse roteador. **Selecionar todos** marca os Builders exibidos, respeitando o filtro e a busca. Seleções fora do filtro são preservadas e contabilizadas; **Limpar seleção** desmarca todos. O seletor de uma única origem também oferece os dois filtros, mantendo a seleção individual.
 
@@ -62,7 +83,7 @@ A publicação automática aplica as expirações ao runtime já compilado do pr
 
 `blockKeys` usa as chaves do objeto do fluxo, retornadas pela análise, mesmo quando diferem de `block.id`. A resposta inclui a análise atualizada, `updated`, `kept` e `published: false`.
 
-Validação visual isolada: `npm run test:ui -- --port 5175` e abra `http://127.0.0.1:5175/inactivity-ui.html`. Essa fixture usa a aplicação completa, com o seletor real e respostas fictícias do Portal e da API; não consulta nem altera bots reais. A integração com os rascunhos reais ainda requer validação dentro do Portal Blip.
+Validação visual isolada: `npm run test:ui -- --port 5175` e abra `http://127.0.0.1:5175/inactivity-ui.html`. Essa fixture usa a aplicação completa, com as abas do Bot Manager, o seletor real e respostas fictícias do Portal e da API; não consulta nem altera bots reais. Use `http://127.0.0.1:5175/inactivity-ui.html?viewport=390` para conferir a composição em largura de celular. A integração com os rascunhos reais ainda requer validação dentro do Portal Blip.
 
 ## Como rodar
 
@@ -89,6 +110,20 @@ npm run dev
 ### `GET /api/health`
 
 Valida se a API está online.
+
+### `POST /api/builders/export`
+
+Lê os documentos de um Builder usando somente comandos Blip `get`. `builderShortName` e `builderKey` devem corresponder ao mesmo bot. `version` aceita `working` (padrão) ou `published`.
+
+```json
+{
+  "builderShortName": "meu-builder",
+  "builderKey": "Key ...",
+  "version": "working"
+}
+```
+
+A resposta tem `{ builderShortName, version, document: { flow, configuration, globalActions } }`, sem incluir a key de autenticação. A interface grava somente `document` em cada JSON e monta o ZIP no navegador. Fluxo ausente ou inválido e falhas de acesso retornam erro; configuração e ações globais ausentes retornam `{}`.
 
 ### `POST /api/templates/search`
 

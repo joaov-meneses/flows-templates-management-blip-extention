@@ -1,0 +1,154 @@
+.manager-tabs {
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.ember-subtabs.manager-tabs button {
+  min-height: 44px;
+}
+.ember-subtabs[hidden] {
+  display: none;
+}
+.manager-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+.manager-filters > .blip-native-field {
+  flex: 0 1 220px;
+  min-width: 180px;
+}
+.manager-filters > .manager-search {
+  flex: 1 1 280px;
+}
+.manager-layout-field {
+  display: grid;
+  gap: 8px;
+  color: var(--blip-content);
+  font-size: 14px;
+}
+.manager-layout {
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+}
+.manager-layout .blip-button {
+  min-height: 44px;
+}
+.manager-context {
+  margin: 0;
+  color: var(--blip-content-soft);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.router-directory-grid.manager-directory-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.router-directory-grid.manager-directory-list .router-directory-card {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  grid-template-rows: auto;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--blip-border);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 16px 0;
+}
+.manager-directory-list .router-directory-card:last-child {
+  border-bottom: 0;
+}
+.manager-directory-list .router-directory-card-main {
+  min-width: 0;
+}
+.manager-directory-list .router-directory-card-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+.manager-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.manager-download-actions > span {
+  margin-right: auto;
+  font-size: 14px;
+  color: var(--blip-content);
+}
+.manager-download-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.manager-download-list > li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--blip-border);
+}
+.manager-download-list > li:last-child {
+  border-bottom: 0;
+}
+.manager-download-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+.manager-download-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  min-width: 0;
+}
+.manager-download-choice input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--blip-primary);
+}
+.manager-download-choice svg {
+  flex-shrink: 0;
+  color: var(--blip-content-soft);
+}
+.manager-download-choice > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--blip-content);
+  overflow-wrap: anywhere;
+}
+.manager-download-choice small {
+  color: var(--blip-content-soft);
+}
+.manager-download-row > .blip-button {
+  flex-shrink: 0;
+}
+.manager-download-list .blip-feedback {
+  margin-top: 12px;
+}
+@media (max-width: 680px) {
+  .router-directory-panel .results-title,
+  .builder-downloads .results-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .manager-filters > .blip-native-field,
+  .manager-layout-field {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+  .manager-directory-list .router-directory-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manager-download-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .manager-download-actions > span {
+    flex-basis: 100%;
+  }
+}

@@ -4,6 +4,7 @@ export type ActiveView =
   | "flows"
   | "bots"
   | "plugins"
+  | "downloads"
   | "inactivity"
   | "logs";
 export type RouterModal = "source" | "targets" | null;

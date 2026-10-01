@@ -37,11 +37,13 @@ export function InactivityTab({
   onSelect,
   resolveKey,
   embedded,
+  onBusyChange,
 }: {
   applications: PortalApplicationAccount[];
   onSelect: () => void;
   resolveKey: (shortName: string) => Promise<ResolvedRouterKey>;
   embedded: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [bots, setBots] = useState<BotDraft[]>([]);
   const currentBots = useRef(bots);
@@ -50,6 +52,10 @@ export function InactivityTab({
   const [keepExisting, setKeepExisting] = useState(false);
   const [publishAfterSave, setPublishAfterSave] = useState(false);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
   const [confirming, setConfirming] = useState(false);
   const operationLock = useRef(false);
   const [notice, setNotice] = useState("");

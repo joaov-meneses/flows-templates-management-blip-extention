@@ -4,6 +4,7 @@ export type ActivityView =
   | "flows"
   | "bots"
   | "plugins"
+  | "downloads"
   | "inactivity"
   | "logs";
 

@@ -28,6 +28,29 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path === "/api/builders/export") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    if (body.builderShortName === "builder_falha")
+      return Response.json(
+        { error: { message: "Falha simulada de acesso ao fluxo." } },
+        { status: 403 },
+      );
+    return Response.json({
+      builderShortName: body.builderShortName,
+      version: body.version,
+      document: {
+        flow: {
+          start: {
+            id: "start",
+            root: true,
+            $title: body.version === "working" ? "Rascunho fictício" : "Publicado fictício",
+          },
+        },
+        configuration: { fixture: true },
+        globalActions: { $enteringCustomActions: [], $leavingCustomActions: [] },
+      },
+    });
+  }
   if (path === "/api/builders/publish") {
     const body = JSON.parse(String(options?.body || "{}"));
     window.parent.postMessage(

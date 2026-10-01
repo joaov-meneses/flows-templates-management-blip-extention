@@ -18,7 +18,7 @@ async function postJsonInternal<TResponse>(path: string, body: unknown): Promise
   if (!response.ok) {
     const messages: Record<number, string> = {
       401: "A sessão expirou. Abra novamente a extensão pelo Portal Blip.",
-      403: "Você não tem permissão para esta ação. Confira o acesso ao router selecionado.",
+      403: `Você não tem permissão para esta ação. Confira o acesso ao ${path.startsWith("/api/builders/") ? "Builder" : "router"} selecionado.`,
       429: "Muitas solicitações em sequência. Aguarde alguns instantes antes de tentar novamente.",
       502: "O serviço está temporariamente indisponível. Aguarde e tente novamente.",
       503: "O serviço está temporariamente indisponível. Aguarde e tente novamente.",

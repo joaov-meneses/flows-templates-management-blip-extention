@@ -57,6 +57,7 @@ const {
 const { streamOperation } = require("./server/progressStream.cjs");
 const { analyzeInactivity, applyInactivity } = require("./server/inactivityService.cjs");
 const { publishBuilderDraft } = require("./server/builderPublicationService.cjs");
+const { exportBuilderFlow } = require("./server/builderExportService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -75,6 +76,15 @@ app.get("/api/health", (_req, res) => {
 app.post("/api/builders/publish", async (req, res, next) => {
   try {
     res.json(await publishBuilderDraft(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/builders/export", async (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await exportBuilderFlow(req.body || {}));
   } catch (error) {
     next(error);
   }

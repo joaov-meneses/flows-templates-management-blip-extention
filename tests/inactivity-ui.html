@@ -21,7 +21,7 @@
     <iframe
       title="Extensão com dados fictícios"
       src="/inactivity-app.html"
-      style="width: 100%; min-height: 1100px; border: 0"
+      style="width: 100%; height: 900px; border: 0"
     ></iframe>
     <dialog
       aria-labelledby="fixture-alert-title"
@@ -42,6 +42,9 @@
       </form>
     </dialog>
     <script>
+      const fixtureWidth = Number(new URLSearchParams(location.search).get("viewport"));
+      if (fixtureWidth >= 320 && fixtureWidth <= 1920)
+        document.body.style.width = `${fixtureWidth}px`;
       let saves = 0;
       let publications = 0;
       const builders = [
@@ -143,8 +146,10 @@
               },
             };
           else response = { status: "success", resource: {} };
-        } else if (message?.action === "blipEvent:heightChange") return;
-        else return;
+        } else if (message?.action === "blipEvent:heightChange") {
+          if (Number.isFinite(message.content)) frame.style.height = `${message.content}px`;
+          return;
+        } else return;
         event.source.postMessage(
           { trackingProperties: event.data.trackingProperties, response },
           event.origin,
