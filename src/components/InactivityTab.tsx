@@ -370,24 +370,32 @@ export function InactivityTab({
             aria-describedby="inactivity-time-help"
           />
         </label>
-        <label className="inactivity-check">
+        <label className="inactivity-switch blip-switch-option">
           <input
             type="checkbox"
+            role="switch"
             checked={keepExisting}
             onChange={(event) => setKeepExisting(event.target.checked)}
             disabled={busy}
           />
-          Manter tempos já preenchidos
+          <span className="flow-switch-track" aria-hidden="true">
+            <span className="flow-switch-thumb" />
+          </span>
+          <span className="blip-switch-label">Manter tempos já preenchidos</span>
         </label>
-        <label className="inactivity-check">
+        <label className="inactivity-switch blip-switch-option">
           <input
             type="checkbox"
+            role="switch"
             checked={publishAfterSave}
             onChange={(event) => void togglePublication(event.target.checked)}
             disabled={busy}
             aria-describedby="inactivity-publish-help"
           />
-          Publicar automaticamente
+          <span className="flow-switch-track" aria-hidden="true">
+            <span className="flow-switch-thumb" />
+          </span>
+          <span className="blip-switch-label">Publicar automaticamente</span>
         </label>
         <Button
           variant="primary"
