@@ -40,6 +40,7 @@ import { COMMAND_METHODS } from "../lib/blipActions";
 import {
   getAccount,
   getCurrentApplication,
+  getPublicationAuthor,
   sendBlipCommand,
   showBlipAlert,
 } from "../lib/blipProxy";
@@ -3630,6 +3631,18 @@ export default function CreateTemplatesApp() {
     if (!confirmed) return;
 
     setIsBulkCreatingBots(true);
+    let publicationAuthor: string | undefined;
+    if (selectedBuilders.length && bulkPublishAfterClone) {
+      try {
+        publicationAuthor = await getPublicationAuthor();
+      } catch (caughtError) {
+        setError(
+          getErrorMessage(caughtError, "Não foi possível identificar quem está publicando."),
+        );
+        setIsBulkCreatingBots(false);
+        return;
+      }
+    }
     let succeeded = 0;
     let partial = 0;
     let failed = 0;
@@ -3685,6 +3698,7 @@ export default function CreateTemplatesApp() {
             options: botCloneOptions,
             activateBuilder: true,
             publishAfterClone: bulkPublishAfterClone,
+            publicationAuthor,
           });
           const hasErrors = cloneResult.totals.failed > 0 || cloneResult.totals.partial > 0;
           if (hasErrors) partial += 1;

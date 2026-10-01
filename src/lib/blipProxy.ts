@@ -169,6 +169,16 @@ export function getAccount() {
   }) as Promise<GetAccountResponse>;
 }
 
+export async function getPublicationAuthor() {
+  const account = await getAccount();
+  const email = typeof account?.email === "string" ? account.email.trim() : "";
+  if (email.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email))
+    throw new Error(
+      "Não foi possível identificar o e-mail do usuário logado no Portal Blip. Reabra a extensão antes de publicar.",
+    );
+  return email;
+}
+
 export function getCurrentApplication() {
   return sendPortalMessage(BLIP_ACTIONS.GET_APPLICATION, null, {
     responseTimeout: 10000,

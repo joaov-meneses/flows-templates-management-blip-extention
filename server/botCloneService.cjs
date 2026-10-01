@@ -1,4 +1,5 @@
 const { randomUUID } = require("node:crypto");
+const { requirePublicationAuthor } = require("./publicationAuthor.cjs");
 
 const MSGING_COMMANDS_URL = "https://msging.net/commands";
 const CORE_POSTMASTER_TO = "postmaster@msging.net";
@@ -193,29 +194,19 @@ function parseJsonResource(resource, fallback) {
   }
 }
 
-function buildPublicationRecord(sourceLatest, sourceIdentity, index) {
-  const sourcePublication = Array.isArray(sourceLatest?.publications)
-    ? sourceLatest.publications[0]
-    : undefined;
+function buildPublicationRecord(publicationAuthor, index) {
   return {
-    authorIdentity: sourcePublication?.authorIdentity || sourceIdentity,
-    author: sourcePublication?.author || "Templates/Flows Manager",
+    ...requirePublicationAuthor(publicationAuthor),
     publishedAt: new Date().toISOString(),
     index,
   };
 }
 
-async function registerBuilderPublication(
-  sourceRouterKey,
-  targetRouterKey,
-  sourceIdentity,
-  documents,
-) {
-  const [sourceLatestRaw, targetLatestRaw] = await Promise.all([
-    getBucket(sourceRouterKey, "blip_portal:builder_latestpublications"),
-    getBucket(targetRouterKey, "blip_portal:builder_latestpublications"),
-  ]);
-  const sourceLatest = parseJsonResource(sourceLatestRaw, {});
+async function registerBuilderPublication(targetRouterKey, documents, publicationAuthor) {
+  const targetLatestRaw = await getBucket(
+    targetRouterKey,
+    "blip_portal:builder_latestpublications",
+  );
   const targetLatest = parseJsonResource(targetLatestRaw, {});
   const previousPublications = Array.isArray(targetLatest?.publications)
     ? targetLatest.publications
@@ -224,7 +215,7 @@ async function registerBuilderPublication(
     ? targetLatest.lastInsertedIndex
     : 0;
   const nextIndex = lastInsertedIndex + 1;
-  const publication = buildPublicationRecord(sourceLatest, sourceIdentity, nextIndex);
+  const publication = buildPublicationRecord(publicationAuthor, nextIndex);
   const publications = [publication, ...previousPublications].slice(0, 5);
   const isMoreOptionsActive =
     targetLatest?.isMoreOptionsActive === true || previousPublications.length >= 5;
@@ -258,7 +249,7 @@ async function registerBuilderPublication(
   return nextIndex;
 }
 
-async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
+async function publishBuilderClone(sourceRouterKey, targetRouterKey, publicationAuthor) {
   const [sourceIdentity, targetIdentity, sourceRuntime] = await Promise.all([
     getBotIdentity(sourceRouterKey),
     getBotIdentity(targetRouterKey),
@@ -316,10 +307,9 @@ async function publishBuilderClone(sourceRouterKey, targetRouterKey) {
     );
   }
   const publicationIndex = await registerBuilderPublication(
-    sourceRouterKey,
     targetRouterKey,
-    sourceIdentity,
     publishedDocuments,
+    publicationAuthor,
   );
   const verified = await getBuilderRuntime(targetRouterKey);
   if (!verified || verified.Application !== application) {
@@ -1044,6 +1034,7 @@ async function cloneBot(params) {
     options,
     activateBuilder: shouldActivateBuilder,
     publishAfterClone,
+    publicationAuthor,
   } = params || {};
   validateRouterKey(sourceRouterKey, "sourceRouterKey");
   validateRouterKey(targetRouterKey, "targetRouterKey");
@@ -1056,6 +1047,7 @@ async function cloneBot(params) {
   if (selectedSteps.length === 0) {
     throw new InputError("Selecione pelo menos um item para clonar.");
   }
+  const author = publishAfterClone ? requirePublicationAuthor(publicationAuthor) : undefined;
 
   const steps = [];
   if (shouldActivateBuilder) {
@@ -1102,7 +1094,7 @@ async function cloneBot(params) {
       });
     } else {
       try {
-        const detail = await publishBuilderClone(sourceRouterKey, targetRouterKey);
+        const detail = await publishBuilderClone(sourceRouterKey, targetRouterKey, author.author);
         steps.push({ key: "publish", label: "Publicação do fluxo", status: "success", detail });
       } catch (error) {
         steps.push({

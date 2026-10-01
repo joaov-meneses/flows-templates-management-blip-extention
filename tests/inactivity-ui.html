@@ -9,6 +9,14 @@
     <p style="margin: 0; padding: 8px; font: 13px system-ui">
       Validação local · bots e rascunhos fictícios
       <output id="fixture-operations">0 salvamentos · 0 publicações</output>
+      <label>
+        Conta fictícia:
+        <select id="fixture-account">
+          <option value="publisher@example.com">publisher@example.com</option>
+          <option value="other@example.com">other@example.com</option>
+          <option value="">Sem e-mail</option>
+        </select>
+      </label>
     </p>
     <iframe
       title="Extensão com dados fictícios"
@@ -79,7 +87,7 @@
         if (event.data?.fixturePublication) {
           publications++;
           document.querySelector("#fixture-operations").textContent =
-            `${saves} salvamentos · ${publications} publicações solicitadas`;
+            `${saves} salvamentos · ${publications} publicações solicitadas · autor: ${event.data.publicationAuthor || "ausente"}`;
           return;
         }
         if (event.data?.fixtureApply) {
@@ -116,7 +124,10 @@
         } else if (message?.action === "blipEvent:getApplication")
           response = { shortName: "router_test", name: "Router de teste", tenantId: "test" };
         else if (message?.action === "blipEvent:getAccount")
-          response = { identity: "test@example.com" };
+          response = {
+            identity: "test@example.com",
+            email: document.querySelector("#fixture-account").value,
+          };
         else if (message?.action === "blipEvent:sendCommand") {
           const uri = message.content.command.uri;
           if (uri.includes("/users/"))

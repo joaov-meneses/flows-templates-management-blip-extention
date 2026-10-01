@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
 const { confirmBuilderRuntime } = require("./builderRuntimeVerification.cjs");
+const { requirePublicationAuthor } = require("./publicationAuthor.cjs");
 
 const PREFIX = "/buckets/blip_portal:builder_";
 const RUNTIME_URI = "lime://builder.hosting@msging.net/configuration";
@@ -52,7 +53,8 @@ function withoutExpirations(flow, entries) {
 // Inactivity has no effect on compiled actions/outputs. Reuse their published
 // representation only when the draft differs exclusively in eligible expirations.
 // Never claim to compile arbitrary pending Builder changes by replaying old runtime.
-async function publishInactivity(key, flow, entries) {
+async function publishInactivity(key, flow, entries, publicationAuthor) {
+  const author = requirePublicationAuthor(publicationAuthor);
   let published = false;
   try {
     const runtimeResource = await command(key, {
@@ -165,8 +167,7 @@ async function publishInactivity(key, flow, entries) {
       isMoreOptionsActive: latest.isMoreOptionsActive === true || previous.length >= 5,
       publications: [
         {
-          authorIdentity: `${runtime.identifier}@msging.net`,
-          author: "Templates/Flows Manager",
+          ...author,
           publishedAt: new Date().toISOString(),
           index,
         },

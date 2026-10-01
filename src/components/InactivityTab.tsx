@@ -3,7 +3,7 @@ import { ChevronDown, Clock3, Eye, RefreshCw, X } from "lucide-react";
 import { useModalFocus } from "../hooks/useModalFocus";
 import { postJson } from "../lib/api";
 import { recordActivityResult } from "../lib/activityLog";
-import { showBlipAlert } from "../lib/blipProxy";
+import { getPublicationAuthor, showBlipAlert } from "../lib/blipProxy";
 import {
   expirationGroup,
   expirationLabel,
@@ -233,6 +233,7 @@ export function InactivityTab({
     let published = 0;
     let publicationWarnings = 0;
     try {
+      let publicationAuthor: string | undefined;
       if (publishAfterSave) {
         const confirmed = await confirmPublication(
           "Salvar e publicar os fluxos?",
@@ -240,6 +241,7 @@ export function InactivityTab({
           "Salvar e publicar",
         );
         if (!confirmed || !mounted.current) return;
+        publicationAuthor = await getPublicationAuthor();
       }
       setProgress({ processed: 0, total: targets.length });
       for (const [index, bot] of targets.entries()) {
@@ -265,6 +267,7 @@ export function InactivityTab({
             overrides,
             keepExisting,
             publishAfterSave,
+            publicationAuthor,
           });
           saved++;
           updated += response.updated;
@@ -316,6 +319,8 @@ export function InactivityTab({
             `${failed ? `${failed} bot(s) com falha ao salvar. ` : ""}${publicationWarnings ? `${publicationWarnings} bot(s) com aviso de publicação. ` : ""}Confira o aviso em cada bot e atualize a análise antes de tentar novamente.`,
           );
       }
+    } catch (caughtError) {
+      if (mounted.current) setError(messageOf(caughtError));
     } finally {
       operationLock.current = false;
       if (mounted.current) setBusy(false);

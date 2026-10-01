@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
 const { compileBuilderFlow } = require("./builderCompiler.cjs");
 const { confirmBuilderRuntime } = require("./builderRuntimeVerification.cjs");
+const { requirePublicationAuthor } = require("./publicationAuthor.cjs");
 
 const PREFIX = "/buckets/blip_portal:builder_";
 const CONFIGURATIONS = "postmaster@configurations.msging.net";
@@ -54,7 +55,7 @@ async function writeBucket(key, name, resource) {
     throw new Error("A leitura após publicar não confirmou os documentos do Builder.");
 }
 
-async function publishBuilderDraft({ builderKey, builderShortName } = {}) {
+async function publishBuilderDraft({ builderKey, builderShortName, publicationAuthor } = {}) {
   if (
     typeof builderShortName !== "string" ||
     !/^[a-z0-9][a-z0-9_-]*$/i.test(builderShortName) ||
@@ -63,6 +64,7 @@ async function publishBuilderDraft({ builderKey, builderShortName } = {}) {
     Buffer.from(builderKey.slice(4), "base64").toString("utf8").split(":")[0] !== builderShortName
   )
     throw new BuilderPublicationInputError("Selecione um Builder com ID e key correspondentes.");
+  const author = requirePublicationAuthor(publicationAuthor);
 
   const admin = await command(
     builderKey,
@@ -209,8 +211,7 @@ async function publishBuilderDraft({ builderKey, builderShortName } = {}) {
         {
           index,
           publishedAt: new Date().toISOString(),
-          author: "Templates/Flows Manager",
-          authorIdentity: `${builderShortName}@msging.net`,
+          ...author,
         },
         ...previous,
       ].slice(0, 5),

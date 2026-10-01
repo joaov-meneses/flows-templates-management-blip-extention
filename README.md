@@ -27,6 +27,8 @@ Blocos de agente IA com mudanças em configurações externas exigem publicaçã
 
 A confirmação do runtime, tanto na publicação em massa quanto na publicação automática de inatividade, compara o conteúdo completo do JSON, ignorando apenas sua formatação e a ordem das propriedades. Se a leitura ainda retornar uma versão diferente, faz até cinco consultas, com pausas progressivas que somam 5,5 segundos, sem reenviar o comando de publicação. Se nenhuma leitura confirmar o conteúdo esperado, mantém o resultado como não confirmado e não registra o histórico como sucesso.
 
+Nas novas publicações de Builders (em massa, após salvar inatividade e após criação/clonagem), a extensão consulta `getAccount` do Portal após a confirmação e envia o e-mail atual em `publicationAuthor`. O histórico grava esse e-mail em `author` e `authorIdentity`. Sem um e-mail válido, a operação é interrompida antes de gravar, criar ou publicar bots. Salvamentos sem publicação não exigem essa informação. Registros anteriores permanecem como estavam; a clonagem não atribui a nova publicação ao autor antigo da origem. Chamadas diretas a essas APIs também precisam enviar `publicationAuthor` quando houver publicação.
+
 ## Aba Inatividade
 
 Selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.

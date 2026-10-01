@@ -1,5 +1,6 @@
 const { randomUUID, createHash } = require("node:crypto");
 const { publishInactivity } = require("./inactivityPublicationService.cjs");
+const { requirePublicationAuthor } = require("./publicationAuthor.cjs");
 
 const WORKING_FLOW_URI = "/buckets/blip_portal:builder_working_flow";
 const SKIP_BLOCKS = ["onboarding", "fallback", "error"];
@@ -107,6 +108,7 @@ async function applyInactivity({
   overrides = {},
   keepExisting = false,
   publishAfterSave = false,
+  publicationAuthor,
 } = {}) {
   validateMinutes(minutes);
   if (
@@ -127,6 +129,9 @@ async function applyInactivity({
   ) {
     throw new InactivityInputError("Opções de inatividade inválidas.");
   }
+  // Resolve authorship before saving the draft, so an invalid author cannot leave
+  // a partially applied Save and publish operation.
+  const author = publishAfterSave ? requirePublicationAuthor(publicationAuthor) : undefined;
   const selected = new Set(blockKeys);
   for (const [key, value] of Object.entries(overrides)) {
     if (!selected.has(key))
@@ -172,7 +177,7 @@ async function applyInactivity({
     }
   }
   const publication = publishAfterSave
-    ? await publishInactivity(builderKey, flow, entries)
+    ? await publishInactivity(builderKey, flow, entries, author.author)
     : { published: false };
   return { ...describeFlow(flow), updated, kept, ...publication };
 }

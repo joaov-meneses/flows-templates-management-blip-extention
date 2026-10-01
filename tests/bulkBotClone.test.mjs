@@ -85,6 +85,7 @@ test("criação em massa ativa Builder, copia todos os JSONs e confirma o runtim
     options: { flow: true },
     activateBuilder: true,
     publishAfterClone: true,
+    publicationAuthor: "publisher@example.com",
   });
 
   assert.equal(result.totals.requested, 3);
@@ -108,7 +109,15 @@ test("criação em massa ativa Builder, copia todos os JSONs e confirma o runtim
   ]);
   assert.equal(
     targetBuckets.get("blip_portal:builder_latestpublications").publications[0].author,
-    "Autora de origem",
+    "publisher@example.com",
+  );
+  assert.equal(
+    targetBuckets.get("blip_portal:builder_latestpublications").publications[0].authorIdentity,
+    "publisher@example.com",
+  );
+  assert.deepEqual(
+    sourceBuckets.get("blip_portal:builder_latestpublications"),
+    sourceLatestPublications,
   );
   assert.equal(result.steps.at(-1).detail.verified, true);
   assert.equal(result.steps.at(-1).detail.publicationIndex, 1);

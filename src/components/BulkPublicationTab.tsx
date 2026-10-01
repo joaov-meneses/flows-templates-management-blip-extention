@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Bot, Send, X } from "lucide-react";
 import { postJson } from "../lib/api";
-import { showBlipAlert } from "../lib/blipProxy";
+import { getPublicationAuthor, showBlipAlert } from "../lib/blipProxy";
 import { recordActivityResult } from "../lib/activityLog";
 import type { PortalApplicationAccount, ResolvedRouterKey } from "../types/templates";
 import { Button } from "./ui/Button";
@@ -56,6 +56,7 @@ export function BulkPublicationTab({
         buttons: { cancel: "Cancelar", confirm: "Publicar fluxos" },
       });
       if (!confirmed) return;
+      const publicationAuthor = await getPublicationAuthor();
       setConfirming(false);
       setResults({});
       setSummary("");
@@ -71,6 +72,7 @@ export function BulkPublicationTab({
           result = await postJson<PublicationResult>("/api/builders/publish", {
             builderShortName: application.shortName,
             builderKey: key,
+            publicationAuthor,
           });
           if (
             result.builderShortName !== application.shortName ||

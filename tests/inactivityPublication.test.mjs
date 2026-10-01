@@ -3,6 +3,7 @@ import test from "node:test";
 import service from "../server/inactivityService.cjs";
 
 const key = "Key test-only";
+const publicationAuthor = "publisher@example.com";
 const prefix = "/buckets/blip_portal:builder_";
 const runtimeUri = "lime://builder.hosting@msging.net/configuration";
 function flow() {
@@ -100,6 +101,7 @@ async function apply(publishAfterSave = true) {
     minutes: 25,
     blockKeys: ["eligible"],
     publishAfterSave,
+    publicationAuthor,
   });
 }
 
@@ -146,7 +148,9 @@ test("publicação automática atualiza runtime, documento e histórico, preserv
   assert.equal(latest.lastInsertedIndex, 7);
   assert.equal(latest.publications.length, 5);
   assert.equal(latest.isMoreOptionsActive, true);
-  assert.equal(latest.publications[0].author, "Templates/Flows Manager");
+  assert.equal(latest.publications[0].author, publicationAuthor);
+  assert.equal(latest.publications[0].authorIdentity, publicationAuthor);
+  assert.deepEqual(latest.publications[1], { index: 6 });
   assert.deepEqual(
     store.get(prefix + "latestpublications:7").flow,
     store.get(prefix + "working_flow"),

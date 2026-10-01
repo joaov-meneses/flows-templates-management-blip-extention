@@ -30,7 +30,10 @@ window.fetch = async (input, options) => {
   const path = String(input);
   if (path === "/api/builders/publish") {
     const body = JSON.parse(String(options?.body || "{}"));
-    window.parent.postMessage({ fixturePublication: true }, location.origin);
+    window.parent.postMessage(
+      { fixturePublication: true, publicationAuthor: body.publicationAuthor },
+      location.origin,
+    );
     await new Promise((resolve) => window.setTimeout(resolve, 200));
     return Response.json({
       builderShortName: body.builderShortName,

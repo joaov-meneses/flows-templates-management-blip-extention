@@ -4,6 +4,7 @@ import publication from "../server/builderPublicationService.cjs";
 import compiler from "../server/builderCompiler.cjs";
 
 const builderShortName = "builder-test";
+const publicationAuthor = "publisher@example.com";
 const builderKey = `Key ${Buffer.from(`${builderShortName}:test-secret`).toString("base64")}`;
 const prefix = "/buckets/blip_portal:builder_";
 const runtimeUri = "lime://take.builder.hosting@msging.net/configuration";
@@ -153,7 +154,8 @@ function mockBuilder(t, options = {}) {
   });
   return { store, commands, originalRuntime, flow };
 }
-const publish = () => publication.publishBuilderDraft({ builderKey, builderShortName });
+const publish = () =>
+  publication.publishBuilderDraft({ builderKey, builderShortName, publicationAuthor });
 
 test("confirma o runtime com JSON equivalente mesmo quando a Blip muda a formatação e a ordem dos campos", async (t) => {
   mockBuilder(t, {
@@ -253,6 +255,12 @@ test("publica o rascunho completo, incluindo blocos e mensagens novos, sem reuti
   assert.deepEqual(store.get(prefix + "published_flow"), flow);
   assert.deepEqual(store.get(prefix + "latestpublications:6").flow, flow);
   assert.equal(store.get(prefix + "latestpublications").publications.length, 5);
+  assert.equal(store.get(prefix + "latestpublications").publications[0].author, publicationAuthor);
+  assert.equal(
+    store.get(prefix + "latestpublications").publications[0].authorIdentity,
+    publicationAuthor,
+  );
+  assert.deepEqual(store.get(prefix + "latestpublications").publications[1], { index: 5 });
   assert.ok(
     commands.every((command) => command.method !== "set" || !command.uri.includes("working_")),
   );
