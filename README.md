@@ -15,6 +15,35 @@ Os testes exigem Node 22.6 ou superior. `npm run test:ui` disponibiliza fixtures
 
 Ferramenta para buscar templates de mensagem WhatsApp em um router BLiP e replicá-los em um ou mais routers destino.
 
+## Aba Inatividade
+
+Selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.
+
+A regra é a mesma de `src/app/Features/SetInactivity/index.ts` do Blip Addons 2: percorre os blocos do fluxo, ignora IDs `onboarding`, `fallback` e `error`, considera a **primeira** ação com `input` em `$contentActions` e exige `!input.bypass`. A contagem considera somente esses blocos elegíveis. Os blocos restantes e os demais campos do JSON são preservados.
+
+O resumo mostra quantos bots e blocos têm cada tempo, incluindo os sem inatividade. Um bot pode participar de vários grupos. Clique em um bot para abrir os detalhes e em um tempo para listar os blocos, pesquisar por nome/ID, desmarcar blocos ou preparar tempos individuais. Todos os bots escolhidos e seus blocos elegíveis começam selecionados. Adicionar outro bot à seleção preserva as edições preparadas dos bots que permanecem na lista.
+
+Informe o tempo global em minutos, maior que zero e menor que 1380, como no plugin. A conversão gravada também é a do plugin: `${Math.floor(minutos / 60)}:${minutos % 60}`. Um tempo individual preenchido tem prioridade sobre o global; vazio usa o global. **Manter tempos já preenchidos** preserva qualquer `input.expiration` já preenchido, inclusive quando há um tempo individual preparado.
+
+**Salvar** atualiza exclusivamente `/buckets/blip_portal:builder_working_flow`. Não altera documentos publicados, configuração, ações globais, histórico de publicações ou runtime. A API relê o rascunho antes de gravar e bloqueia a operação se ele mudou desde a análise (HTTP 409). Depois da escrita, uma nova leitura confirma o JSON salvo. Em caso de falha ou resposta incerta, use **Atualizar** no bot para conferir o rascunho antes de repetir; essa ação refaz a seleção de todos os blocos e limpa os tempos individuais desse bot. As gravações são independentes por bot, sem transação entre destinos.
+
+`POST /api/inactivity/analyze` recebe `{ "builderKey": "Key ..." }` e retorna revisão, contagens e blocos elegíveis. `POST /api/inactivity/apply` recebe:
+
+```json
+{
+  "builderKey": "Key ...",
+  "revision": "sha256 retornado pela análise",
+  "minutes": 10,
+  "blockKeys": ["id-do-bloco"],
+  "overrides": { "id-do-bloco": 15 },
+  "keepExisting": false
+}
+```
+
+`blockKeys` usa as chaves do objeto do fluxo, retornadas pela análise, mesmo quando diferem de `block.id`. A resposta inclui a análise atualizada, `updated`, `kept` e `published: false`.
+
+Validação visual isolada: `npm run test:ui -- --port 5175` e abra `http://127.0.0.1:5175/inactivity-ui.html`. Essa fixture usa a aplicação completa, com o seletor real e respostas fictícias do Portal e da API; não consulta nem altera bots reais. A integração com os rascunhos reais ainda requer validação dentro do Portal Blip.
+
 ## Como rodar
 
 ```bash

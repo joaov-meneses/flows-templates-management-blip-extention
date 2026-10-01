@@ -55,6 +55,7 @@ const {
   cloneRouterResources,
 } = require("./server/routerResourceService.cjs");
 const { streamOperation } = require("./server/progressStream.cjs");
+const { analyzeInactivity, applyInactivity } = require("./server/inactivityService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -68,6 +69,21 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "create-templates-api",
   });
+});
+
+app.post("/api/inactivity/analyze", async (req, res, next) => {
+  try {
+    res.json(await analyzeInactivity(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+app.post("/api/inactivity/apply", async (req, res, next) => {
+  try {
+    res.json(await applyInactivity(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/routers/whatsapp-number", async (req, res, next) => {

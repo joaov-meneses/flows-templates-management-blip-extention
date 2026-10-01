@@ -1,4 +1,11 @@
-export type ActivityView = "routers" | "templates" | "flows" | "bots" | "plugins" | "logs";
+export type ActivityView =
+  | "routers"
+  | "templates"
+  | "flows"
+  | "bots"
+  | "plugins"
+  | "inactivity"
+  | "logs";
 
 export type ActivityEntry = {
   id: string;

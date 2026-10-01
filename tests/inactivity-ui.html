@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inatividade · dados fictícios</title>
+  </head>
+  <body style="margin: 0">
+    <p style="margin: 0; padding: 8px; font: 13px system-ui">
+      Validação local · bots e rascunhos fictícios
+    </p>
+    <iframe
+      title="Extensão com dados fictícios"
+      src="/inactivity-app.html"
+      style="width: 100%; min-height: 1100px; border: 0"
+    ></iframe>
+    <script>
+      const builders = [
+        {
+          shortName: "builder_agendamento",
+          name: "Agendamento",
+          template: "builder",
+          hasPermission: true,
+          tenantId: "test",
+        },
+        {
+          shortName: "builder_suporte",
+          name: "Suporte",
+          template: "builder",
+          hasPermission: true,
+          tenantId: "test",
+        },
+        {
+          shortName: "builder_falha",
+          name: "Falha de leitura",
+          template: "builder",
+          hasPermission: true,
+          tenantId: "test",
+        },
+        {
+          shortName: "router_test",
+          name: "Router não deve aparecer",
+          template: "master",
+          hasPermission: true,
+          tenantId: "test",
+        },
+        {
+          shortName: "sem_acesso",
+          name: "Sem acesso",
+          template: "builder",
+          hasPermission: false,
+          tenantId: "test",
+        },
+      ];
+      window.addEventListener("message", (event) => {
+        const frame = document.querySelector("iframe");
+        if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+        const message = event.data?.message;
+        let response;
+        if (message?.action === "blipEvent:getApplication")
+          response = { shortName: "router_test", name: "Router de teste", tenantId: "test" };
+        else if (message?.action === "blipEvent:getAccount")
+          response = { identity: "test@example.com" };
+        else if (message?.action === "blipEvent:sendCommand") {
+          const uri = message.content.command.uri;
+          if (uri.includes("/users/"))
+            response = { status: "success", resource: { roleId: "admin" } };
+          else if (uri.endsWith("/applications") || uri.startsWith("/applications?"))
+            response = { status: "success", resource: { items: builders } };
+          else if (uri.startsWith("/applications/"))
+            response = {
+              status: "success",
+              resource: {
+                shortName: uri.split("/").pop().split("@")[0],
+                accessKey: btoa("fake-local-key"),
+              },
+            };
+          else response = { status: "success", resource: {} };
+        } else if (message?.action === "blipEvent:heightChange") return;
+        else return;
+        event.source.postMessage(
+          { trackingProperties: event.data.trackingProperties, response },
+          event.origin,
+        );
+      });
+    </script>
+  </body>
+</html>

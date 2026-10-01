@@ -1,0 +1,209 @@
+.inactivity-panel {
+  display: grid;
+  gap: 18px;
+}
+.inactivity-panel h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--blip-content);
+}
+.inactivity-controls,
+.inactivity-detail-tools {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.inactivity-controls > .blip-native-field {
+  flex: 0 1 220px;
+}
+.inactivity-controls > .blip-button {
+  margin-left: auto;
+}
+.inactivity-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  color: var(--blip-content);
+  font-size: 14px;
+}
+.inactivity-panel input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--blip-primary);
+}
+.inactivity-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--blip-content-soft);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.inactivity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  padding: 12px 0;
+  border-block: 1px solid var(--blip-border);
+}
+.inactivity-bot-list {
+  display: grid;
+}
+.inactivity-bot-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px 14px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--blip-border);
+}
+.inactivity-bot-selection {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.inactivity-bot-details {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  text-align: left;
+  color: var(--blip-content);
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  border-radius: var(--blip-radius-sm);
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.inactivity-bot-details:hover:not(:disabled) {
+  background: var(--blip-row-hover);
+}
+.inactivity-bot-details:disabled {
+  cursor: default;
+}
+.inactivity-bot-details > span {
+  color: var(--blip-content-soft);
+  font-size: 13px;
+}
+.inactivity-bot-details .inactivity-detail-link {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--blip-primary);
+}
+.inactivity-bot-feedback {
+  grid-column: 1 / -1;
+}
+.inactivity-saved {
+  margin: 0;
+  font-size: 13px;
+  color: var(--blip-success);
+}
+.inactivity-distribution ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+}
+.inactivity-distribution li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--blip-border-soft);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.inactivity-distribution li > span {
+  color: var(--blip-content-soft);
+}
+.inactivity-details-modal {
+  width: min(900px, 100%);
+}
+.inactivity-detail-tools > .blip-native-field {
+  flex: 1 1 240px;
+}
+.inactivity-groups {
+  display: grid;
+}
+.inactivity-group-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 4px;
+  color: var(--blip-content);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--blip-border);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.inactivity-group-toggle:hover {
+  background: var(--blip-row-hover);
+}
+.inactivity-group-toggle[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.inactivity-block-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--blip-border-soft);
+}
+.inactivity-block-check {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.inactivity-block-check > span {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.inactivity-block-check span span {
+  font-size: 13px;
+  color: var(--blip-content-soft);
+}
+.inactivity-block-time input {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.inactivity-panel input[aria-invalid="true"] {
+  border-color: var(--blip-danger);
+}
+@media (max-width: 640px) {
+  .inactivity-controls > .blip-native-field,
+  .inactivity-controls > .blip-button {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .inactivity-bot-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .inactivity-bot-row > .blip-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .inactivity-block-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inactivity-distribution li {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+  .inactivity-block-time {
+    margin-left: 30px;
+  }
+}

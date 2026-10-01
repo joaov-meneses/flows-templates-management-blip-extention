@@ -17,6 +17,8 @@ dist-ssr
 .vite
 .cache
 coverage
+# Local UI review captures
+.impeccable/review/
 *.tsbuildinfo
 *.local
 .local/

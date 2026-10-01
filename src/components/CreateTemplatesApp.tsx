@@ -7,6 +7,7 @@ import {
   Check,
   CheckSquare,
   Clipboard,
+  Clock3,
   CopyPlus,
   Eraser,
   Eye,
@@ -51,6 +52,7 @@ import { StatusBadge } from "./ui/StatusBadge";
 import { SelectionBar } from "./ui/SelectionBar";
 import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
+import { InactivityTab } from "./InactivityTab";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
 import {
@@ -154,6 +156,7 @@ const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
   flows: "Flows",
   bots: "Clone Bots",
   plugins: "Plugins Manager",
+  inactivity: "Inatividade",
   logs: "Logs",
 };
 const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
@@ -809,7 +812,13 @@ export default function CreateTemplatesApp() {
   );
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
-  const [botPicker, setBotPicker] = useState<"source" | "target" | null>(null);
+  const [botPicker, setBotPicker] = useState<"source" | "target" | "inactivity" | null>(null);
+  const [inactivityApplications, setInactivityApplications] = useState<PortalApplicationAccount[]>(
+    [],
+  );
+  const [inactivityPickerSelection, setInactivityPickerSelection] = useState<Set<string>>(
+    new Set(),
+  );
   const [isResolvingBotSourceKey, setIsResolvingBotSourceKey] = useState(false);
   const [isResolvingBotTargetKey, setIsResolvingBotTargetKey] = useState(false);
   const [botCloneOptions, setBotCloneOptions] =
@@ -1172,37 +1181,75 @@ export default function CreateTemplatesApp() {
     (sourceRouterKey.trim() ? "Router configurado" : "Nenhum router selecionado");
   const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
+  const pickerIsBuilder = botPicker === "inactivity" || cloneMode === "builder";
+  const pickerApplications =
+    botPicker === "inactivity"
+      ? botApplications.filter(
+          (application) =>
+            !botTargetSearch.trim() ||
+            `${application.name} ${application.shortName}`
+              .toLowerCase()
+              .includes(botTargetSearch.trim().toLowerCase()),
+        )
+      : botPicker === "source"
+        ? filteredBotSourceApplications
+        : filteredBotTargetApplications;
+  const pickerSelection =
+    botPicker === "inactivity"
+      ? inactivityPickerSelection
+      : pickerIsBuilder
+        ? builderTargetPickerSelection
+        : routerTargetPickerSelection;
+  const setPickerSelection =
+    botPicker === "inactivity"
+      ? setInactivityPickerSelection
+      : pickerIsBuilder
+        ? setBuilderTargetPickerSelection
+        : setRouterTargetPickerSelection;
+
+  function confirmInactivityBots() {
+    setInactivityApplications(
+      botApplications.filter((application) => inactivityPickerSelection.has(application.shortName)),
+    );
+    setBotPicker(null);
+  }
+
   const headerCopy =
-    visibleActiveView === "routers"
+    visibleActiveView === "inactivity"
       ? {
-          title: "Bots",
-          description: "Routers e builders aos quais você tem acesso no Portal BLiP",
+          title: "Inatividade",
+          description: "Consulta e atualização da inatividade nos rascunhos dos Builders",
         }
-      : visibleActiveView === "templates"
+      : visibleActiveView === "routers"
         ? {
-            title: "Templates",
-            description: "Replicação de templates entre routers BLiP",
+            title: "Bots",
+            description: "Routers e builders aos quais você tem acesso no Portal BLiP",
           }
-        : visibleActiveView === "flows"
+        : visibleActiveView === "templates"
           ? {
-              title: "Flows",
-              description: "Consulta, visualização e cópia de flows entre routers BLiP",
+              title: "Templates",
+              description: "Replicação de templates entre routers BLiP",
             }
-          : visibleActiveView === "bots"
+          : visibleActiveView === "flows"
             ? {
-                title: "Clone Bots",
-                description:
-                  "Copie configurações de builders ou de routers entre bots do contrato atual",
+                title: "Flows",
+                description: "Consulta, visualização e cópia de flows entre routers BLiP",
               }
-            : visibleActiveView === "plugins"
+            : visibleActiveView === "bots"
               ? {
-                  title: "Plugins Manager",
-                  description: "Gerenciamento e cópia de plugins entre routers BLiP",
+                  title: "Clone Bots",
+                  description:
+                    "Copie configurações de builders ou de routers entre bots do contrato atual",
                 }
-              : {
-                  title: "Logs",
-                  description: "Requisições e resultados desta sessão da extensão",
-                };
+              : visibleActiveView === "plugins"
+                ? {
+                    title: "Plugins Manager",
+                    description: "Gerenciamento e cópia de plugins entre routers BLiP",
+                  }
+                : {
+                    title: "Logs",
+                    description: "Requisições e resultados desta sessão da extensão",
+                  };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -3210,6 +3257,7 @@ export default function CreateTemplatesApp() {
       !isEmbedded ||
       !(
         visibleActiveView === "bots" ||
+        visibleActiveView === "inactivity" ||
         (visibleActiveView === "routers" && directoryTab === "builders")
       )
     )
@@ -4302,6 +4350,14 @@ export default function CreateTemplatesApp() {
             <ScrollText size={18} aria-hidden="true" />
             Logs
           </button>
+          <button
+            className={visibleActiveView === "inactivity" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("inactivity")}
+            aria-current={visibleActiveView === "inactivity" ? "page" : undefined}
+          >
+            <Clock3 size={18} aria-hidden="true" /> Inatividade
+          </button>
         </nav>
       </aside>
 
@@ -4315,6 +4371,7 @@ export default function CreateTemplatesApp() {
           </div>
           <div className="ember-header-actions">
             {visibleActiveView !== "bots" &&
+              visibleActiveView !== "inactivity" &&
               visibleActiveView !== "routers" &&
               visibleActiveView !== "logs" && (
                 <div className="router-summary">
@@ -4422,7 +4479,23 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
-        {visibleActiveView === "routers" ? (
+        <div hidden={visibleActiveView !== "inactivity"}>
+          <InactivityTab
+            applications={inactivityApplications}
+            resolveKey={loadRouterKey}
+            embedded={isEmbedded}
+            onSelect={() => {
+              setError("");
+              setBotTargetSearch("");
+              setInactivityPickerSelection(
+                new Set(inactivityApplications.map((application) => application.shortName)),
+              );
+              setBotPicker("inactivity");
+              if (!botApplications.length) void loadBotApplications();
+            }}
+          />
+        </div>
+        {visibleActiveView === "inactivity" ? null : visibleActiveView === "routers" ? (
           <section className="ember-panel results-panel router-directory-panel">
             <div className="ember-subtabs" role="tablist" aria-label="Tipos de bots">
               <button
@@ -7445,13 +7518,21 @@ export default function CreateTemplatesApp() {
               <div className="ember-modal-header">
                 <div>
                   <h2 id="bot-picker-title">
-                    {cloneMode === "builder" ? "Builder" : "Router"} de{" "}
-                    {botPicker === "source" ? "origem" : "destino"}
+                    {botPicker === "inactivity" ? (
+                      "Selecionar Builders para inatividade"
+                    ) : (
+                      <>
+                        {pickerIsBuilder ? "Builder" : "Router"} de{" "}
+                        {botPicker === "source" ? "origem" : "destino"}
+                      </>
+                    )}
                   </h2>
                   <p>
-                    {botPicker === "target"
-                      ? `Selecione um ou mais ${cloneMode === "builder" ? "builders" : "routers"} de destino do contrato atual.`
-                      : `Selecione um ${cloneMode === "builder" ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
+                    {botPicker === "inactivity"
+                      ? "Selecione os Builders do contrato. Os rascunhos serão analisados após confirmar."
+                      : botPicker !== "source"
+                        ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
+                        : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
                   </p>
                 </div>
                 <Button
@@ -7468,7 +7549,7 @@ export default function CreateTemplatesApp() {
                 {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
                 <div className="router-picker-toolbar">
                   <label className="blip-native-field" htmlFor="builderPickerSearch">
-                    Buscar {cloneMode === "builder" ? "builder" : "router"}
+                    Buscar {pickerIsBuilder ? "builder" : "router"}
                     <input
                       id="builderPickerSearch"
                       autoFocus
@@ -7478,67 +7559,43 @@ export default function CreateTemplatesApp() {
                           ? setBotSourceSearch(event.target.value)
                           : setBotTargetSearch(event.target.value)
                       }
-                      placeholder={`Nome ou ID do ${cloneMode === "builder" ? "builder" : "router"}`}
+                      placeholder={`Nome ou ID do ${pickerIsBuilder ? "builder" : "router"}`}
                     />
                   </label>
                   <Button
                     variant="secondary"
                     onClick={() =>
-                      void (cloneMode === "builder"
-                        ? loadBotApplications()
-                        : loadRouterApplications())
+                      void (pickerIsBuilder ? loadBotApplications() : loadRouterApplications())
                     }
                     loading={
-                      cloneMode === "builder"
-                        ? isLoadingBotApplications
-                        : isLoadingRouterApplications
+                      pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications
                     }
                   >
                     <Search size={18} aria-hidden="true" /> Atualizar
                   </Button>
                 </div>
                 <div className="router-picker-meta">
-                  {
-                    (botPicker === "source"
-                      ? filteredBotSourceApplications
-                      : filteredBotTargetApplications
-                    ).length
-                  }{" "}
-                  {cloneMode === "builder" ? "builders" : "routers"} disponíveis
-                  {botPicker === "target"
-                    ? ` · ${cloneMode === "builder" ? builderTargetPickerSelection.size : routerTargetPickerSelection.size} selecionado(s)`
-                    : ""}
+                  {pickerApplications.length} {pickerIsBuilder ? "builders" : "routers"} disponíveis
+                  {botPicker !== "source" ? ` · ${pickerSelection.size} selecionado(s)` : ""}
                 </div>
                 <div className="router-application-list">
-                  {(
-                    cloneMode === "builder" ? isLoadingBotApplications : isLoadingRouterApplications
-                  ) ? (
+                  {(pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications) ? (
                     <div className="router-picker-empty">
                       <LoaderCircle className="spin" size={18} /> Carregando{" "}
-                      {cloneMode === "builder" ? "builders" : "routers"}…
+                      {pickerIsBuilder ? "builders" : "routers"}…
                     </div>
-                  ) : (cloneMode === "builder" ? botApplicationsError : routerApplicationsError) ? (
+                  ) : (pickerIsBuilder ? botApplicationsError : routerApplicationsError) ? (
                     <Feedback>
-                      {cloneMode === "builder" ? botApplicationsError : routerApplicationsError}
+                      {pickerIsBuilder ? botApplicationsError : routerApplicationsError}
                     </Feedback>
-                  ) : (botPicker === "source"
-                      ? filteredBotSourceApplications
-                      : filteredBotTargetApplications
-                    ).length === 0 ? (
+                  ) : pickerApplications.length === 0 ? (
                     <div className="router-picker-empty">
-                      Nenhum {cloneMode === "builder" ? "builder" : "router"} encontrado.
+                      Nenhum {pickerIsBuilder ? "builder" : "router"} encontrado.
                     </div>
                   ) : (
-                    (botPicker === "source"
-                      ? filteredBotSourceApplications
-                      : filteredBotTargetApplications
-                    ).map((application) => {
-                      const isMultiTarget = botPicker === "target";
-                      const selected = (
-                        cloneMode === "builder"
-                          ? builderTargetPickerSelection
-                          : routerTargetPickerSelection
-                      ).has(application.shortName);
+                    pickerApplications.map((application) => {
+                      const isMultiTarget = botPicker !== "source";
+                      const selected = pickerSelection.has(application.shortName);
                       const content = (
                         <>
                           <span className="router-application-avatar">
@@ -7563,9 +7620,7 @@ export default function CreateTemplatesApp() {
                             type="checkbox"
                             checked={selected}
                             onChange={(event) =>
-                              (cloneMode === "builder"
-                                ? setBuilderTargetPickerSelection
-                                : setRouterTargetPickerSelection)((current) => {
+                              setPickerSelection((current) => {
                                 const next = new Set(current);
                                 if (event.target.checked) next.add(application.shortName);
                                 else next.delete(application.shortName);
@@ -7598,20 +7653,23 @@ export default function CreateTemplatesApp() {
                 >
                   Cancelar
                 </Button>
-                {botPicker === "target" && (
+                {botPicker !== "source" && (
                   <Button
                     variant="primary"
                     onClick={() =>
-                      void (cloneMode === "builder"
-                        ? handleConfirmBuilderTargets()
-                        : handleConfirmRouterTargets())
+                      void (botPicker === "inactivity"
+                        ? confirmInactivityBots()
+                        : pickerIsBuilder
+                          ? handleConfirmBuilderTargets()
+                          : handleConfirmRouterTargets())
                     }
                     loading={isResolvingBotTargetKey}
+                    disabled={
+                      pickerSelection.size === 0 ||
+                      (pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications)
+                    }
                   >
-                    <Check size={18} aria-hidden="true" /> Confirmar{" "}
-                    {cloneMode === "builder"
-                      ? builderTargetPickerSelection.size
-                      : routerTargetPickerSelection.size}
+                    <Check size={18} aria-hidden="true" /> Confirmar {pickerSelection.size}
                   </Button>
                 )}
               </div>

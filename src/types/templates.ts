@@ -1,4 +1,11 @@
-export type ActiveView = "routers" | "templates" | "flows" | "bots" | "plugins" | "logs";
+export type ActiveView =
+  | "routers"
+  | "templates"
+  | "flows"
+  | "bots"
+  | "plugins"
+  | "inactivity"
+  | "logs";
 export type RouterModal = "source" | "targets" | null;
 export type SortDirection = "asc" | "desc";
 export type PluginCopyMode = "add" | "replace";
