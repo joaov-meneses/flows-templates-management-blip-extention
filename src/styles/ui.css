@@ -644,3 +644,16 @@
     animation: none;
   }
 }
+
+.builder-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+.builder-picker-actions > .blip-native-field {
+  flex: 1 1 240px;
+}
+.builder-picker-meta {
+  flex-wrap: wrap;
+}

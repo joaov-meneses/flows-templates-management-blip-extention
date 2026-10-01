@@ -3,6 +3,7 @@ import { ChevronDown, Clock3, Eye, RefreshCw, X } from "lucide-react";
 import { useModalFocus } from "../hooks/useModalFocus";
 import { postJson } from "../lib/api";
 import { recordActivityResult } from "../lib/activityLog";
+import { showBlipAlert } from "../lib/blipProxy";
 import {
   expirationGroup,
   expirationLabel,
@@ -47,7 +48,10 @@ export function InactivityTab({
   currentBots.current = bots;
   const [minutes, setMinutes] = useState("5");
   const [keepExisting, setKeepExisting] = useState(false);
+  const [publishAfterSave, setPublishAfterSave] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const operationLock = useRef(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -170,7 +174,48 @@ export function InactivityTab({
     }
   }
 
+  async function confirmPublication(title: string, body: string, confirm: string) {
+    setConfirming(true);
+    try {
+      return await showBlipAlert({
+        variant: "warning",
+        icon: "warning",
+        title,
+        body,
+        buttons: { cancel: "Cancelar", confirm },
+      });
+    } catch (caughtError) {
+      setError(`Não foi possível confirmar a publicação: ${messageOf(caughtError)}`);
+      return false;
+    } finally {
+      if (mounted.current) setConfirming(false);
+    }
+  }
+
+  async function togglePublication(checked: boolean) {
+    if (operationLock.current) return;
+    if (!checked) {
+      setPublishAfterSave(false);
+      return;
+    }
+    operationLock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const confirmed = await confirmPublication(
+        "Ativar publicação automática?",
+        "Ao salvar, a inatividade será publicada e passará a valer no atendimento dos bots selecionados, incluindo os tempos já salvos no rascunho. A publicação será confirmada novamente antes da aplicação. Se houver outras mudanças pendentes, publique-as no Builder primeiro.",
+        "Ativar publicação",
+      );
+      if (mounted.current && confirmed) setPublishAfterSave(true);
+    } finally {
+      operationLock.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+
   async function apply() {
+    if (operationLock.current) return;
     setError("");
     setNotice("");
     if (!validInactivityMinutes(minutes) || individualInvalid) {
@@ -180,12 +225,23 @@ export function InactivityTab({
       return;
     }
     if (!targets.length || !effectiveCount || busy || loading) return;
+    operationLock.current = true;
     setBusy(true);
-    setProgress({ processed: 0, total: targets.length });
     let saved = 0;
     let failed = 0;
     let updated = 0;
+    let published = 0;
+    let publicationWarnings = 0;
     try {
+      if (publishAfterSave) {
+        const confirmed = await confirmPublication(
+          "Salvar e publicar os fluxos?",
+          `Você vai aplicar o tempo global de ${minutes} minuto(s), respeitando os tempos individuais e a opção de manter tempos preenchidos, em ${effectiveCount} bloco(s) de ${targets.length} bot(s): ${targets.map((bot) => bot.application.name).join(", ")}. A publicação inclui os tempos já salvos no rascunho e afetará o atendimento desses bots. Deseja continuar?`,
+          "Salvar e publicar",
+        );
+        if (!confirmed || !mounted.current) return;
+      }
+      setProgress({ processed: 0, total: targets.length });
       for (const [index, bot] of targets.entries()) {
         try {
           const overrides = Object.fromEntries(
@@ -208,14 +264,17 @@ export function InactivityTab({
             blockKeys: [...bot.blockKeys],
             overrides,
             keepExisting,
+            publishAfterSave,
           });
           saved++;
           updated += response.updated;
+          if (response.published) published++;
+          if (response.publicationError) publicationWarnings++;
           patchBot(bot.application.shortName, {
             analysis: response,
             overrides: {},
-            error: undefined,
-            result: `${response.updated} bloco(s) alterado(s)${response.kept ? ` · ${response.kept} mantido(s)` : ""}. Rascunho salvo.`,
+            error: response.publicationError,
+            result: `${response.updated} bloco(s) alterado(s)${response.kept ? ` · ${response.kept} mantido(s)` : ""}. ${response.published ? "Rascunho salvo e fluxo publicado." : "Rascunho salvo."}`,
           });
           recordActivityResult(
             `Inatividade: ${bot.application.name} · ${response.updated} bloco(s) alterado(s)`,
@@ -223,9 +282,11 @@ export function InactivityTab({
               bot: bot.application.shortName,
               updated: response.updated,
               kept: response.kept,
-              published: false,
+              published: response.published,
+              publicationIndex: response.publicationIndex,
+              publicationError: response.publicationError,
             },
-            "success",
+            response.publicationError ? "warning" : "success",
             "inactivity",
           );
         } catch (caughtError) {
@@ -248,14 +309,15 @@ export function InactivityTab({
       if (mounted.current) {
         if (saved)
           setNotice(
-            `${saved} bot(s) com rascunho salvo · ${updated} bloco(s) alterado(s). Nenhum bot foi publicado.`,
+            `${saved} bot(s) com rascunho salvo · ${updated} bloco(s) alterado(s). ${publishAfterSave ? `${published} publicação(ões) confirmada(s).` : "Nenhum bot foi publicado."}`,
           );
-        if (failed)
+        if (failed || publicationWarnings)
           setError(
-            `${failed} bot(s) com falha. Confira o aviso em cada bot e atualize a análise antes de tentar novamente.`,
+            `${failed ? `${failed} bot(s) com falha ao salvar. ` : ""}${publicationWarnings ? `${publicationWarnings} bot(s) com aviso de publicação. ` : ""}Confira o aviso em cada bot e atualize a análise antes de tentar novamente.`,
           );
       }
     } finally {
+      operationLock.current = false;
       if (mounted.current) setBusy(false);
     }
   }
@@ -317,6 +379,16 @@ export function InactivityTab({
           />
           Manter tempos já preenchidos
         </label>
+        <label className="inactivity-check">
+          <input
+            type="checkbox"
+            checked={publishAfterSave}
+            onChange={(event) => void togglePublication(event.target.checked)}
+            disabled={busy}
+            aria-describedby="inactivity-publish-help"
+          />
+          Publicar automaticamente
+        </label>
         <Button
           variant="primary"
           onClick={() => void apply()}
@@ -325,12 +397,17 @@ export function InactivityTab({
             loading || !effectiveCount || !validInactivityMinutes(minutes) || individualInvalid
           }
         >
-          Salvar em {targets.length} bot(s)
+          {publishAfterSave ? "Salvar e publicar" : "Salvar"} em {targets.length} bot(s)
         </Button>
       </div>
       <p className="inactivity-note" id="inactivity-time-help">
         Maior que zero e menor que 1380 minutos. Os tempos individuais definidos nos detalhes têm
         prioridade sobre o global. A opção de manter tempos preserva os blocos já preenchidos.
+      </p>
+      <p className="inactivity-note" id="inactivity-publish-help">
+        {publishAfterSave
+          ? "A publicação inclui os tempos já salvos no rascunho. Se houver outras mudanças pendentes, publique-as no Builder primeiro."
+          : "A publicação automática é opcional. Por padrão, apenas o rascunho é salvo."}
       </p>
       <div className="inactivity-summary" role="status" aria-live="polite">
         <span>
@@ -340,9 +417,11 @@ export function InactivityTab({
         <span>
           {selectedBlocks} selecionado(s) · {effectiveCount} para aplicar
         </span>
-        {busy && (
+        {confirming && <span>Aguardando confirmação de publicação…</span>}
+        {busy && !confirming && (
           <span>
-            Salvando {progress.processed}/{progress.total} bot(s)…
+            {publishAfterSave ? "Salvando e publicando" : "Salvando"} {progress.processed}/
+            {progress.total} bot(s)…
           </span>
         )}
         {loading && <span>Analisando rascunhos…</span>}
@@ -447,7 +526,7 @@ export function InactivityTab({
       )}
       <p className="inactivity-note">
         A regra do Addons ignora onboarding, fallback, error e entradas com bypass. Apenas a
-        primeira entrada de cada bloco é considerada. As alterações são salvas sem publicar.
+        primeira entrada de cada bloco é considerada.
       </p>
       {detail?.analysis && (
         <div className="ember-modal-backdrop" role="presentation">

@@ -8,13 +8,34 @@
   <body style="margin: 0">
     <p style="margin: 0; padding: 8px; font: 13px system-ui">
       Validação local · bots e rascunhos fictícios
+      <output id="fixture-operations">0 salvamentos · 0 publicações</output>
     </p>
     <iframe
       title="Extensão com dados fictícios"
       src="/inactivity-app.html"
       style="width: 100%; min-height: 1100px; border: 0"
     ></iframe>
+    <dialog
+      aria-labelledby="fixture-alert-title"
+      style="
+        max-width: 440px;
+        border: 0;
+        border-radius: 8px;
+        padding: 24px;
+        font: 14px system-ui;
+        color: #27354b;
+      "
+    >
+      <h2 id="fixture-alert-title" style="font-size: 20px"></h2>
+      <p id="fixture-alert-body" style="line-height: 1.6"></p>
+      <form method="dialog" style="display: flex; gap: 12px; justify-content: end">
+        <button value="cancel">Cancelar</button>
+        <button value="confirm" id="fixture-alert-confirm"></button>
+      </form>
+    </dialog>
     <script>
+      let saves = 0;
+      let publications = 0;
       const builders = [
         {
           shortName: "builder_agendamento",
@@ -55,9 +76,38 @@
       window.addEventListener("message", (event) => {
         const frame = document.querySelector("iframe");
         if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+        if (event.data?.fixtureApply) {
+          saves++;
+          if (event.data.published) publications++;
+          document.querySelector("#fixture-operations").textContent =
+            `${saves} salvamentos · ${publications} publicações`;
+          return;
+        }
         const message = event.data?.message;
         let response;
-        if (message?.action === "blipEvent:getApplication")
+        if (message?.action === "showAlert" || message?.action === "blipEvent:showAlert") {
+          const dialog = document.querySelector("dialog");
+          document.querySelector("#fixture-alert-title").textContent = message.content.title;
+          document.querySelector("#fixture-alert-body").textContent = message.content.body;
+          document.querySelector("#fixture-alert-confirm").textContent =
+            message.content.buttons.confirm;
+          dialog.returnValue = "";
+          dialog.addEventListener(
+            "close",
+            () => {
+              event.source.postMessage(
+                {
+                  trackingProperties: event.data.trackingProperties,
+                  response: dialog.returnValue === "confirm",
+                },
+                event.origin,
+              );
+            },
+            { once: true },
+          );
+          dialog.showModal();
+          return;
+        } else if (message?.action === "blipEvent:getApplication")
           response = { shortName: "router_test", name: "Router de teste", tenantId: "test" };
         else if (message?.action === "blipEvent:getAccount")
           response = { identity: "test@example.com" };

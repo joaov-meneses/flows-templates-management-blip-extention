@@ -45,6 +45,12 @@ import {
 } from "../lib/blipProxy";
 import { useModalFocus } from "../hooks/useModalFocus";
 import { useTheme } from "../hooks/useTheme";
+import { useRouterBuilderScope } from "../hooks/useRouterBuilderScope";
+import {
+  filterBuilderPickerApplications,
+  selectAllVisibleBuilders,
+  type BuilderPickerScope,
+} from "../lib/builderPicker";
 import { Button } from "./ui/Button";
 import { ActionsMenu } from "./ui/ActionsMenu";
 import { Feedback } from "./ui/Feedback";
@@ -813,6 +819,7 @@ export default function CreateTemplatesApp() {
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
   const [botPicker, setBotPicker] = useState<"source" | "target" | "inactivity" | null>(null);
+  const [builderPickerScope, setBuilderPickerScope] = useState<BuilderPickerScope>("router");
   const [inactivityApplications, setInactivityApplications] = useState<PortalApplicationAccount[]>(
     [],
   );
@@ -1182,18 +1189,28 @@ export default function CreateTemplatesApp() {
   const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
   const pickerIsBuilder = botPicker === "inactivity" || cloneMode === "builder";
-  const pickerApplications =
-    botPicker === "inactivity"
-      ? botApplications.filter(
-          (application) =>
-            !botTargetSearch.trim() ||
-            `${application.name} ${application.shortName}`
-              .toLowerCase()
-              .includes(botTargetSearch.trim().toLowerCase()),
-        )
-      : botPicker === "source"
-        ? filteredBotSourceApplications
-        : filteredBotTargetApplications;
+  const pickerRouterShortName = sourceRouterShortName || currentApplicationRouter?.shortName || "";
+  const routerBuilderScope = useRouterBuilderScope(
+    pickerRouterShortName,
+    Boolean(botPicker && pickerIsBuilder && builderPickerScope === "router"),
+    loadRouterKey,
+  );
+  const pickerLoading = pickerIsBuilder
+    ? isLoadingBotApplications || routerBuilderScope.loading
+    : isLoadingRouterApplications;
+  const pickerError = pickerIsBuilder
+    ? botApplicationsError || routerBuilderScope.error
+    : routerApplicationsError;
+  const pickerApplications = pickerIsBuilder
+    ? filterBuilderPickerApplications(botApplications, {
+        scope: builderPickerScope,
+        routerBuilderIds: routerBuilderScope.ids,
+        query: botPicker === "source" ? botSourceSearch : botTargetSearch,
+        excludedShortName: botPicker === "target" ? botSourceShortName : "",
+      })
+    : botPicker === "source"
+      ? filteredBotSourceApplications
+      : filteredBotTargetApplications;
   const pickerSelection =
     botPicker === "inactivity"
       ? inactivityPickerSelection
@@ -1206,6 +1223,20 @@ export default function CreateTemplatesApp() {
       : pickerIsBuilder
         ? setBuilderTargetPickerSelection
         : setRouterTargetPickerSelection;
+
+  const hiddenPickerSelections = [...pickerSelection].filter(
+    (shortName) => !pickerApplications.some((application) => application.shortName === shortName),
+  ).length;
+  function openBotPicker(purpose: "source" | "target" | "inactivity") {
+    setBuilderPickerScope("router");
+    setBotPicker(purpose);
+  }
+  function refreshBotPicker() {
+    if (pickerIsBuilder) {
+      void loadBotApplications();
+      if (builderPickerScope === "router") routerBuilderScope.refresh();
+    } else void loadRouterApplications();
+  }
 
   function confirmInactivityBots() {
     setInactivityApplications(
@@ -4490,7 +4521,7 @@ export default function CreateTemplatesApp() {
               setInactivityPickerSelection(
                 new Set(inactivityApplications.map((application) => application.shortName)),
               );
-              setBotPicker("inactivity");
+              openBotPicker("inactivity");
               if (!botApplications.length) void loadBotApplications();
             }}
           />
@@ -5048,7 +5079,7 @@ export default function CreateTemplatesApp() {
                         size="sm"
                         onClick={() => {
                           setBotSourceSearch("");
-                          setBotPicker("source");
+                          openBotPicker("source");
                         }}
                         disabled={!isEmbedded || isCloningBot || isCloningRouter}
                       >
@@ -5116,7 +5147,7 @@ export default function CreateTemplatesApp() {
                               new Set(builderCloneTargets.map((target) => target.shortName)),
                             );
                           }
-                          setBotPicker("target");
+                          openBotPicker("target");
                         }}
                         disabled={!isEmbedded || isCloningBot || isCloningRouter}
                       >
@@ -5365,7 +5396,7 @@ export default function CreateTemplatesApp() {
                         size="sm"
                         onClick={() => {
                           setBotSourceSearch("");
-                          setBotPicker("source");
+                          openBotPicker("source");
                         }}
                         disabled={!isEmbedded || isBulkCreatingBots || isLoadingBulkBots}
                       >
@@ -7547,6 +7578,45 @@ export default function CreateTemplatesApp() {
               </div>
               <div className="ember-modal-body router-application-picker">
                 {error && <Feedback onDismiss={() => setError("")}>{error}</Feedback>}
+                {pickerIsBuilder && (
+                  <div className="builder-picker-actions">
+                    <label className="blip-native-field" htmlFor="builderPickerScope">
+                      Exibir Builders
+                      <select
+                        id="builderPickerScope"
+                        value={builderPickerScope}
+                        onChange={(event) =>
+                          setBuilderPickerScope(event.target.value as BuilderPickerScope)
+                        }
+                        disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
+                      >
+                        <option value="router">
+                          Do roteador{" "}
+                          {sourceRouterApplication?.name || pickerRouterShortName || "de origem"}
+                        </option>
+                        <option value="all">Todos os Builders com acesso</option>
+                      </select>
+                    </label>
+                    {botPicker !== "source" && (
+                      <Button
+                        onClick={() =>
+                          setPickerSelection((current) =>
+                            selectAllVisibleBuilders(current, pickerApplications),
+                          )
+                        }
+                        disabled={
+                          pickerLoading ||
+                          !!pickerError ||
+                          !pickerApplications.length ||
+                          isResolvingBotSourceKey ||
+                          isResolvingBotTargetKey
+                        }
+                      >
+                        Selecionar todos
+                      </Button>
+                    )}
+                  </div>
+                )}
                 <div className="router-picker-toolbar">
                   <label className="blip-native-field" htmlFor="builderPickerSearch">
                     Buscar {pickerIsBuilder ? "builder" : "router"}
@@ -7564,29 +7634,48 @@ export default function CreateTemplatesApp() {
                   </label>
                   <Button
                     variant="secondary"
-                    onClick={() =>
-                      void (pickerIsBuilder ? loadBotApplications() : loadRouterApplications())
-                    }
-                    loading={
-                      pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications
-                    }
+                    onClick={refreshBotPicker}
+                    loading={pickerLoading}
+                    disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
                   >
                     <Search size={18} aria-hidden="true" /> Atualizar
                   </Button>
                 </div>
-                <div className="router-picker-meta">
+                <div className="router-picker-meta builder-picker-meta">
                   {pickerApplications.length} {pickerIsBuilder ? "builders" : "routers"} disponíveis
                   {botPicker !== "source" ? ` · ${pickerSelection.size} selecionado(s)` : ""}
+                  {pickerIsBuilder && botPicker !== "source" && (
+                    <>
+                      {!pickerLoading && !pickerError && hiddenPickerSelections > 0 && (
+                        <span>{hiddenPickerSelections} selecionado(s) fora do filtro</span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPickerSelection(new Set())}
+                        disabled={
+                          !pickerSelection.size ||
+                          isResolvingBotSourceKey ||
+                          isResolvingBotTargetKey
+                        }
+                      >
+                        Limpar seleção
+                      </Button>
+                    </>
+                  )}
                 </div>
                 <div className="router-application-list">
-                  {(pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications) ? (
+                  {pickerLoading ? (
                     <div className="router-picker-empty">
                       <LoaderCircle className="spin" size={18} /> Carregando{" "}
                       {pickerIsBuilder ? "builders" : "routers"}…
                     </div>
-                  ) : (pickerIsBuilder ? botApplicationsError : routerApplicationsError) ? (
+                  ) : pickerError ? (
                     <Feedback>
-                      {pickerIsBuilder ? botApplicationsError : routerApplicationsError}
+                      {pickerError}
+                      {pickerIsBuilder &&
+                        builderPickerScope === "router" &&
+                        " Use Atualizar para tentar novamente ou escolha Todos os Builders com acesso."}
                     </Feedback>
                   ) : pickerApplications.length === 0 ? (
                     <div className="router-picker-empty">
@@ -7664,10 +7753,7 @@ export default function CreateTemplatesApp() {
                           : handleConfirmRouterTargets())
                     }
                     loading={isResolvingBotTargetKey}
-                    disabled={
-                      pickerSelection.size === 0 ||
-                      (pickerIsBuilder ? isLoadingBotApplications : isLoadingRouterApplications)
-                    }
+                    disabled={pickerSelection.size === 0 || pickerLoading || !!pickerError}
                   >
                     <Check size={18} aria-hidden="true" /> Confirmar {pickerSelection.size}
                   </Button>

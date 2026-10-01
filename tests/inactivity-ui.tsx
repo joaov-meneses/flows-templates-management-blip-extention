@@ -28,9 +28,27 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path === "/api/routers/services")
+    return Response.json({
+      routerShortName: "router_test",
+      template: "master",
+      applicationHash: "fixture-router",
+      services: ["builder_agendamento", "builder_suporte", "sem_acesso"].map((shortName) => ({
+        identity: `${shortName}@msging.net`,
+        shortName,
+        name: shortName,
+        isDefault: false,
+        isOnline: true,
+      })),
+    });
   if (!path.startsWith("/api/inactivity/"))
     return Response.json({ status: "not-connected", phoneNumber: null });
   const body = JSON.parse(String(options?.body || "{}"));
+  if (path.endsWith("apply"))
+    window.parent.postMessage(
+      { fixtureApply: true, published: body.publishAfterSave },
+      location.origin,
+    );
   const bot = atob(body.builderKey.slice(4)).split(":")[0];
   if (bot === "builder_falha")
     return Response.json(
@@ -57,7 +75,7 @@ window.fetch = async (input, options) => {
   draft.revision = `fixture-${++version}`;
   draft.configuredBlocks = draft.blocks.filter((block) => block.expiration).length;
   drafts.set(bot, draft);
-  return Response.json({ ...draft, updated, kept, published: false });
+  return Response.json({ ...draft, updated, kept, published: Boolean(body.publishAfterSave) });
 };
 new Function(themeBootstrap)();
 createRoot(document.getElementById("root")!).render(<CreateTemplatesApp />);

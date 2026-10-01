@@ -1,4 +1,5 @@
 const { randomUUID, createHash } = require("node:crypto");
+const { publishInactivity } = require("./inactivityPublicationService.cjs");
 
 const WORKING_FLOW_URI = "/buckets/blip_portal:builder_working_flow";
 const SKIP_BLOCKS = ["onboarding", "fallback", "error"];
@@ -105,6 +106,7 @@ async function applyInactivity({
   blockKeys,
   overrides = {},
   keepExisting = false,
+  publishAfterSave = false,
 } = {}) {
   validateMinutes(minutes);
   if (
@@ -118,6 +120,7 @@ async function applyInactivity({
   }
   if (
     typeof keepExisting !== "boolean" ||
+    typeof publishAfterSave !== "boolean" ||
     !overrides ||
     typeof overrides !== "object" ||
     Array.isArray(overrides)
@@ -168,7 +171,10 @@ async function applyInactivity({
       );
     }
   }
-  return { ...describeFlow(flow), updated, kept, published: false };
+  const publication = publishAfterSave
+    ? await publishInactivity(builderKey, flow, entries)
+    : { published: false };
+  return { ...describeFlow(flow), updated, kept, ...publication };
 }
 
 module.exports = {

@@ -16,5 +16,7 @@ export type InactivityAnalysis = {
 export type InactivityApplyResponse = InactivityAnalysis & {
   updated: number;
   kept: number;
-  published: false;
+  published: boolean;
+  publicationIndex?: number;
+  publicationError?: string;
 };
