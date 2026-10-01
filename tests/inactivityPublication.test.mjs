@@ -81,12 +81,12 @@ function mockPublication(t, options = {}) {
         status: "failure",
         reason: { code: 67, description: "Resource not found" },
       });
+    const resource = options.readResource
+      ? options.readResource(command, structuredClone(store.get(uri)))
+      : store.get(uri);
     return Response.json({
       status: "success",
-      resource:
-        options.asString && uri.startsWith(prefix)
-          ? JSON.stringify(store.get(uri))
-          : store.get(uri),
+      resource: options.asString && uri.startsWith(prefix) ? JSON.stringify(resource) : resource,
     });
   });
   return { store, commands, runtime, draft };
@@ -102,6 +102,34 @@ async function apply(publishAfterSave = true) {
     publishAfterSave,
   });
 }
+
+test("publicação de inatividade confirma leitura atrasada e JSON reformatado sem ativar o runtime duas vezes", async (t) => {
+  let previousRuntime;
+  let written = false;
+  let verificationReads = 0;
+  const { commands, store } = mockPublication(t, {
+    onCommand(command) {
+      if (command.method === "set" && command.uri.startsWith(runtimeUri)) written = true;
+    },
+    readResource(command, resource) {
+      if (written && command.method === "get" && command.uri === runtimeUri) {
+        if (++verificationReads === 1) return previousRuntime;
+        resource.Application = JSON.stringify(JSON.parse(resource.Application), null, 2);
+      }
+      return resource;
+    },
+  });
+  previousRuntime = structuredClone(store.get(runtimeUri));
+  const result = await apply();
+  assert.equal(result.published, true);
+  assert.equal(verificationReads, 2);
+  assert.equal(
+    commands.filter((command) => command.method === "set" && command.uri.startsWith(runtimeUri))
+      .length,
+    1,
+  );
+  assert.equal(store.get(prefix + "latestpublications").lastInsertedIndex, 7);
+});
 
 test("publicação automática atualiza runtime, documento e histórico, preservando ações e blocos excluídos", async (t) => {
   const { store, runtime, commands } = mockPublication(t, { asString: true });

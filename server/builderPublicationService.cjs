@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
 const { compileBuilderFlow } = require("./builderCompiler.cjs");
+const { confirmBuilderRuntime } = require("./builderRuntimeVerification.cjs");
 
 const PREFIX = "/buckets/blip_portal:builder_";
 const CONFIGURATIONS = "postmaster@configurations.msging.net";
@@ -155,11 +156,7 @@ async function publishBuilderDraft({ builderKey, builderShortName } = {}) {
       type: "application/json",
       resource: { Template: "builder", Application: application },
     });
-    const verified = await getRuntime();
-    if (verified?.Application !== application)
-      throw new Error(
-        "A leitura não confirmou o fluxo ativo. O comando pode ter sido aplicado; confira o Builder antes de repetir.",
-      );
+    await confirmBuilderRuntime(getRuntime, runtime);
     published = true;
     for (const [name, document] of Object.entries({
       flow,

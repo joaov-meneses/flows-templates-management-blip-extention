@@ -140,7 +140,9 @@ function mockBuilder(t, options = {}) {
     }
     if (!store.has(uri))
       return Response.json({ status: "failure", reason: { code: 67, description: "Not found" } });
-    const resource = store.get(uri);
+    const resource = options.readResource
+      ? options.readResource(request, structuredClone(store.get(uri)))
+      : store.get(uri);
     return Response.json({
       status: "success",
       resource:
@@ -152,6 +154,56 @@ function mockBuilder(t, options = {}) {
   return { store, commands, originalRuntime, flow };
 }
 const publish = () => publication.publishBuilderDraft({ builderKey, builderShortName });
+
+test("confirma o runtime com JSON equivalente mesmo quando a Blip muda a formatação e a ordem dos campos", async (t) => {
+  mockBuilder(t, {
+    readResource(request, resource) {
+      if (request.method === "get" && request.uri === runtimeUri) {
+        const parsed = JSON.parse(resource.Application);
+        resource.Application = JSON.stringify(
+          Object.fromEntries(Object.entries(parsed).reverse()),
+          null,
+          2,
+        );
+      }
+      return resource;
+    },
+  });
+  const result = await publish();
+  assert.equal(result.published, true);
+  assert.equal(result.publicationIndex, 6);
+});
+
+test("aguarda a leitura refletir a publicação sem reenviar o comando de ativação", async (t) => {
+  let previousRuntime;
+  let written = false;
+  let verificationReads = 0;
+  const { commands, store } = mockBuilder(t, {
+    onCommand(request) {
+      if (request.method === "set" && request.uri.startsWith(runtimeUri)) written = true;
+    },
+    readResource(request, resource) {
+      if (
+        written &&
+        request.method === "get" &&
+        request.uri === runtimeUri &&
+        ++verificationReads === 1
+      )
+        return previousRuntime;
+      return resource;
+    },
+  });
+  previousRuntime = structuredClone(store.get(runtimeUri));
+  const result = await publish();
+  assert.equal(result.published, true);
+  assert.equal(verificationReads, 2);
+  assert.equal(
+    commands.filter((request) => request.method === "set" && request.uri.startsWith(runtimeUri))
+      .length,
+    1,
+  );
+  assert.equal(store.get(prefix + "latestpublications").lastInsertedIndex, 6);
+});
 
 test("publica o rascunho completo, incluindo blocos e mensagens novos, sem reutilizar o fluxo publicado antigo", async (t) => {
   const { store, commands, flow, originalRuntime } = mockBuilder(t, { asString: true });

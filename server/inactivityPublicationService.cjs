@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
+const { confirmBuilderRuntime } = require("./builderRuntimeVerification.cjs");
 
 const PREFIX = "/buckets/blip_portal:builder_";
 const RUNTIME_URI = "lime://builder.hosting@msging.net/configuration";
@@ -144,15 +145,15 @@ async function publishInactivity(key, flow, entries) {
       type: "application/json",
       resource: { Template: "builder", Application: application },
     });
-    const verified = await command(key, {
-      to: "postmaster@configurations.msging.net",
-      method: "get",
-      uri: RUNTIME_URI,
-    });
-    if (verified?.Application !== application)
-      throw new Error(
-        "A leitura após publicar não confirmou o fluxo ativo. Confira o Builder antes de repetir; o comando pode ter sido aplicado.",
-      );
+    await confirmBuilderRuntime(
+      () =>
+        command(key, {
+          to: "postmaster@configurations.msging.net",
+          method: "get",
+          uri: RUNTIME_URI,
+        }),
+      runtime,
+    );
     published = true;
     await setBucket(key, "published_flow", flow);
     const index = (Number.isInteger(latest.lastInsertedIndex) ? latest.lastInsertedIndex : 0) + 1;

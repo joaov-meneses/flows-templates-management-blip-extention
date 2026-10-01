@@ -25,6 +25,8 @@ A API `POST /api/builders/publish` recebe `builderShortName` e `builderKey` e l�
 
 Blocos de agente IA com mudanças em configurações externas exigem publicação pelo Builder; a API apresenta a falha nesse bot antes de alterar seu runtime. Um bloco de IA inalterado mantém sua representação compilada anterior. Subflows referenciados não são publicados separadamente por esta operação. Uma falha de registro depois da confirmação do runtime informa **Publicado, com aviso**, pois não há transação entre a ativação e os documentos. Se a resposta for incerta, confira o Builder antes de repetir. A validação automatizada e a fixture usam somente bots fictícios; a integração real requer validação no Portal Blip.
 
+A confirmação do runtime, tanto na publicação em massa quanto na publicação automática de inatividade, compara o conteúdo completo do JSON, ignorando apenas sua formatação e a ordem das propriedades. Se a leitura ainda retornar uma versão diferente, faz até cinco consultas, com pausas progressivas que somam 5,5 segundos, sem reenviar o comando de publicação. Se nenhuma leitura confirmar o conteúdo esperado, mantém o resultado como não confirmado e não registra o histórico como sucesso.
+
 ## Aba Inatividade
 
 Selecione os bots no modal existente de seleção de Builders. A lista usa o contrato atual e as permissões do Portal, excluindo routers (`template: master`). Cada rascunho é analisado separadamente; falhas de acesso aparecem por bot e não impedem a consulta dos demais.
