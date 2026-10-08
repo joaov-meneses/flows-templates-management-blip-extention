@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FlowPublicKeyStatus } from "../../shared/flowPublicKey.mjs";
 import {
-  buildFlowPublicKeyCommand,
-  readFlowPublicKeyStatus,
-  type FlowPublicKeyStatus,
-} from "../../shared/flowPublicKey.mjs";
-import { sendBlipCommand } from "../lib/blipProxy";
-import { postJson } from "../lib/api";
+  lookupFlowPublicKey,
+  type FlowPublicKeyRouter,
+  type FlowRouterKeyResolver,
+} from "../lib/flowPublicKeys";
 
-type Router = { shortName: string; key?: string };
 type KeyStatus = FlowPublicKeyStatus & { shortName: string };
 type State = {
   scope: string;
@@ -16,7 +14,11 @@ type State = {
   error: string;
 };
 
-export function useFlowPublicKeys(routers: Router[], enabled: boolean, embedded: boolean) {
+export function useFlowPublicKeys(
+  routers: FlowPublicKeyRouter[],
+  enabled: boolean,
+  resolveKey?: FlowRouterKeyResolver,
+) {
   const scope = JSON.stringify(routers);
   const [state, setState] = useState<State | null>(null);
   const requestId = useRef(0);
@@ -28,21 +30,8 @@ export function useFlowPublicKeys(routers: Router[], enabled: boolean, embedded:
     setState({ scope, status: "loading", entries: [], error: "" });
     try {
       const entries: KeyStatus[] = [];
-      for (const router of JSON.parse(scope) as Router[]) {
-        let status: FlowPublicKeyStatus;
-        if (embedded) {
-          const response = await sendBlipCommand(
-            buildFlowPublicKeyCommand(router.shortName, crypto.randomUUID()),
-            { destination: "BlipService", timeout: 30000 },
-          );
-          status = readFlowPublicKeyStatus(response, router.shortName);
-        } else {
-          status = await postJson<FlowPublicKeyStatus>("/api/flows/public-key", {
-            sourceRouterKey: router.key,
-          });
-          if (typeof status.exists !== "boolean")
-            throw new Error("A consulta da public key retornou dados incompletos.");
-        }
+      for (const router of JSON.parse(scope) as FlowPublicKeyRouter[]) {
+        const status = await lookupFlowPublicKey(router, resolveKey);
         if (id !== requestId.current) {
           throw new Error("A seleção de routers mudou durante a consulta. Tente novamente.");
         }
@@ -61,7 +50,7 @@ export function useFlowPublicKeys(routers: Router[], enabled: boolean, embedded:
         });
       throw error;
     }
-  }, [scope, embedded]);
+  }, [scope, resolveKey]);
   useEffect(() => {
     if (enabled && routers.length) void verify().catch(() => {});
     return cancel;

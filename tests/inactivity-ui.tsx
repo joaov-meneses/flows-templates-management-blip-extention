@@ -7,6 +7,7 @@ import "../src/styles.css";
 
 const drafts = new Map<string, InactivityAnalysis>();
 let version = 1;
+let keyChecks = 0;
 function initialDraft(): InactivityAnalysis {
   return {
     revision: "fixture-1",
@@ -28,6 +29,22 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path === "/api/flows/public-key") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    const shortName = atob(body.sourceRouterKey.slice(4)).split(":")[0];
+    const parentDocument = window.parent.document;
+    const mode = (parentDocument.querySelector("#fixture-public-key") as HTMLSelectElement).value;
+    keyChecks++;
+    parentDocument.querySelector("#fixture-key-checks")!.textContent =
+      `${keyChecks} consultas de public key · ${shortName}@msging.net`;
+    if (mode === "error") {
+      return Response.json({ error: { message: "Sem permissão (fictício)" } }, { status: 403 });
+    }
+    return Response.json({
+      exists: mode === "present" || (mode === "per-router" && shortName !== "router_sem_chave"),
+      signatureStatus: null,
+    });
+  }
   if (path === "/api/flows/search")
     return Response.json({
       total: 2,

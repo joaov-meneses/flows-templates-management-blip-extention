@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import flowService from "../server/flowService.cjs";
-import {
-  buildFlowPublicKeyCommand,
-  readFlowPublicKeyStatus,
-  FLOW_PUBLIC_KEY_URI,
-} from "../shared/flowPublicKey.mjs";
+import { readFlowPublicKeyStatus, FLOW_PUBLIC_KEY_URI } from "../shared/flowPublicKey.mjs";
+import { lookupFlowPublicKey } from "../src/lib/flowPublicKeys.ts";
 
 const existingKey = "-----BEGIN PUBLIC KEY-----\nexisting-test-key\n-----END PUBLIC KEY-----";
 const newKey = "-----BEGIN PUBLIC KEY-----\nnew-test-key\n-----END PUBLIC KEY-----";
@@ -70,16 +67,102 @@ const replicateParams = {
 const writes = (calls) => calls.filter((call) => call.command.method === "set");
 const uploads = (calls) => writes(calls).filter((call) => call.command.uri === FLOW_PUBLIC_KEY_URI);
 
-test("iframe consulta o proprietário selecionado, com ID único e sem credenciais no comando", () => {
-  const command = buildFlowPublicKeyCommand("router_test", "unique-id");
-  assert.deepEqual(command, {
-    id: "unique-id",
-    from: "router_test@msging.net",
-    to: "postmaster@wa.gw.msging.net",
-    method: "get",
-    uri: `lime://router_test@msging.net${FLOW_PUBLIC_KEY_URI}`,
+test("consulta usa a autenticação de cada router sem criar envelope delegado pelo Portal", async (t) => {
+  const calls = [];
+  const resolved = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push({ url, body, key: options.headers.Authorization });
+    if (url === "/api/flows/public-key") {
+      return Response.json(await flowService.getFlowPublicKeyStatus(body));
+    }
+    assert.equal(url, "https://http.msging.net/commands");
+    // Reproduce the gateway's code 26 for the old delegated envelope.
+    if (body.from && !body.pp) {
+      return Response.json({
+        status: "failure",
+        reason: {
+          code: 26,
+          description: "The 'pp' property must be specified when sending delegate envelopes",
+        },
+      });
+    }
+    return Response.json(options.headers.Authorization === "key-origin" ? present : absent);
   });
-  assert.throws(() => buildFlowPublicKeyCommand("invalid@owner", "id"));
+  const resolveKey = async (shortName) => {
+    resolved.push(shortName);
+    return { shortName, key: `key-${shortName}` };
+  };
+  assert.equal((await lookupFlowPublicKey({ shortName: "origin" }, resolveKey)).exists, true);
+  assert.equal((await lookupFlowPublicKey({ shortName: "target" }, resolveKey)).exists, false);
+  assert.deepEqual(resolved, ["origin", "target"]);
+  const commands = calls.filter((call) => call.url.startsWith("https://"));
+  assert.deepEqual(
+    commands.map((call) => call.key),
+    ["key-origin", "key-target"],
+  );
+  assert.equal(new Set(commands.map((call) => call.body.id)).size, 2);
+  for (const { body } of commands) {
+    assert.equal(body.method, "get");
+    assert.equal(body.uri, FLOW_PUBLIC_KEY_URI);
+    assert.equal(body.to, "postmaster@wa.gw.msging.net");
+    assert.equal("from" in body, false);
+    assert.equal("pp" in body, false);
+  }
+});
+
+test("key já disponível é usada diretamente, inclusive fora do iframe", async (t) => {
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "/api/flows/public-key");
+    assert.deepEqual(JSON.parse(options.body), { sourceRouterKey: "key-origin" });
+    return Response.json({ exists: true, signatureStatus: "VALID" });
+  });
+  assert.deepEqual(
+    await lookupFlowPublicKey({ shortName: "Router de origem", key: " key-origin " }, () => {
+      throw new Error("Não deve resolver novamente a key");
+    }),
+    { exists: true, signatureStatus: "VALID" },
+  );
+});
+
+test("falha ao resolver a key e resposta de outro router bloqueiam a consulta", async (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("Não deve consultar com key inválida");
+  });
+  await assert.rejects(
+    lookupFlowPublicKey({ shortName: "target" }, async () => {
+      throw new Error("Sem acesso ao router");
+    }),
+    /Sem acesso/,
+  );
+  await assert.rejects(
+    lookupFlowPublicKey({ shortName: "target" }, async () => ({
+      shortName: "other",
+      key: "key-other",
+    })),
+    /outro router/,
+  );
+  await assert.rejects(lookupFlowPublicKey({ shortName: "target" }), /obter a key/);
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+test("falha do backend ou resposta incompleta não são interpretadas como chave ausente", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ error: { message: "Falha ao consultar o gateway" } }, { status: 500 }),
+  );
+  await assert.rejects(
+    lookupFlowPublicKey({ shortName: "target", key: "key-target" }),
+    /Falha ao consultar/,
+  );
+  t.mock.restoreAll();
+  t.mock.method(globalThis, "fetch", async () => Response.json({ signatureStatus: null }));
+  await assert.rejects(
+    lookupFlowPublicKey({ shortName: "target", key: "key-target" }),
+    /dados incompletos/,
+  );
+});
+
+test("resposta que identifica outro router é rejeitada", () => {
   assert.throws(
     () =>
       readFlowPublicKeyStatus(

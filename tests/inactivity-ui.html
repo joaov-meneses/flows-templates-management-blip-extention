@@ -57,7 +57,6 @@
         document.body.style.width = `${fixtureWidth}px`;
       let saves = 0;
       let publications = 0;
-      let keyChecks = 0;
       const builders = [
         {
           shortName: "builder_agendamento",
@@ -159,32 +158,13 @@
         else if (message?.action === "blipEvent:sendCommand") {
           const uri = message.content.command.uri;
           if (uri.endsWith("/whatsapp-flows/public-key/upload")) {
-            keyChecks++;
-            document.querySelector("#fixture-key-checks").textContent =
-              `${keyChecks} consultas de public key · ${message.content.command.from}`;
-            const mode = document.querySelector("#fixture-public-key").value;
-            const present =
-              mode === "present" || (mode === "per-router" && !uri.includes("router_sem_chave"));
-            response =
-              mode === "error"
-                ? {
-                    status: "failure",
-                    reason: { code: 13, description: "Sem permissão (fictício)" },
-                  }
-                : {
-                    status: "success",
-                    resource: {
-                      data: present
-                        ? [
-                            {
-                              business_public_key: "fixture-public-key",
-                              business_public_key_signature_status: "VALID",
-                            },
-                          ]
-                        : [],
-                    },
-                    metadata: { "#command.uri": uri },
-                  };
+            response = {
+              status: "failure",
+              reason: {
+                code: 26,
+                description: "The 'pp' property must be specified when sending delegate envelopes",
+              },
+            };
           } else if (uri.includes("/users/"))
             response = { status: "success", resource: { roleId: "admin" } };
           else if (uri.endsWith("/applications") || uri.startsWith("/applications?"))

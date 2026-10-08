@@ -1094,7 +1094,7 @@ export default function CreateTemplatesApp() {
   const replicatePublicKeys = useFlowPublicKeys(
     flowKeyTargets,
     visibleActiveView === "flows" && selectedFlowsIncludeApi,
-    isEmbedded,
+    isEmbedded ? loadRouterKey : undefined,
   );
   const sourcePublicKeys = useFlowPublicKeys(
     sourceRouterShortName || sourceRouterKey
@@ -1105,7 +1105,7 @@ export default function CreateTemplatesApp() {
         ]
       : [],
     isCreateFlowModalOpen && newFlowIsApi,
-    isEmbedded,
+    isEmbedded ? loadRouterKey : undefined,
   );
   const allVisibleFlowsSelected =
     filteredFlows.length > 0 && filteredFlows.every((f) => selectedFlowIds.has(flowKey(f)));

@@ -26,17 +26,3 @@ export function readFlowPublicKeyStatus(response, shortName) {
       : null,
   };
 }
-
-export function buildFlowPublicKeyCommand(shortName, id) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(shortName)) {
-    throw new Error("Selecione um router válido para consultar a public key.");
-  }
-  const identity = `${shortName}@msging.net`;
-  return {
-    id,
-    from: identity,
-    to: "postmaster@wa.gw.msging.net",
-    method: "get",
-    uri: `lime://${identity}${FLOW_PUBLIC_KEY_URI}`,
-  };
-}
