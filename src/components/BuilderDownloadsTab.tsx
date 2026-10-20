@@ -82,17 +82,9 @@ export function BuilderDownloadsTab({
             builderKey: key,
             version,
           });
-          if (
-            result.builderShortName !== bot.shortName ||
-            result.version !== version ||
-            !result.document ||
-            ![
-              result.document.flow,
-              result.document.configuration,
-              result.document.globalActions,
-            ].every((value) => value && typeof value === "object" && !Array.isArray(value))
-          )
+          if (result.builderShortName !== bot.shortName || result.version !== version)
             throw new Error("A resposta não confirmou o fluxo solicitado.");
+          builderExportFile(result);
           exported.push(result);
         } catch (caught) {
           failures++;
@@ -137,8 +129,8 @@ export function BuilderDownloadsTab({
         <div>
           <h2>Baixar Fluxos</h2>
           <p>
-            Baixe um fluxo em JSON ou reúna vários em um arquivo ZIP, com configurações e ações
-            globais.
+            Baixe um fluxo em JSON ou reúna vários em um arquivo ZIP, incluindo os conteúdos
+            internos dos subfluxos.
           </p>
         </div>
         <Button
@@ -186,7 +178,7 @@ export function BuilderDownloadsTab({
                 }}
               >
                 <option value="working">Rascunho</option>
-                <option value="published">Publicada</option>
+                <option value="published">Última publicada</option>
               </select>
             </label>
             <label className="blip-native-field manager-search">

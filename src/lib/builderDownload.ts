@@ -1,21 +1,23 @@
 import { strToU8, zip } from "fflate";
+import {
+  builderExportFilename,
+  validateBuilderExportDocument,
+  type BuilderDocument,
+  type BuilderPublication,
+} from "../../shared/builderExport.mjs";
 
 export type BuilderExport = {
   builderShortName: string;
   version: "working" | "published";
-  document: {
-    flow: Record<string, unknown>;
-    configuration: Record<string, unknown>;
-    globalActions: Record<string, unknown>;
-  };
+  publication?: BuilderPublication;
+  document: BuilderDocument;
 };
 
 export function builderExportFile(exported: BuilderExport) {
-  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(exported.builderShortName))
-    throw new Error("O Builder retornou um ID inválido para download.");
+  validateBuilderExportDocument(exported.document);
   return {
-    name: `${exported.builderShortName}.json`,
-    text: JSON.stringify(exported.document, null, 2),
+    name: builderExportFilename(exported),
+    text: JSON.stringify(exported.document),
   };
 }
 

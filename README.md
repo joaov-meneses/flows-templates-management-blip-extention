@@ -28,13 +28,17 @@ Alterne entre **Blocos** (cartões) e **Lista**. As duas visualizações mantêm
 
 Em **Bot Manager → Baixar Fluxos**, o filtro **Builders** inicia em **Somente do roteador**, usando o roteador de origem selecionado. **Todos com acesso** lista os Builders acessíveis no contrato atual. A busca filtra por nome ou ID do Builder. **Versão do fluxo** inicia em **Rascunho** (`working`); escolha **Publicada** (`published`) para ler os documentos da versão publicada.
 
-- **Baixar JSON** baixa um Builder como `shortName.json`.
+- **Baixar JSON** baixa o rascunho como `shortName.json`; a última publicação usa o título/ID e a data do histórico, com caracteres inválidos de nome de arquivo substituídos.
 - **Selecionar todos** respeita a busca; seleções ocultas pela busca permanecem marcadas. **Limpar seleção** desmarca todos. Trocar o filtro de Builders limpa a seleção.
-- **Baixar selecionados (.zip)** reúne os Builders selecionados; **Baixar todos (.zip)** reúne todos os Builders do filtro escolhido, incluindo os ocultos pela busca. O arquivo é `fluxos-rascunho.zip` ou `fluxos-publicados.zip`, com um `shortName.json` por Builder.
+- **Baixar selecionados (.zip)** reúne os Builders selecionados; **Baixar todos (.zip)** reúne todos os Builders do filtro escolhido, incluindo os ocultos pela busca. O arquivo é `fluxos-rascunho.zip` ou `fluxos-publicados.zip`, com o mesmo JSON e nome do download individual por Builder.
 
-Cada JSON contém somente o documento `{ flow, configuration, globalActions }`; a key usada para autenticação e os metadados de transporte ficam fora do arquivo. Configuração ou ações globais ausentes são exportadas como `{}`. A exportação usa apenas comandos Blip `get`, sem excluir, gravar ou publicar documentos. Se um bot falhar, os demais continuam: o ZIP inclui somente os bem-sucedidos e a interface identifica os bots excluídos e seus erros. Se todos falharem, nenhum arquivo é gerado.
+**Rascunho** segue o formato do botão do editor: `{ flow, globalActions, subflows? }`. A fonte atual `/flow` e `/flow/global-actions` é lida sem executar migrações; somente ausência/erro conhecido de fonte legada permite usar os buckets de trabalho. Para cada referência são incluídos `edited-flow` e `edited-configurations`, preservando os controles nativos. Estados nativos de AI Agent recebem os catálogos/documentos de grounding e a configuração de KnowledgeBaseConsult consultados em DEV, conforme a preparação observada no exportador do Portal. O rascunho salvo, as ações e os internos são relidos para detectar edição concorrente. Alterações ainda não salvas na sessão do editor não podem ser obtidas por esta extensão.
 
-Os testes usam leituras simuladas e validam o conteúdo dos arquivos JSON e ZIP. A fixture da aplicação completa também usa dados fictícios. A importação desses arquivos no Portal Blip e a entrega efetiva no sistema de arquivos do usuário ainda precisam de validação real.
+**Última publicada** lê o índice do histórico por data e `lastInsertedIndex`, baixa `builder_latestpublications:{index}` e preserva o pacote completo, inclusive configurações, internos e campos adicionais. Índices são reutilizados: não é escolhido simplesmente o maior número. O histórico é relido para detectar publicação concorrente.
+
+O backend e a interface validam que toda referência tem implementação e configuração reais. Ausência, falha de permissão ou pacote incompleto interrompem o download daquele bot, sem substituição silenciosa por `{}`. Formatos de subfluxos aninhados ainda não validados são encaminhados ao download nativo do Builder. A key de transporte e os metadados de identificação da versão não são inseridos no JSON; campos legítimos do pacote original são preservados. A exportação usa somente commands `get`, sem excluir, gravar, migrar ou publicar. Se um bot falhar, o lote continua e identifica os excluídos; se todos falharem, nenhum arquivo é gerado.
+
+Os testes usam leituras simuladas com subfluxos, histórico com índices reutilizados, erros e concorrência, e validam a preservação dos pacotes em JSON e ZIP. A equivalência do conteúdo é conferida contra exports nativos conhecidos; testes de fixtures não comprovam o funcionamento de uma conta/versão do Portal ainda não ensaiada.
 
 ## Publicação em Massa
 
