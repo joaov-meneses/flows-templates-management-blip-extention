@@ -8,6 +8,7 @@ import "../src/styles.css";
 const drafts = new Map<string, InactivityAnalysis>();
 let version = 1;
 let keyChecks = 0;
+let templateCreates = 0;
 const sourceReads = { templates: 0, flows: 0 };
 function initialDraft(): InactivityAnalysis {
   return {
@@ -43,6 +44,29 @@ window.fetch = async (input, options) => {
       (parent.querySelector("#fixture-source-delay") as HTMLSelectElement).value,
     );
     if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+  }
+  if (path === "/api/templates/create") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    const { compileTemplateDraft } = await import("../shared/templateCreation.mjs");
+    const compiled = compileTemplateDraft(body.draft);
+    if (compiled.errors.length)
+      return Response.json({ error: { message: compiled.errors[0].message } }, { status: 400 });
+    templateCreates++;
+    let counter = window.parent.document.querySelector("#fixture-template-creates");
+    if (!counter) {
+      counter = window.parent.document.createElement("output");
+      counter.id = "fixture-template-creates";
+      window.parent.document.body.prepend(counter);
+    }
+    counter.textContent = `${templateCreates} criações simuladas de template · ${body.draft.name}`;
+    return Response.json({
+      template: { ...compiled.template, id: "template-ficticio", status: "PENDING" },
+      response: {
+        id: body.requestId,
+        status: "success",
+        resource: { id: "template-ficticio", status: "PENDING" },
+      },
+    });
   }
   if (path === "/api/templates/search") {
     return Response.json({

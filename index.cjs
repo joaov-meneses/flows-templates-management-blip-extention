@@ -60,6 +60,8 @@ const { analyzeInactivity, applyInactivity } = require("./server/inactivityServi
 const { publishBuilderDraft } = require("./server/builderPublicationService.cjs");
 const { exportBuilderFlow } = require("./server/builderExportService.cjs");
 
+const { createTemplate } = require("./server/templateCreationService.cjs");
+
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
 let ssrServerPromise;
@@ -109,6 +111,15 @@ app.post("/api/inactivity/apply", async (req, res, next) => {
 app.post("/api/routers/whatsapp-number", async (req, res, next) => {
   try {
     res.json(await getRouterPhoneNumber(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/templates/create", async (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await createTemplate(req.body || {}));
   } catch (error) {
     next(error);
   }

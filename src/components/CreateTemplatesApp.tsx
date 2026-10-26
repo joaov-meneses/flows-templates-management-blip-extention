@@ -62,6 +62,7 @@ import { ActionsMenu } from "./ui/ActionsMenu";
 import { Feedback } from "./ui/Feedback";
 import { StatusBadge } from "./ui/StatusBadge";
 import { SelectionBar } from "./ui/SelectionBar";
+import { TemplateCreationTab } from "./TemplateCreationTab";
 import { TemplateTable } from "./TemplateTable";
 import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
@@ -918,6 +919,7 @@ export default function CreateTemplatesApp() {
   const sourceReadRequests = useRef({ templates: 0, flows: 0 });
   const pendingSourceReads = useRef({ templates: "", flows: "" });
   const [sourceTabVisit, setSourceTabVisit] = useState(0);
+  const [templateTab, setTemplateTab] = useState<"list" | "create">("list");
   const isManagerView = ["routers", "bots", "inactivity", "downloads"].includes(visibleActiveView);
   const visibleActivityEntries = activityEntries.filter(
     (entry) => activityFilter === "all" || entry.view === activityFilter,
@@ -989,10 +991,10 @@ export default function CreateTemplatesApp() {
 
   useEffect(() => {
     if (!selectedReadSource) return;
-    if (visibleActiveView === "templates") void handleSearchTemplates();
+    if (visibleActiveView === "templates" && templateTab === "list") void handleSearchTemplates();
     if (visibleActiveView === "flows") void handleLoadFlows();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Entering a tab or changing its source starts one read; typing filters does not.
-  }, [visibleActiveView, selectedReadSource, sourceTabVisit]);
+  }, [visibleActiveView, selectedReadSource, sourceTabVisit, templateTab]);
 
   function openSourceTab(view: "templates" | "flows") {
     setActiveView(view);
@@ -1390,7 +1392,10 @@ export default function CreateTemplatesApp() {
         description: "Consulte, clone e gerencie os bots do contrato em um só lugar",
       }
     : visibleActiveView === "templates"
-      ? { title: "Templates", description: "Replicação de templates entre routers BLiP" }
+      ? {
+          title: "Templates",
+          description: "Criação e replicação de templates WhatsApp entre routers BLiP",
+        }
       : visibleActiveView === "flows"
         ? {
             title: "Flows",
@@ -4708,6 +4713,188 @@ export default function CreateTemplatesApp() {
           </div>
         )}
 
+        <section
+          className="ember-panel results-panel templates-workspace"
+          hidden={visibleActiveView !== "templates"}
+        >
+          <div className="ember-subtabs templates-subtabs" role="tablist" aria-label="Templates">
+            <button
+              type="button"
+              role="tab"
+              id="templates-list-tab"
+              aria-controls="templates-list-panel"
+              aria-selected={templateTab === "list"}
+              tabIndex={templateTab === "list" ? 0 : -1}
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? "list"
+                    : event.key === "End"
+                      ? "create"
+                      : templateTab === "list"
+                        ? "create"
+                        : "list";
+                setTemplateTab(next);
+                document.getElementById(`templates-${next}-tab`)?.focus();
+              }}
+              className={templateTab === "list" ? "active" : ""}
+              onClick={() => setTemplateTab("list")}
+            >
+              Templates existentes
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="templates-create-tab"
+              aria-controls="templates-create-panel"
+              aria-selected={templateTab === "create"}
+              tabIndex={templateTab === "create" ? 0 : -1}
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? "list"
+                    : event.key === "End"
+                      ? "create"
+                      : templateTab === "list"
+                        ? "create"
+                        : "list";
+                setTemplateTab(next);
+                document.getElementById(`templates-${next}-tab`)?.focus();
+              }}
+              className={templateTab === "create" ? "active" : ""}
+              onClick={() => setTemplateTab("create")}
+            >
+              Criar template
+            </button>
+          </div>
+          <div
+            role="tabpanel"
+            id="templates-create-panel"
+            aria-labelledby="templates-create-tab"
+            hidden={templateTab !== "create"}
+          >
+            <TemplateCreationTab
+              sourceId={sourceRouterDisplayId}
+              sourceScope={selectedReadSource}
+              sourceName={sourceRouterDisplayName}
+              hasSource={hasSourceRouterSelection()}
+              ensureSourceKey={ensureSourceRouterKey}
+              onSelectSource={openSourceModal}
+            />
+          </div>
+          <div
+            role="tabpanel"
+            id="templates-list-panel"
+            aria-labelledby="templates-list-tab"
+            hidden={templateTab !== "list"}
+          >
+            <div className="ember-panel-title results-title">
+              <div>
+                <h2>Templates</h2>
+                <p>
+                  {templateSearchResult.total} encontrados, {selectedTemplates.length} selecionados,{" "}
+                  {targetCount} destinos
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={toggleAllTemplates}
+                disabled={templateSearchResult.templates.length === 0}
+              >
+                {allVisibleTemplatesSelected ? (
+                  <CheckSquare size={18} aria-hidden="true" />
+                ) : (
+                  <Square size={18} aria-hidden="true" />
+                )}
+                Selecionar
+              </Button>
+            </div>
+
+            <form className="template-filter-row" onSubmit={handleSearchTemplates}>
+              <label className="blip-native-field template-search-field" htmlFor="templateName">
+                Nome do template
+                <input
+                  id="templateName"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="Buscar todos ou filtrar por nome"
+                />
+              </label>
+              <Button type="submit" loading={isSearchingTemplates}>
+                {!isSearchingTemplates && <Search size={18} aria-hidden="true" />}Buscar
+              </Button>
+              <ActionsMenu
+                actions={[
+                  {
+                    label: "Comparar routers",
+                    icon: <Search size={16} />,
+                    onSelect: () => {
+                      setError("");
+                      setCopyNotice("");
+                      setTemplateCompareResult(null);
+                      setIsTemplateCompareModalOpen(true);
+                    },
+                  },
+                  {
+                    label: targetCount ? `Editar destinos (${targetCount})` : "Configurar destinos",
+                    icon: <Network size={16} />,
+                    onSelect: openTargetsModal,
+                  },
+                  { label: "Limpar resultados", icon: <X size={16} />, onSelect: clearResults },
+                ]}
+              />
+            </form>
+            <SelectionBar
+              count={selectedTemplates.length}
+              targets={targetCount}
+              loading={isReplicatingTemplates}
+              disabled={isDeletingTemplates || isInspectingTemplateDeletion || isSearchingTemplates}
+              onTargets={openTargetsModal}
+              onReplicate={handleReplicateTemplates}
+              onClear={() => setSelectedTemplateKeys(new Set())}
+            >
+              <ActionsMenu
+                label="Ações em lote"
+                disabled={
+                  isInspectingTemplateDeletion || isDeletingTemplates || isReplicatingTemplates
+                }
+                actions={[
+                  {
+                    label: "Deletar na origem",
+                    icon: <Trash2 size={16} />,
+                    danger: true,
+                    onSelect: handleOpenSourceTemplateDeleteModal,
+                  },
+                  {
+                    label: "Deletar em massa",
+                    icon: <Trash2 size={16} />,
+                    danger: true,
+                    onSelect: handleOpenBulkTemplateDeleteModal,
+                  },
+                ]}
+              />
+            </SelectionBar>
+            {templateReplicateProgress && (
+              <OperationProgress
+                progress={templateReplicateProgress}
+                label="templates processados"
+              />
+            )}
+            <TemplateTable
+              templates={templateSearchResult.templates}
+              selected={selectedTemplateKeys}
+              loading={isSearchingTemplates}
+              loaded={templatesLoaded}
+              onToggle={toggleTemplate}
+            />
+          </div>
+        </section>
+
         {isManagerView && (
           <div className="ember-subtabs manager-tabs" role="tablist" aria-label="Bot Manager">
             {MANAGER_TABS.map(({ id, label, icon: Icon }) => (
@@ -5101,110 +5288,7 @@ export default function CreateTemplatesApp() {
               </>
             )}
           </section>
-        ) : visibleActiveView === "templates" ? (
-          <section className="ember-panel results-panel">
-            <div className="ember-panel-title results-title">
-              <div>
-                <h2>Templates</h2>
-                <p>
-                  {templateSearchResult.total} encontrados, {selectedTemplates.length} selecionados,{" "}
-                  {targetCount} destinos
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={toggleAllTemplates}
-                disabled={templateSearchResult.templates.length === 0}
-              >
-                {allVisibleTemplatesSelected ? (
-                  <CheckSquare size={18} aria-hidden="true" />
-                ) : (
-                  <Square size={18} aria-hidden="true" />
-                )}
-                Selecionar
-              </Button>
-            </div>
-
-            <form className="template-filter-row" onSubmit={handleSearchTemplates}>
-              <label className="blip-native-field template-search-field" htmlFor="templateName">
-                Nome do template
-                <input
-                  id="templateName"
-                  value={templateName}
-                  onChange={(event) => setTemplateName(event.target.value)}
-                  placeholder="Buscar todos ou filtrar por nome"
-                />
-              </label>
-              <Button type="submit" loading={isSearchingTemplates}>
-                {!isSearchingTemplates && <Search size={18} aria-hidden="true" />}Buscar
-              </Button>
-              <ActionsMenu
-                actions={[
-                  {
-                    label: "Comparar routers",
-                    icon: <Search size={16} />,
-                    onSelect: () => {
-                      setError("");
-                      setCopyNotice("");
-                      setTemplateCompareResult(null);
-                      setIsTemplateCompareModalOpen(true);
-                    },
-                  },
-                  {
-                    label: targetCount ? `Editar destinos (${targetCount})` : "Configurar destinos",
-                    icon: <Network size={16} />,
-                    onSelect: openTargetsModal,
-                  },
-                  { label: "Limpar resultados", icon: <X size={16} />, onSelect: clearResults },
-                ]}
-              />
-            </form>
-            <SelectionBar
-              count={selectedTemplates.length}
-              targets={targetCount}
-              loading={isReplicatingTemplates}
-              disabled={isDeletingTemplates || isInspectingTemplateDeletion || isSearchingTemplates}
-              onTargets={openTargetsModal}
-              onReplicate={handleReplicateTemplates}
-              onClear={() => setSelectedTemplateKeys(new Set())}
-            >
-              <ActionsMenu
-                label="Ações em lote"
-                disabled={
-                  isInspectingTemplateDeletion || isDeletingTemplates || isReplicatingTemplates
-                }
-                actions={[
-                  {
-                    label: "Deletar na origem",
-                    icon: <Trash2 size={16} />,
-                    danger: true,
-                    onSelect: handleOpenSourceTemplateDeleteModal,
-                  },
-                  {
-                    label: "Deletar em massa",
-                    icon: <Trash2 size={16} />,
-                    danger: true,
-                    onSelect: handleOpenBulkTemplateDeleteModal,
-                  },
-                ]}
-              />
-            </SelectionBar>
-            {templateReplicateProgress && (
-              <OperationProgress
-                progress={templateReplicateProgress}
-                label="templates processados"
-              />
-            )}
-            <TemplateTable
-              templates={templateSearchResult.templates}
-              selected={selectedTemplateKeys}
-              loading={isSearchingTemplates}
-              loaded={templatesLoaded}
-              onToggle={toggleTemplate}
-            />
-          </section>
-        ) : visibleActiveView === "flows" ? (
+        ) : visibleActiveView === "templates" ? null : visibleActiveView === "flows" ? (
           <section className="ember-panel results-panel">
             <div className="ember-panel-title results-title">
               <div>

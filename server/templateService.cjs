@@ -189,6 +189,7 @@ function buildTemplateResource(template) {
     components: template.components,
     language: template.language,
     name: template.name,
+    ...(template.parameter_format ? { parameter_format: template.parameter_format } : {}),
   };
 }
 
