@@ -24,6 +24,12 @@ Em **Bot Manager → Resumo**, consulte os bots acessíveis no contrato atual. *
 
 Alterne entre **Blocos** (cartões) e **Lista**. As duas visualizações mantêm as ações de abrir o bot no Portal e copiar **ID** e **Key**. Routers também mostram o estado do WhatsApp e permitem copiar **Número** quando conectado. A abertura no Portal depende do tenant disponível no cadastro do bot.
 
+O interruptor **Mostrar bots sem acesso**, inicialmente desligado, inclui os metadados de bots/routers sem permissão retornados pela listagem do Portal. Esses cards mostram **Sem acesso** e não consultam key, telefone ou equipe; seleção como origem e ações protegidas ficam desabilitadas. **Detalhes** continua disponível com apenas os metadados da listagem. A visibilidade depende da conta: o interruptor não amplia permissões nem garante uma listagem de todos os bots do contrato.
+
+No menu de três pontos, **Selecionar como origem** aparece somente para routers e define a origem de Templates, Flows e Plugins Manager. Builders oferecem apenas **Detalhes** nesse menu. Ao abrir Templates ou Flows, a extensão consulta automaticamente os dados do router selecionado; a troca de origem descarta as listas anteriores e respostas atrasadas não substituem os dados da nova origem. A busca manual continua disponível. **Detalhes** consulta o cadastro completo, mostra o proprietário informado em `emailOwner`, datas, descrição, contrato, tipo e WhatsApp. A key permanece mascarada e pode ser copiada. Pessoas com permissões diretas são agrupadas por identidade e área, com paginação; negação de acesso aparece como indisponibilidade, sem afirmar que a equipe está vazia. Esses acessos não representam todos os administradores do contrato.
+
+Em **Logs**, selecione uma requisição para consultar `request` e `response`, incluindo corpo completo, headers/status HTTP, respostas de erro e eventos de progresso. Registros do proxy incluem o comando e o envelope retornado. Textos, listas e objetos não são truncados; credenciais são ocultadas, inclusive em JSON serializado. Os últimos 200 registros ficam somente na memória da sessão. Não há persistência de logs no servidor.
+
 ## Baixar Fluxos
 
 Em **Bot Manager → Baixar Fluxos**, o filtro **Builders** inicia em **Somente do roteador**, usando o roteador de origem selecionado. **Todos com acesso** lista os Builders acessíveis no contrato atual. A busca filtra por nome ou ID do Builder. **Versão do fluxo** inicia em **Rascunho** (`working`); escolha **Publicada** (`published`) para ler os documentos da versão publicada.

@@ -47,35 +47,49 @@ export function clearActivityLog() {
   publish([]);
 }
 
-export function sanitizeActivityValue(value: unknown, depth = 0): unknown {
-  if (depth > 5) return "[detalhes omitidos]";
+/** Keep complete session payloads; redact credentials at every depth, including JSON strings. */
+export function sanitizeActivityValue(value: unknown, ancestors = new Set<object>()): unknown {
   if (typeof value === "string") {
-    const safe = value
-      .replace(/Key\s+[A-Za-z0-9+/=]{8,}/g, "Key [oculta]")
-      .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token oculto]");
-    return safe.length > 1200 ? `${safe.slice(0, 1200)}… [truncado]` : safe;
-  }
-  if (Array.isArray(value)) {
-    const items = value.slice(0, 30).map((item) => sanitizeActivityValue(item, depth + 1));
-    if (value.length > 30) items.push(`[mais ${value.length - 30} itens]`);
-    return items;
+    if (/^\s*[[{]/.test(value)) {
+      try {
+        return JSON.stringify(sanitizeActivityValue(JSON.parse(value), ancestors));
+      } catch {
+        // Plain text and malformed JSON are still useful diagnostics.
+      }
+    }
+    return value
+      .replace(/\b(?:Key|Bearer)\s+[A-Za-z0-9+/_=.-]+/gi, "[credencial oculta]")
+      .replace(
+        /([?&](?:access[_-]?token|api[_-]?key|key|token|password|secret)=)[^&#\s]*/gi,
+        "$1[oculto]",
+      )
+      .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token oculto]")
+      .replace(
+        /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+        "[chave privada oculta]",
+      );
   }
   if (value && typeof value === "object") {
+    if (ancestors.has(value)) return "[referência circular]";
+    const next = new Set(ancestors).add(value);
+    if (value instanceof Error)
+      return { name: value.name, message: sanitizeActivityValue(value.message) };
+    if (Array.isArray(value)) return value.map((item) => sanitizeActivityValue(item, next));
     return Object.fromEntries(
-      Object.entries(value)
-        .slice(0, 40)
-        .map(([key, item]) => [
+      Object.entries(value).map(([key, item]) => [
+        key,
+        /authorization|(?:access|router|builder|api|private)[_-]?keys?|secret|token|password|cookie|certificate|credential/i.test(
           key,
-          /authorization|access.?key|router.?key|secret|token|password|cookie/i.test(key)
-            ? "[oculto]"
-            : sanitizeActivityValue(item, depth + 1),
-        ]),
+        )
+          ? "[oculto]"
+          : sanitizeActivityValue(item, next),
+      ]),
     );
   }
   return value;
 }
 
-export function startActivity(kind: ActivityEntry["kind"], title: string) {
+export function startActivity(kind: ActivityEntry["kind"], title: string, payload?: unknown) {
   const id = crypto.randomUUID();
   publish([
     {
@@ -84,6 +98,7 @@ export function startActivity(kind: ActivityEntry["kind"], title: string) {
       kind,
       title: String(sanitizeActivityValue(title)),
       status: "running",
+      payload: sanitizeActivityValue(payload),
       startedAt: new Date().toISOString(),
     },
     ...entries,
@@ -105,7 +120,7 @@ export function finishActivity(
             status,
             finishedAt: new Date().toISOString(),
             detail: detail ? String(sanitizeActivityValue(detail)) : undefined,
-            payload: payload === undefined ? undefined : sanitizeActivityValue(payload),
+            payload: payload === undefined ? entry.payload : sanitizeActivityValue(payload),
           }
         : entry,
     ),

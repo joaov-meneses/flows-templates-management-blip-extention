@@ -115,7 +115,8 @@ export async function sendPortalMessage(
   const label = command
     ? `${String(command.method || "command").toUpperCase()} ${safeUri || "(sem URI)"} · ${action}`
     : action;
-  const activityId = startActivity("request", label);
+  const request = { action, content, options };
+  const activityId = startActivity("request", label, { request });
   try {
     const iframeMessageProxy = await getIframeMessageProxy();
     if (!iframeMessageProxy) {
@@ -141,10 +142,16 @@ export async function sendPortalMessage(
       activityId,
       status === "failure" ? "error" : "success",
       String(status || "Resposta recebida"),
+      { request, response: result },
     );
     return response;
   } catch (error) {
-    finishActivity(activityId, "error", error instanceof Error ? error.message : "Falha no Portal");
+    finishActivity(
+      activityId,
+      "error",
+      error instanceof Error ? error.message : "Falha no Portal",
+      { request, error },
+    );
     throw error;
   }
 }

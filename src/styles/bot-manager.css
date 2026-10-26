@@ -62,7 +62,7 @@
 .manager-directory-list .router-directory-card-main {
   min-width: 0;
 }
-.manager-directory-list .router-directory-card-actions {
+.manager-directory-list .router-directory-card .router-directory-card-actions {
   border-top: 0;
   padding-top: 0;
 }
@@ -151,4 +151,92 @@
   .manager-download-actions > span {
     flex-basis: 100%;
   }
+}
+
+.router-directory-card .router-directory-card-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+}
+.router-directory-card .router-directory-card-actions.builders {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+}
+.bot-details-modal {
+  width: min(840px, calc(100vw - 32px));
+}
+.bot-details-body {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  overflow: auto;
+  min-height: 0;
+}
+.bot-details-body > p[role="status"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bot-details-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+  margin: 0;
+}
+.bot-details-fields dt,
+.bot-access-person dt {
+  color: var(--blip-content-soft);
+  font-size: 12px;
+}
+.bot-details-fields dd,
+.bot-access-person dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--blip-content);
+}
+.bot-details-wide,
+.bot-details-key {
+  grid-column: 1 / -1;
+}
+.bot-details-key dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.bot-details-body summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.bot-details-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+}
+.bot-access-person {
+  border-bottom: 1px solid var(--blip-border);
+  padding: 12px 0;
+}
+.bot-access-person dl {
+  display: grid;
+  gap: 10px;
+}
+.bot-access-person summary span,
+.bot-details-body section > p {
+  color: var(--blip-content-soft);
+  font-size: 13px;
+}
+@media (max-width: 560px) {
+  .bot-details-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bot-details-body {
+    padding: 16px;
+  }
+}
+
+.manager-access-switch {
+  align-self: center;
+  margin-top: 20px;
+}
+.router-directory-copy .router-directory-access {
+  color: var(--blip-content-soft);
+  font-weight: 700;
 }

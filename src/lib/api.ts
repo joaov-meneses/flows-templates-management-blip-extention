@@ -1,7 +1,54 @@
 import { finishActivity, startActivity } from "./activityLog.ts";
 
+type RequestTrace = {
+  request: { method: string; url: string; headers: Record<string, string>; body: unknown };
+  response?: {
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body?: unknown;
+  };
+  error?: unknown;
+};
+
+function newTrace(path: string, body: unknown): RequestTrace {
+  const serialized = JSON.stringify(body);
+  return {
+    request: {
+      method: "POST",
+      url: path,
+      headers: { "Content-Type": "application/json" },
+      body: serialized === undefined ? null : JSON.parse(serialized),
+    },
+  };
+}
+
+function traceResponse(trace: RequestTrace, response: Response) {
+  trace.response = {
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries()),
+  };
+}
+
+async function readResponse(response: Response, trace: RequestTrace) {
+  const raw = await response.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    data = null;
+  }
+  trace.response!.body = data === null ? raw : data;
+  return data;
+}
+
 /** Shared transport: reject proxy HTML and empty responses with actionable feedback. */
-async function postJsonInternal<TResponse>(path: string, body: unknown): Promise<TResponse> {
+async function postJsonInternal<TResponse>(
+  path: string,
+  body: unknown,
+  trace: RequestTrace,
+): Promise<TResponse> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -14,7 +61,8 @@ async function postJsonInternal<TResponse>(path: string, body: unknown): Promise
       "A conexão com o servidor foi interrompida. Verifique sua conexão. Se você enviou uma alteração, atualize a lista para conferir o resultado antes de repetir.",
     );
   }
-  const data = await response.json().catch(() => null);
+  traceResponse(trace, response);
+  const data = await readResponse(response, trace);
   if (!response.ok) {
     const messages: Record<number, string> = {
       401: "A sessão expirou. Abra novamente a extensão pelo Portal Blip.",
@@ -46,16 +94,18 @@ async function postJsonInternal<TResponse>(path: string, body: unknown): Promise
 }
 
 export async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
-  const activityId = startActivity("request", `POST ${path}`);
+  const trace = newTrace(path, body);
+  const activityId = startActivity("request", `POST ${path}`, trace);
   try {
-    const result = await postJsonInternal<TResponse>(path, body);
-    finishActivity(activityId, "success", "Resposta recebida");
+    const result = await postJsonInternal<TResponse>(path, body, trace);
+    finishActivity(activityId, "success", "Resposta recebida", trace);
     return result;
   } catch (error) {
     finishActivity(
       activityId,
       "error",
       error instanceof Error ? error.message : "Falha na requisição",
+      { ...trace, error },
     );
     throw error;
   }
@@ -72,6 +122,7 @@ async function postJsonWithProgressInternal<TResponse>(
   path: string,
   body: unknown,
   onProgress: (progress: OperationProgress) => void,
+  trace: RequestTrace,
 ): Promise<TResponse> {
   let response: Response;
   try {
@@ -83,7 +134,9 @@ async function postJsonWithProgressInternal<TResponse>(
   } catch {
     throw new Error("Conexão interrompida. Confira o resultado nos destinos antes de repetir.");
   }
+  traceResponse(trace, response);
   if (!response.ok || !response.body) {
+    await readResponse(response, trace);
     throw new Error(`Não foi possível iniciar a operação (HTTP ${response.status}).`);
   }
 
@@ -91,14 +144,18 @@ async function postJsonWithProgressInternal<TResponse>(
   const decoder = new TextDecoder();
   let buffer = "";
   let result: TResponse | undefined;
+  const events: unknown[] = [];
+  trace.response!.body = events;
   const consume = (line: string) => {
     if (!line.trim()) return;
     let event: Record<string, unknown>;
     try {
       event = JSON.parse(line) as Record<string, unknown>;
     } catch {
+      events.push(line);
       throw new Error("O servidor enviou uma atualização de progresso inválida.");
     }
+    events.push(event);
     if (!event || typeof event !== "object" || Array.isArray(event)) {
       throw new Error("O servidor enviou uma atualização de progresso inválida.");
     }
@@ -158,16 +215,18 @@ export async function postJsonWithProgress<TResponse>(
   body: unknown,
   onProgress: (progress: OperationProgress) => void,
 ): Promise<TResponse> {
-  const activityId = startActivity("request", `POST ${path}`);
+  const trace = newTrace(path, body);
+  const activityId = startActivity("request", `POST ${path}`, trace);
   try {
-    const result = await postJsonWithProgressInternal<TResponse>(path, body, onProgress);
-    finishActivity(activityId, "success", "Operação concluída");
+    const result = await postJsonWithProgressInternal<TResponse>(path, body, onProgress, trace);
+    finishActivity(activityId, "success", "Operação concluída", trace);
     return result;
   } catch (error) {
     finishActivity(
       activityId,
       "error",
       error instanceof Error ? error.message : "Falha na operação",
+      { ...trace, error },
     );
     throw error;
   }

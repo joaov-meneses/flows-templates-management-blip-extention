@@ -67,6 +67,7 @@ import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
 import { BulkPublicationTab } from "./BulkPublicationTab";
 import { BuilderDownloadsTab } from "./BuilderDownloadsTab";
+import { BotDetailsModal } from "./BotDetailsModal";
 import "../styles/bot-manager.css";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
@@ -82,7 +83,6 @@ import {
   getActiveTenantId,
   getApplicationListUri,
   matchesRouterSearch,
-  readWhatsAppPhone,
   type RouterPhone,
 } from "../lib/routerDirectory";
 import {
@@ -447,7 +447,7 @@ function extractCommandResource(response: unknown) {
 }
 function extractPortalApplications(
   response: unknown,
-  options: { templateFilter?: "master" | "non-master" } = {},
+  options: { templateFilter?: "master" | "non-master"; includeInaccessible?: boolean } = {},
 ): PortalApplicationAccount[] {
   const resource = extractCommandResource(response);
   if (!isRecord(resource) || !Array.isArray(resource.items)) {
@@ -464,7 +464,8 @@ function extractPortalApplications(
           : item.template !== "master");
 
       return (
-        item.hasPermission === true &&
+        (item.hasPermission === true ||
+          (options.includeInaccessible === true && item.hasPermission === false)) &&
         matchesTemplateFilter &&
         typeof item.shortName === "string" &&
         typeof item.name === "string"
@@ -773,9 +774,19 @@ export default function CreateTemplatesApp() {
   const [routerPhoneNumbers, setRouterPhoneNumbers] = useState<
     Record<string, RouterPhone | { status: "loading" | "unavailable"; phoneNumber: null }>
   >({});
+  const [showInaccessibleBots, setShowInaccessibleBots] = useState(false);
+  const [restrictedRouterApplications, setRestrictedRouterApplications] = useState<
+    PortalApplicationAccount[]
+  >([]);
+  const [restrictedBuilderApplications, setRestrictedBuilderApplications] = useState<
+    PortalApplicationAccount[]
+  >([]);
   const routerListRequestId = useRef(0);
   const [isLoadingRouterApplications, setIsLoadingRouterApplications] = useState(false);
   const [routerKeyActionId, setRouterKeyActionId] = useState("");
+  const [detailsApplication, setDetailsApplication] = useState<PortalApplicationAccount | null>(
+    null,
+  );
   const [currentApplicationRouter, setCurrentApplicationRouter] =
     useState<CurrentApplicationRouter | null>(null);
   const [newFlowName, setNewFlowName] = useState("");
@@ -899,6 +910,12 @@ export default function CreateTemplatesApp() {
   const [isLoadingCurrentApplication, setIsLoadingCurrentApplication] = useState(false);
   const isEmbedded = useIframeAutoHeight(shellRef);
   const visibleActiveView = activeView;
+  const selectedReadSource = isEmbedded ? sourceRouterShortName : sourceRouterKey.trim();
+  const sourceReadScope = useRef(selectedReadSource);
+  sourceReadScope.current = selectedReadSource;
+  const sourceReadRequests = useRef({ templates: 0, flows: 0 });
+  const pendingSourceReads = useRef({ templates: "", flows: "" });
+  const [sourceTabVisit, setSourceTabVisit] = useState(0);
   const isManagerView = ["routers", "bots", "inactivity", "downloads"].includes(visibleActiveView);
   const visibleActivityEntries = activityEntries.filter(
     (entry) => activityFilter === "all" || entry.view === activityFilter,
@@ -934,29 +951,51 @@ export default function CreateTemplatesApp() {
     }
   }
   const pageOperationResult = operationResult?.view === visibleActiveView ? operationResult : null;
-  const activeModalId = botPicker
-    ? "bot-picker"
-    : isBulkBotPickerOpen
-      ? "bulk-bot-picker"
-      : isRouterAuditModalOpen
-        ? "router-clone-audit"
-        : routerModal
-          ? "router"
-          : isBulkFlowMappingModalOpen
-            ? "bulk-flow-mapping"
-            : isEditFlowModalOpen
-              ? "edit-flow"
-              : isCreateFlowModalOpen
-                ? "create-flow"
-                : isTemplateDeleteModalOpen
-                  ? "template-delete"
-                  : isTemplateCompareModalOpen
-                    ? "template-compare"
-                    : null;
+  const activeModalId = detailsApplication
+    ? "bot-details"
+    : botPicker
+      ? "bot-picker"
+      : isBulkBotPickerOpen
+        ? "bulk-bot-picker"
+        : isRouterAuditModalOpen
+          ? "router-clone-audit"
+          : routerModal
+            ? "router"
+            : isBulkFlowMappingModalOpen
+              ? "bulk-flow-mapping"
+              : isEditFlowModalOpen
+                ? "edit-flow"
+                : isCreateFlowModalOpen
+                  ? "create-flow"
+                  : isTemplateDeleteModalOpen
+                    ? "template-delete"
+                    : isTemplateCompareModalOpen
+                      ? "template-compare"
+                      : null;
 
   useEffect(() => {
     setActivityView(visibleActiveView);
   }, [visibleActiveView]);
+
+  useEffect(() => {
+    sourceReadRequests.current.templates++;
+    sourceReadRequests.current.flows++;
+    pendingSourceReads.current = { templates: "", flows: "" };
+    setIsSearchingTemplates(false);
+    setIsLoadingFlows(false);
+  }, [selectedReadSource]);
+
+  useEffect(() => {
+    if (!selectedReadSource) return;
+    if (visibleActiveView === "templates") void handleSearchTemplates();
+    if (visibleActiveView === "flows") void handleLoadFlows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Entering a tab or changing its source starts one read; typing filters does not.
+  }, [visibleActiveView, selectedReadSource, sourceTabVisit]);
+
+  function openSourceTab(view: "templates" | "flows") {
+    setActiveView(view);
+    setSourceTabVisit((visit) => visit + 1);
+  }
 
   useEffect(() => {
     if (isEmbedded) void loadRouterApplications(true);
@@ -1142,24 +1181,36 @@ export default function CreateTemplatesApp() {
   }, [routerApplicationSearch, routerApplications]);
 
   const filteredDirectoryRouterApplications = useMemo(() => {
-    return routerApplications.filter((application) =>
+    return [
+      ...routerApplications,
+      ...(showInaccessibleBots ? restrictedRouterApplications : []),
+    ].filter((application) =>
       matchesRouterSearch(
         application,
         routerPhoneNumbers[application.shortName]?.phoneNumber ?? null,
         routerDirectorySearch,
       ),
     );
-  }, [routerApplications, routerDirectorySearch, routerPhoneNumbers]);
+  }, [
+    routerApplications,
+    restrictedRouterApplications,
+    showInaccessibleBots,
+    routerDirectorySearch,
+    routerPhoneNumbers,
+  ]);
 
   const filteredDirectoryBuilderApplications = useMemo(() => {
     const query = routerDirectorySearch.trim().toLowerCase();
-    return botApplications.filter(
+    return [
+      ...botApplications,
+      ...(showInaccessibleBots ? restrictedBuilderApplications : []),
+    ].filter(
       (application) =>
         !query ||
         application.name.toLowerCase().includes(query) ||
         application.shortName.toLowerCase().includes(query),
     );
-  }, [botApplications, routerDirectorySearch]);
+  }, [botApplications, restrictedBuilderApplications, showInaccessibleBots, routerDirectorySearch]);
 
   const directoryApplications = [
     ...(directoryTab !== "builders" ? filteredDirectoryRouterApplications : []),
@@ -1402,24 +1453,16 @@ export default function CreateTemplatesApp() {
         const application = ordered[nextIndex++];
         let result: RouterPhone | { status: "unavailable"; phoneNumber: null };
         try {
-          if (application.shortName === currentRouter.shortName) {
-            const response = await sendBlipCommand(
-              {
-                id: createCommandId(),
-                method: COMMAND_METHODS.GET,
-                to: "postmaster@configurations.msging.net",
-                uri: "/configuration/gateways",
-              },
-              { destination: PORTAL_COMMAND_DESTINATION, timeout: 15000 },
-            );
-            result = readWhatsAppPhone(extractCommandResource(response));
-          } else {
-            const router = await loadRouterKey(application.shortName);
-            result = await postJson<RouterPhone>("/api/routers/whatsapp-number", {
-              routerKey: router.key,
-              routerShortName: application.shortName,
-            });
-          }
+          // A Portal administrative command is not a Messaging Hub command.
+          // Resolve the selected bot's key for every router, including the current one.
+          const key =
+            application.shortName === currentRouter.shortName && currentRouter.accessKey
+              ? buildRouterKey(application.shortName, currentRouter.accessKey)
+              : (await loadRouterKey(application.shortName)).key;
+          result = await postJson<RouterPhone>("/api/routers/whatsapp-number", {
+            routerKey: key,
+            routerShortName: application.shortName,
+          });
         } catch {
           result = { phoneNumber: null, status: "unavailable" };
         }
@@ -1455,6 +1498,15 @@ export default function CreateTemplatesApp() {
       if (requestId !== routerListRequestId.current) return;
       setCurrentApplicationRouter(currentRouter);
       setRouterApplications(applications);
+      setRestrictedRouterApplications(
+        extractPortalApplications(response, {
+          templateFilter: "master",
+          includeInaccessible: true,
+        }).filter(
+          (application) =>
+            application.hasPermission === false && application.tenantId?.toLowerCase() === tenantId,
+        ),
+      );
       if (withPhoneNumbers && applications.length) {
         setRouterPhoneNumbers(
           Object.fromEntries(
@@ -1472,6 +1524,7 @@ export default function CreateTemplatesApp() {
         caughtError instanceof Error ? caughtError.message : "Erro ao carregar routers.";
 
       setRouterApplications([]);
+      setRestrictedRouterApplications([]);
       setRouterApplicationsError(message);
     } finally {
       if (requestId === routerListRequestId.current) setIsLoadingRouterApplications(false);
@@ -1494,9 +1547,19 @@ export default function CreateTemplatesApp() {
         templateFilter: "non-master",
       }).filter((application) => application.tenantId?.toLowerCase() === tenantId);
       setBotApplications(applications);
+      setRestrictedBuilderApplications(
+        extractPortalApplications(response, {
+          templateFilter: "non-master",
+          includeInaccessible: true,
+        }).filter(
+          (application) =>
+            application.hasPermission === false && application.tenantId?.toLowerCase() === tenantId,
+        ),
+      );
       return applications;
     } catch (caughtError) {
       setBotApplications([]);
+      setRestrictedBuilderApplications([]);
       setBotApplicationsError(getErrorMessage(caughtError, "Erro ao carregar builders."));
       return [];
     } finally {
@@ -1678,6 +1741,20 @@ export default function CreateTemplatesApp() {
     }
   }
 
+  function selectDirectorySource(application: PortalApplicationAccount) {
+    if (application.hasPermission !== true || application.template !== "master") return;
+    const changed = application.shortName !== sourceRouterShortName;
+    setSourceRouterShortName(application.shortName);
+    setSourceRouterKey("");
+    setTargetRouterShortNames((current) => removeRouterSelection(current, application.shortName));
+    setTargetRouterKeys("");
+    if (changed) clearTemplateAndFlowResults();
+    clearPluginManagerState();
+    setError("");
+    setStartupError("");
+    setCopyNotice(`"${application.name}" selecionado como origem.`);
+  }
+
   async function handleCopyRouterId(application: PortalApplicationAccount) {
     setError("");
 
@@ -1705,6 +1782,7 @@ export default function CreateTemplatesApp() {
   }
 
   async function handleCopyRouterKey(application: PortalApplicationAccount) {
+    if (application.hasPermission !== true) return;
     setError("");
     setCopyNotice("");
     setRouterKeyActionId(application.shortName);
@@ -1755,7 +1833,11 @@ export default function CreateTemplatesApp() {
       return key;
     }
 
-    const router = await loadRouterKey(sourceRouterShortName);
+    const requestedSource = sourceRouterShortName;
+    const router = await loadRouterKey(requestedSource);
+    if (sourceReadScope.current !== requestedSource) {
+      throw new Error("O router de origem mudou durante a consulta.");
+    }
 
     setSourceRouterKey(router.key);
     setSourceRouterShortName(router.shortName);
@@ -1841,8 +1923,10 @@ export default function CreateTemplatesApp() {
     }
   }
 
-  async function handleSearchTemplates(event: FormEvent) {
-    event.preventDefault();
+  async function handleSearchTemplates(event?: FormEvent) {
+    event?.preventDefault();
+    const scope = selectedReadSource;
+    if (scope && pendingSourceReads.current.templates === scope) return;
     setError("");
     setOperationResult(null);
     if (!hasSourceRouterSelection()) {
@@ -1850,23 +1934,32 @@ export default function CreateTemplatesApp() {
       openSourceModal();
       return;
     }
+    const request = ++sourceReadRequests.current.templates;
+    pendingSourceReads.current.templates = scope;
+    const current = () =>
+      sourceReadScope.current === scope && sourceReadRequests.current.templates === request;
     setIsSearchingTemplates(true);
     try {
       const sourceKey = await ensureSourceRouterKey();
+      if (!current()) return;
       const data = await postJson<SearchResponse>("/api/templates/search", {
         sourceRouterKey: sourceKey,
         templateName: templateName.trim(),
         onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved,
       });
+      if (!current()) return;
       setTemplateSearchResult(data);
       setTemplatesLoaded(true);
       setSelectedTemplateKeys(
         data.templates.length === 1 ? new Set([templateKey(data.templates[0])]) : new Set(),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao buscar templates.");
+      if (current()) setError(e instanceof Error ? e.message : "Erro ao buscar templates.");
     } finally {
-      setIsSearchingTemplates(false);
+      if (sourceReadRequests.current.templates === request) {
+        pendingSourceReads.current.templates = "";
+        setIsSearchingTemplates(false);
+      }
     }
   }
 
@@ -2259,6 +2352,8 @@ export default function CreateTemplatesApp() {
 
   async function handleLoadFlows(event?: FormEvent) {
     event?.preventDefault();
+    const scope = selectedReadSource;
+    if (scope && pendingSourceReads.current.flows === scope) return;
     setError("");
     setOperationResult(null);
     if (!hasSourceRouterSelection()) {
@@ -2266,21 +2361,31 @@ export default function CreateTemplatesApp() {
       openSourceModal();
       return;
     }
+    const request = ++sourceReadRequests.current.flows;
+    pendingSourceReads.current.flows = scope;
+    const current = () =>
+      sourceReadScope.current === scope && sourceReadRequests.current.flows === request;
     setIsLoadingFlows(true);
     try {
-      await loadFlowsFromSource();
+      await loadFlowsFromSource(undefined, current);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar flows.");
+      if (current()) setError(e instanceof Error ? e.message : "Erro ao carregar flows.");
     } finally {
-      setIsLoadingFlows(false);
+      if (sourceReadRequests.current.flows === request) {
+        pendingSourceReads.current.flows = "";
+        setIsLoadingFlows(false);
+      }
     }
   }
 
-  async function loadFlowsFromSource(sourceKey?: string) {
+  async function loadFlowsFromSource(sourceKey?: string, current = () => true) {
+    const scope = sourceReadScope.current;
     const resolvedSourceKey = sourceKey ?? (await ensureSourceRouterKey());
+    if (sourceReadScope.current !== scope || !current()) return;
     const data = await postJson<FlowSearchResponse>("/api/flows/search", {
       sourceRouterKey: resolvedSourceKey,
     });
+    if (sourceReadScope.current !== scope || !current()) return data;
     setFlowSearchResult(data);
     setFlowsLoaded(true);
     setSelectedFlowIds(data.flows.length === 1 ? new Set([flowKey(data.flows[0])]) : new Set());
@@ -4189,6 +4294,9 @@ export default function CreateTemplatesApp() {
 
   function closeActiveModal() {
     switch (activeModalId) {
+      case "bot-details":
+        setDetailsApplication(null);
+        return;
       case "bot-picker":
         if (!isResolvingBotSourceKey && !isResolvingBotTargetKey) setBotPicker(null);
         return;
@@ -4434,7 +4542,7 @@ export default function CreateTemplatesApp() {
           <button
             className={visibleActiveView === "templates" ? "active" : ""}
             type="button"
-            onClick={() => setActiveView("templates")}
+            onClick={() => openSourceTab("templates")}
             disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "templates" ? "page" : undefined}
           >
@@ -4444,7 +4552,7 @@ export default function CreateTemplatesApp() {
           <button
             className={visibleActiveView === "flows" ? "active" : ""}
             type="button"
-            onClick={() => setActiveView("flows")}
+            onClick={() => openSourceTab("flows")}
             disabled={isPublishingBuilders}
             aria-current={visibleActiveView === "flows" ? "page" : undefined}
           >
@@ -4739,6 +4847,19 @@ export default function CreateTemplatesApp() {
                       <option value="builders">Builders</option>
                     </select>
                   </label>
+                  <label className="blip-switch-option manager-access-switch">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      checked={showInaccessibleBots}
+                      onChange={(event) => setShowInaccessibleBots(event.target.checked)}
+                      aria-describedby="directory-access-help"
+                    />
+                    <span className="flow-switch-track" aria-hidden="true">
+                      <span className="flow-switch-thumb" />
+                    </span>
+                    <span className="blip-switch-label">Mostrar bots sem acesso</span>
+                  </label>
                   <div className="manager-layout-field">
                     <span>Visualização</span>
                     <div className="manager-layout" role="group" aria-label="Visualização dos bots">
@@ -4763,7 +4884,15 @@ export default function CreateTemplatesApp() {
                 </div>
                 <p className="manager-context">
                   {directoryApplications.length} bot(s)
-                  {routerDirectorySearch ? " encontrados" : " disponíveis"}
+                  {routerDirectorySearch ? " encontrados" : " listados"}
+                  {showInaccessibleBots &&
+                    ` · ${directoryApplications.filter((application) => application.hasPermission === false).length} sem acesso`}
+                </p>
+
+                <p className="manager-context" id="directory-access-help">
+                  {showInaccessibleBots
+                    ? "Exibe também bots sem acesso retornados pelo Portal. Sua conta pode não ter permissão para listar todos os bots do contrato."
+                    : "Mostrando somente bots com acesso."}
                 </p>
 
                 {directoryTab !== "builders" &&
@@ -4799,7 +4928,8 @@ export default function CreateTemplatesApp() {
                   >
                     {directoryApplications.map((application) => {
                       const isRouter = application.template === "master";
-                      const routerUrl = buildRouterUrl(application);
+                      const hasAccess = application.hasPermission === true;
+                      const routerUrl = hasAccess ? buildRouterUrl(application) : "";
                       const isCopyingKey = routerKeyActionId === application.shortName;
                       const phone = routerPhoneNumbers[application.shortName];
 
@@ -4814,7 +4944,9 @@ export default function CreateTemplatesApp() {
                             title={
                               routerUrl
                                 ? `Abrir ${application.name} no Portal BLiP`
-                                : "Tenant não disponível para abrir este bot."
+                                : !hasAccess
+                                  ? "Você não tem acesso a este bot."
+                                  : "Tenant não disponível para abrir este bot."
                             }
                           >
                             <span className="router-directory-avatar">
@@ -4835,16 +4967,21 @@ export default function CreateTemplatesApp() {
                               )}
                               <span>{application.shortName}</span>
                               {application.tenantId && <small>{application.tenantId}</small>}
+                              {!hasAccess && (
+                                <small className="router-directory-access">Sem acesso</small>
+                              )}
                               {isRouter && (
                                 <small className="router-directory-phone">
                                   WhatsApp:{" "}
-                                  {phone?.status === "connected"
-                                    ? phone.phoneNumber
-                                    : phone?.status === "not-connected"
-                                      ? "não conectado"
-                                      : phone?.status === "unavailable"
-                                        ? "consulta indisponível"
-                                        : "consultando…"}
+                                  {!hasAccess
+                                    ? "sem acesso"
+                                    : phone?.status === "connected"
+                                      ? phone.phoneNumber
+                                      : phone?.status === "not-connected"
+                                        ? "não conectado"
+                                        : phone?.status === "unavailable"
+                                          ? "consulta indisponível"
+                                          : "consultando…"}
                                 </small>
                               )}
                             </span>
@@ -4860,7 +4997,7 @@ export default function CreateTemplatesApp() {
                                 type="button"
                                 aria-label={`Copiar número de ${application.name}`}
                                 onClick={() => void handleCopyRouterPhone(application)}
-                                disabled={phone?.status !== "connected"}
+                                disabled={!hasAccess || phone?.status !== "connected"}
                               >
                                 <Clipboard size={16} aria-hidden="true" />
                                 Número
@@ -4882,7 +5019,7 @@ export default function CreateTemplatesApp() {
                               type="button"
                               aria-label={`Copiar key de ${application.name}`}
                               onClick={() => void handleCopyRouterKey(application)}
-                              disabled={Boolean(routerKeyActionId)}
+                              disabled={!hasAccess || Boolean(routerKeyActionId)}
                             >
                               {isCopyingKey ? (
                                 <LoaderCircle className="spin" size={16} aria-hidden="true" />
@@ -4891,6 +5028,30 @@ export default function CreateTemplatesApp() {
                               )}
                               Key
                             </Button>
+                            <ActionsMenu
+                              compact
+                              label={`Mais ações de ${application.name}`}
+                              actions={[
+                                {
+                                  label: "Selecionar como origem",
+                                  hidden: !isRouter,
+                                  icon: <Check size={16} aria-hidden="true" />,
+                                  onSelect: () => void selectDirectorySource(application),
+                                  disabled:
+                                    !hasAccess ||
+                                    isResolvingBotSourceKey ||
+                                    isCloningBot ||
+                                    isCloningRouter ||
+                                    isPublishingBuilders ||
+                                    isBulkCreatingBots,
+                                },
+                                {
+                                  label: "Detalhes",
+                                  icon: <Eye size={16} aria-hidden="true" />,
+                                  onSelect: () => setDetailsApplication(application),
+                                },
+                              ]}
+                            />
                           </div>
                         </article>
                       );
@@ -6208,7 +6369,10 @@ export default function CreateTemplatesApp() {
             <div className="ember-panel-title results-title">
               <div>
                 <h2>Logs da sessão</h2>
-                <p>{activityEntries.length} registro(s) desde a abertura desta extensão.</p>
+                <p>
+                  {activityEntries.length} registro(s) nesta sessão. Corpos completos; credenciais
+                  ocultas.
+                </p>
               </div>
               <div className="activity-toolbar">
                 <label className="blip-native-field" htmlFor="activityFilter">
@@ -6527,6 +6691,16 @@ export default function CreateTemplatesApp() {
               </table>
             </div>
           </section>
+        )}
+
+        {detailsApplication && (
+          <BotDetailsModal
+            application={detailsApplication}
+            phone={routerPhoneNumbers[detailsApplication.shortName]}
+            onClose={() => setDetailsApplication(null)}
+            resolveKey={loadRouterKey}
+            copyText={copyText}
+          />
         )}
 
         {isTemplateCompareModalOpen && (

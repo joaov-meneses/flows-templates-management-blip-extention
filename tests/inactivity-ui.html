@@ -9,6 +9,7 @@
     <p style="margin: 0; padding: 8px; font: 13px system-ui">
       Validação local · bots e rascunhos fictícios
       <output id="fixture-operations">0 salvamentos · 0 publicações</output>
+      <output id="fixture-restricted-reads">0 consultas protegidas ao bot sem acesso</output>
       <label>
         Conta fictícia:
         <select id="fixture-account">
@@ -27,6 +28,14 @@
         </select>
       </label>
       <output id="fixture-key-checks">0 consultas de public key</output>
+      <output id="fixture-source-reads">Templates: 0 · Flows: 0</output>
+      <label
+        >Atraso na busca (fictício):
+        <select id="fixture-source-delay">
+          <option value="0">Sem atraso</option>
+          <option value="5000">5 segundos</option>
+        </select></label
+      >
     </p>
     <iframe
       title="Extensão com dados fictícios"
@@ -57,6 +66,7 @@
         document.body.style.width = `${fixtureWidth}px`;
       let saves = 0;
       let publications = 0;
+      let restrictedReads = 0;
       const builders = [
         {
           shortName: "builder_agendamento",
@@ -157,12 +167,41 @@
           };
         else if (message?.action === "blipEvent:sendCommand") {
           const uri = message.content.command.uri;
+          if (uri.startsWith("/applications/sem_acesso@msging.net")) {
+            document.querySelector("#fixture-restricted-reads").textContent =
+              `${++restrictedReads} consultas protegidas ao bot sem acesso`;
+            response = { status: "failure", reason: { code: 66, description: "Sem acesso" } };
+            event.source.postMessage(
+              { trackingProperties: event.data.trackingProperties, response },
+              event.origin,
+            );
+            return;
+          }
           if (uri.endsWith("/whatsapp-flows/public-key/upload")) {
             response = {
               status: "failure",
               reason: {
                 code: 26,
                 description: "The 'pp' property must be specified when sending delegate envelopes",
+              },
+            };
+          } else if (uri.includes("/permissions?")) {
+            response = {
+              status: "success",
+              resource: {
+                total: 2,
+                items: [
+                  {
+                    userIdentity: "owner@example.test",
+                    permissionId: "builder",
+                    actions: ["read", "write"],
+                  },
+                  {
+                    userIdentity: "viewer@example.test",
+                    permissionId: "channels",
+                    actions: ["read"],
+                  },
+                ],
               },
             };
           } else if (uri.includes("/users/"))
@@ -175,6 +214,13 @@
               resource: {
                 shortName: uri.split("/").pop().split("@")[0],
                 accessKey: btoa("fake-local-key"),
+                name: "Bot fictício",
+                tenantId: "test",
+                template: uri.includes("router") ? "master" : "builder",
+                emailOwner: "owner@example.test",
+                hasPermission: true,
+                created: "2026-10-01T12:00:00Z",
+                description: "Cadastro de teste. Nenhuma chamada a bots reais.",
               },
             };
           else response = { status: "success", resource: {} };

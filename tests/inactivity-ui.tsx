@@ -8,6 +8,7 @@ import "../src/styles.css";
 const drafts = new Map<string, InactivityAnalysis>();
 let version = 1;
 let keyChecks = 0;
+const sourceReads = { templates: 0, flows: 0 };
 function initialDraft(): InactivityAnalysis {
   return {
     revision: "fixture-1",
@@ -29,6 +30,37 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  let readSource = "";
+  if (path === "/api/templates/search" || path === "/api/flows/search") {
+    const request = JSON.parse(String(options?.body || "{}"));
+    readSource = atob(request.sourceRouterKey.slice(4)).split(":")[0];
+    const kind = path.includes("templates") ? "templates" : "flows";
+    sourceReads[kind]++;
+    const parent = window.parent.document;
+    parent.querySelector("#fixture-source-reads")!.textContent =
+      `Templates: ${sourceReads.templates} · Flows: ${sourceReads.flows} · última busca: ${kind}/${readSource}`;
+    const delay = Number(
+      (parent.querySelector("#fixture-source-delay") as HTMLSelectElement).value,
+    );
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+  }
+  if (path === "/api/templates/search") {
+    return Response.json({
+      search: { templateName: "", onlyApproved: true },
+      total: 1,
+      templates: [
+        {
+          name: `template_${readSource}`,
+          language: "pt_BR",
+          category: "MARKETING",
+          status: "APPROVED",
+          components: [],
+        },
+      ],
+    });
+  }
+  if (path === "/api/routers/whatsapp-number")
+    return Response.json({ status: "connected", phoneNumber: "5511999990000" });
   if (path === "/api/flows/public-key") {
     const body = JSON.parse(String(options?.body || "{}"));
     const shortName = atob(body.sourceRouterKey.slice(4)).split(":")[0];
@@ -51,7 +83,7 @@ window.fetch = async (input, options) => {
       flows: [
         {
           id: "flow-api",
-          name: "Flow API fictício",
+          name: `Flow API fictício · ${readSource}`,
           status: "DRAFT",
           categories: ["OTHER"],
           isFlowApi: true,
@@ -59,7 +91,7 @@ window.fetch = async (input, options) => {
         },
         {
           id: "flow-common",
-          name: "Flow comum fictício",
+          name: `Flow comum fictício · ${readSource}`,
           status: "DRAFT",
           categories: ["OTHER"],
           isFlowApi: false,
