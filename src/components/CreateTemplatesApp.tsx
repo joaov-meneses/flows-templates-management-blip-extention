@@ -82,6 +82,7 @@ import {
   getAccessibleApplicationUri,
   getActiveTenantId,
   getApplicationListUri,
+  getDirectoryPage,
   matchesRouterSearch,
   type RouterPhone,
 } from "../lib/routerDirectory";
@@ -722,6 +723,7 @@ export default function CreateTemplatesApp() {
   const [activeView, setActiveView] = useState<ActiveView>("routers");
   const [directoryTab, setDirectoryTab] = useState<"all" | "routers" | "builders">("all");
   const [directoryLayout, setDirectoryLayout] = useState<"cards" | "list">("cards");
+  const [directoryPage, setDirectoryPage] = useState(1);
   const [managerTab, setManagerTab] = useState<ManagerTab>("summary");
   const lastCloneMode = useRef<"builder" | "router">("builder");
   const [cloneMode, setCloneMode] = useState<CloneMode>("builder");
@@ -1216,9 +1218,18 @@ export default function CreateTemplatesApp() {
     ...(directoryTab !== "builders" ? filteredDirectoryRouterApplications : []),
     ...(directoryTab !== "routers" ? filteredDirectoryBuilderApplications : []),
   ].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const directoryPagination = getDirectoryPage(directoryApplications, directoryPage);
   const directoryLoading =
     (directoryTab !== "builders" && isLoadingRouterApplications) ||
     (directoryTab !== "routers" && isLoadingBotApplications);
+
+  useEffect(() => {
+    setDirectoryPage(1);
+  }, [routerDirectorySearch, directoryTab, showInaccessibleBots]);
+
+  useEffect(() => {
+    setDirectoryPage((page) => Math.min(page, directoryPagination.totalPages));
+  }, [directoryPagination.totalPages]);
 
   const filteredBotSourceApplications = useMemo(() => {
     const q = botSourceSearch.trim().toLowerCase();
@@ -4926,7 +4937,7 @@ export default function CreateTemplatesApp() {
                   <div
                     className={`router-directory-grid ${directoryLayout === "list" ? "manager-directory-list" : ""}`}
                   >
-                    {directoryApplications.map((application) => {
+                    {directoryPagination.items.map((application) => {
                       const isRouter = application.template === "master";
                       const hasAccess = application.hasPermission === true;
                       const routerUrl = hasAccess ? buildRouterUrl(application) : "";
@@ -5057,6 +5068,35 @@ export default function CreateTemplatesApp() {
                       );
                     })}
                   </div>
+                )}
+                {!directoryLoading && directoryPagination.total > 0 && (
+                  <nav className="manager-pagination" aria-label="Paginação dos bots">
+                    <span aria-live="polite">
+                      Mostrando {directoryPagination.start}–{directoryPagination.end} de{" "}
+                      {directoryPagination.total} bots
+                    </span>
+                    <div className="manager-pagination-controls">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={directoryPagination.page === 1}
+                        onClick={() => setDirectoryPage(directoryPagination.page - 1)}
+                      >
+                        Anterior
+                      </Button>
+                      <span>
+                        Página {directoryPagination.page} de {directoryPagination.totalPages}
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={directoryPagination.page === directoryPagination.totalPages}
+                        onClick={() => setDirectoryPage(directoryPagination.page + 1)}
+                      >
+                        Próxima
+                      </Button>
+                    </div>
+                  </nav>
                 )}
               </>
             )}

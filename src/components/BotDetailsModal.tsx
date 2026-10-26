@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Clipboard, LoaderCircle, X } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Feedback } from "./ui/Feedback";
-import { loadBotAccess, loadBotMetadata, type BotAccess } from "../lib/botDetails";
+import { getBotPeople, loadBotAccess, loadBotMetadata, type BotAccess } from "../lib/botDetails";
 import { sendBlipCommand } from "../lib/blipProxy";
 import { sanitizeActivityValue } from "../lib/activityLog";
 import type { PortalApplicationAccount, ResolvedRouterKey } from "../types/templates";
@@ -107,6 +107,7 @@ export function BotDetailsModal({
 
   const value = (key: string) =>
     typeof metadata[key] === "string" ? String(metadata[key]) : "Não informado";
+  const people = getBotPeople(access, metadata.emailOwner);
   const date = (key: string) =>
     typeof metadata[key] === "string" && Number.isFinite(Date.parse(String(metadata[key])))
       ? new Date(String(metadata[key])).toLocaleString("pt-BR")
@@ -170,10 +171,6 @@ export function BotDetailsModal({
               <dd>{value("tenantId")}</dd>
             </div>
             <div>
-              <dt>Proprietário informado pela Blip</dt>
-              <dd>{value("emailOwner")}</dd>
-            </div>
-            <div>
               <dt>Seu acesso ao bot</dt>
               <dd>
                 {metadata.hasPermission === true
@@ -227,38 +224,30 @@ export function BotDetailsModal({
             </div>
           </dl>
           <section aria-labelledby="bot-access-title">
-            <h3 id="bot-access-title">Pessoas com acesso {access ? `(${access.length})` : ""}</h3>
-            <p>
-              Permissões diretas retornadas para este bot. Não representam todos os administradores
-              do contrato.
-            </p>
+            <h3 id="bot-access-title">
+              Pessoas com acesso {people.length ? `(${people.length})` : ""}
+            </h3>
             {accessError && (
-              <Feedback title="Consulta de acessos indisponível">{accessError}</Feedback>
+              <p className="bot-access-notice">
+                A lista completa de pessoas não está disponível para seu usuário.
+              </p>
             )}
-            {access?.length === 0 && <p>Nenhuma permissão direta retornada pela Blip.</p>}
-            {access?.map((person) => (
-              <details className="bot-access-person" key={person.identity}>
-                <summary>
-                  {person.identity} <span>· {person.permissions.length} área(s)</span>
-                </summary>
-                <dl>
-                  {person.permissions.map((permission, index) => (
-                    <div key={`${permission.area}-${index}`}>
-                      <dt>{permission.area}</dt>
-                      <dd>
-                        {permission.actions.join(", ") || "Sem ações"}
-                        {permission.updated ? ` · ${permission.updated}` : ""}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </details>
-            ))}
+            {!loading && !accessError && !people.length && (
+              <p>Nenhuma pessoa informada pela Blip.</p>
+            )}
+            {people.length > 0 && (
+              <ul className="bot-access-list" aria-label="Pessoas com acesso ao bot">
+                {people.map((person) => (
+                  <li key={person.identity.toLowerCase()}>
+                    <span className="bot-access-identity">{person.identity}</span>
+                    <span className="bot-access-role">
+                      ({person.isOwner ? "Proprietário" : person.role})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
-          <details>
-            <summary>Todos os dados do cadastro</summary>
-            <pre className="code">{JSON.stringify(sanitizeActivityValue(metadata), null, 2)}</pre>
-          </details>
         </div>
       </section>
     </div>

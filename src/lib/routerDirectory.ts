@@ -63,3 +63,22 @@ export function matchesRouterSearch(
     Boolean(digits && phoneNumber?.includes(digits))
   );
 }
+
+export function getDirectoryPage<T>(items: T[], requestedPage: number) {
+  const pageSize = 30;
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.max(
+    1,
+    Math.min(totalPages, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 1),
+  );
+  const offset = (page - 1) * pageSize;
+  return {
+    items: items.slice(offset, offset + pageSize),
+    page,
+    totalPages,
+    total,
+    start: total ? offset + 1 : 0,
+    end: Math.min(offset + pageSize, total),
+  };
+}

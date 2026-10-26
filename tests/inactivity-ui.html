@@ -99,6 +99,7 @@
         {
           shortName: "sem_acesso",
           name: "Sem acesso",
+          emailOwner: "owner@example.test",
           template: "builder",
           hasPermission: false,
           tenantId: "test",
@@ -118,6 +119,18 @@
           tenantId: "test",
         },
       ];
+      const extraBots = Math.min(
+        300,
+        Math.max(0, Number(new URLSearchParams(location.search).get("bots")) || 0),
+      );
+      for (let i = 1; i <= extraBots; i++)
+        builders.push({
+          shortName: `fixture-bot-${i}`,
+          name: `Bot de teste ${String(i).padStart(3, "0")}`,
+          template: "builder",
+          hasPermission: true,
+          tenantId: "test",
+        });
       window.addEventListener("message", (event) => {
         const frame = document.querySelector("iframe");
         if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
@@ -189,15 +202,35 @@
             response = {
               status: "success",
               resource: {
-                total: 2,
+                total: 6,
                 items: [
                   {
-                    userIdentity: "owner@example.test",
+                    userIdentity: "owner%40example.test@blip.ai",
                     permissionId: "builder",
                     actions: ["read", "write"],
                   },
                   {
-                    userIdentity: "viewer@example.test",
+                    userIdentity: "admin%40example.test@blip.ai",
+                    permissionId: "team",
+                    actions: ["read", "write"],
+                  },
+                  {
+                    userIdentity: "editor%40example.test@blip.ai",
+                    permissionId: "builder",
+                    actions: ["read", "write"],
+                  },
+                  {
+                    userIdentity: "viewer%40example.test@blip.ai",
+                    permissionId: "builder",
+                    actions: ["read"],
+                  },
+                  {
+                    userIdentity: "custom%40example.test@blip.ai",
+                    permissionId: "builder",
+                    actions: ["read", "write"],
+                  },
+                  {
+                    userIdentity: "custom%40example.test@blip.ai",
                     permissionId: "channels",
                     actions: ["read"],
                   },

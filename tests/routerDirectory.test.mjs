@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getAccessibleApplicationUri,
+  getDirectoryPage,
   getActiveTenantId,
   getApplicationListUri,
   matchesRouterSearch,
@@ -92,4 +93,27 @@ test("remote phone lookup rejects a response for another bot", async (t) => {
     }),
     /outro router/,
   );
+});
+
+test("directory pagination never shows more than 30 bots and clamps page boundaries", () => {
+  const bots = Array.from({ length: 66 }, (_, i) => i);
+  assert.equal(getDirectoryPage(bots, 1).items.length, 30);
+  assert.deepEqual(getDirectoryPage(bots, 2).items, bots.slice(30, 60));
+  assert.deepEqual(getDirectoryPage(bots, 99), {
+    items: bots.slice(60),
+    page: 3,
+    totalPages: 3,
+    total: 66,
+    start: 61,
+    end: 66,
+  });
+  assert.equal(getDirectoryPage(bots, -1).page, 1);
+  assert.deepEqual(getDirectoryPage([], 4), {
+    items: [],
+    page: 1,
+    totalPages: 1,
+    total: 0,
+    start: 0,
+    end: 0,
+  });
 });
