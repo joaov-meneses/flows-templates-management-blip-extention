@@ -404,3 +404,32 @@ button.tc-preview-button {
 .templates-workspace[hidden] {
   display: none;
 }
+
+.tc-auth-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tc-auth-check input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--blip-primary);
+}
+.tc-auth-notice {
+  padding: 14px;
+  border: 1px solid var(--blip-border);
+  border-radius: 8px;
+  background: var(--blip-surface-1);
+  color: var(--blip-content-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tc-auth-terms {
+  padding: 14px;
+  border: 1px solid var(--blip-border);
+  border-radius: 8px;
+}

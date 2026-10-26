@@ -190,6 +190,9 @@ function buildTemplateResource(template) {
     language: template.language,
     name: template.name,
     ...(template.parameter_format ? { parameter_format: template.parameter_format } : {}),
+    ...(template.message_send_ttl_seconds != null
+      ? { message_send_ttl_seconds: template.message_send_ttl_seconds }
+      : {}),
   };
 }
 

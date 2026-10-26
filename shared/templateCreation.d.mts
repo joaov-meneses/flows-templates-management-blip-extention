@@ -1,3 +1,4 @@
+import type { AuthenticationDraft } from "./authenticationTemplates.mjs";
 export interface TemplateButtonDraft {
   id: string;
   type: "URL" | "PHONE_NUMBER" | "QUICK_REPLY" | "COPY_CODE";
@@ -18,12 +19,14 @@ export interface TemplateDraft {
   footer: string;
   examples: Record<string, string>;
   buttons: TemplateButtonDraft[];
+  authentication: AuthenticationDraft;
 }
 export interface CompiledTemplate {
   name: string;
   language: string;
   category: string;
-  parameter_format: string;
+  parameter_format?: string;
+  message_send_ttl_seconds?: number;
   components: any[];
 }
 export const TEMPLATE_LANGUAGES: readonly (readonly string[])[];

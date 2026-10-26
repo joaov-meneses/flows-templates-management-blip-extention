@@ -25,6 +25,8 @@ import {
 } from "../../shared/templateCreation.mjs";
 import { postJson } from "../lib/api";
 import { showBlipAlert } from "../lib/blipProxy";
+import { authenticationPreview } from "../../shared/authenticationTemplates.mjs";
+import { AuthenticationTemplateFields } from "./AuthenticationTemplateFields";
 import { Button } from "./ui/Button";
 import "../styles/template-creation.css";
 
@@ -84,6 +86,14 @@ export function TemplateCreationTab({
   const [error, setError] = useState("");
   const [result, setResult] = useState<(CreationResult & { source: string }) | null>(null);
   const [showExamples, setShowExamples] = useState(true);
+  const [authPreviewScenario, setAuthPreviewScenario] = useState("default");
+  const isAuthentication = draft.category === "AUTHENTICATION";
+  const otpPreview = authenticationPreview(
+    draft.authentication,
+    draft.language,
+    showExamples,
+    authPreviewScenario,
+  );
   const [sentFingerprint, setSentFingerprint] = useState("");
   const submission = useRef({ fingerprint: "", id: "" });
   const locked = useRef(false);
@@ -252,8 +262,11 @@ export function TemplateCreationTab({
           (match, param) => draft.examples[`${field}:${param}`] || match,
         )
       : value;
-  const previewButtons =
-    compiled.template.components.find((component) => component.type === "BUTTONS")?.buttons || [];
+  const previewButtons = isAuthentication
+    ? otpPreview.button
+      ? [{ type: "OTP", text: otpPreview.button }]
+      : []
+    : compiled.template.components.find((component) => component.type === "BUTTONS")?.buttons || [];
   const [expandedButtons, setExpandedButtons] = useState(false);
   const visibleButtons =
     previewButtons.length > 3 && !expandedButtons ? previewButtons.slice(0, 2) : previewButtons;
@@ -276,7 +289,11 @@ export function TemplateCreationTab({
           <h2>Monte sua mensagem</h2>
           <p>Crie o conteúdo e veja como ele aparece no WhatsApp.</p>
         </div>
-        <a href={`${DOCS}utility-templates/utility-templates`} target="_blank" rel="noreferrer">
+        <a
+          href={`${DOCS}${isAuthentication ? "authentication-templates/authentication-templates" : "utility-templates/utility-templates"}`}
+          target="_blank"
+          rel="noreferrer"
+        >
           Regras da Meta <ExternalLink size={14} />
         </a>
       </div>
@@ -307,6 +324,7 @@ export function TemplateCreationTab({
                 >
                   <option value="UTILITY">Utilidade</option>
                   <option value="MARKETING">Marketing</option>
+                  <option value="AUTHENTICATION">Autenticação</option>
                 </select>
               </label>
               <label className="tc-field">
@@ -325,253 +343,273 @@ export function TemplateCreationTab({
               </label>
             </div>
             <p className="tc-help">
-              Templates padrão de Utilidade e Marketing. Autenticação, carrosséis e catálogo usam
-              formatos próprios.
+              Utilidade e Marketing usam conteúdo livre. Autenticação usa o texto e os componentes
+              padronizados de código de verificação da Meta.
             </p>
           </section>
-          <section className="tc-section">
-            <div className="tc-section-title">
-              <h3>Conteúdo</h3>
-              <label className="tc-inline-field">
-                Variáveis
-                <select
-                  value={draft.parameterFormat}
-                  onChange={(event) => update("parameterFormat", event.target.value)}
-                >
-                  <option value="POSITIONAL">Numéricas · {"{{1}}"}</option>
-                  <option value="NAMED">Nomeadas · {"{{nome}}"}</option>
-                </select>
-              </label>
-            </div>
-            <label className="tc-field">
-              Cabeçalho <span className="tc-optional">opcional</span>
-              <select
-                value={draft.headerFormat}
-                onChange={(event) => update("headerFormat", event.target.value)}
-              >
-                <option value="NONE">Sem cabeçalho</option>
-                <option value="TEXT">Texto</option>
-                <option value="IMAGE">Imagem</option>
-                <option value="VIDEO">Vídeo</option>
-                <option value="DOCUMENT">Documento</option>
-                <option value="LOCATION">Localização</option>
-              </select>
-            </label>
-            {draft.headerFormat === "TEXT" && (
-              <>
-                {textField("headerText", "Texto do cabeçalho", 60)}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => addVariable("headerText")}
-                  disabled={variableNames(draft.headerText).length > 0}
-                >
-                  <Plus size={14} />
-                  Variável no cabeçalho
-                </Button>
-                {variableExamples("headerText")}
-              </>
-            )}
-            {["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.headerFormat) && (
-              <label className="tc-field">
-                Handle da mídia de exemplo
-                <input
-                  value={draft.mediaHandle}
-                  onChange={(event) => update("mediaHandle", event.target.value)}
-                  placeholder="4::…"
-                />
-                <span className="tc-help">
-                  Use o identificador retornado pelo upload da Meta para esta conta. A mídia será
-                  analisada junto com o template. URLs e IDs de mensagem não substituem o handle.
-                </span>
-                {fieldErrors("mediaHandle")}
-                <a
-                  href="https://developers.facebook.com/docs/graph-api/guides/upload"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Como obter o handle <ExternalLink size={12} />
-                </a>
-              </label>
-            )}
-            {draft.headerFormat === "LOCATION" && (
-              <p className="tc-help">
-                O endereço e as coordenadas são informados no envio da mensagem.
-              </p>
-            )}
-            {textField(
-              "body",
-              "Corpo da mensagem",
-              1024,
-              true,
-              "Olá, {{1}}! Seu pedido {{2}} foi confirmado. Obrigado pela preferência.",
-            )}
-            <div className="tc-toolbar">
-              <Button size="sm" variant="ghost" onClick={() => addVariable("body")}>
-                <Plus size={14} />
-                Adicionar variável
-              </Button>
-              <span>*negrito* · _itálico_ · ~riscado~</span>
-            </div>
-            {variableExamples("body")}
-            {textField(
-              "footer",
-              "Rodapé (opcional)",
-              60,
-              false,
-              "Obrigado por escolher nossa empresa",
-            )}
-          </section>
-          <section className="tc-section">
-            <div className="tc-section-title">
-              <h3>
-                Botões <span className="tc-optional">{draft.buttons.length}/10</span>
-              </h3>
-              <Button
-                size="sm"
-                onClick={() =>
-                  update("buttons", [
-                    ...draft.buttons,
-                    {
-                      id: crypto.randomUUID(),
-                      type: "QUICK_REPLY",
-                      text: "",
-                      url: "",
-                      phoneNumber: "",
-                      example: "",
-                    },
-                  ])
-                }
-                disabled={draft.buttons.length >= 10}
-              >
-                <Plus size={14} />
-                Adicionar botão
-              </Button>
-            </div>
-            <p className="tc-help">
-              Até 2 links, 1 telefone e 1 código. As respostas rápidas são agrupadas ao final.
-            </p>
-            {fieldErrors("buttons")}
-            {draft.buttons.length === 0 && (
-              <div className="tc-empty">
-                Inclua uma resposta rápida, um link, telefone ou código.
-              </div>
-            )}
-            {draft.buttons.map((button, index) => (
-              <div className="tc-button-editor" key={button.id}>
-                <div className="tc-button-heading">
-                  <strong>Botão {index + 1}</strong>
-                  <div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Mover botão ${index + 1} para cima`}
-                      disabled={index === 0}
-                      onClick={() => moveButton(index, -1)}
-                    >
-                      <ArrowUp size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Mover botão ${index + 1} para baixo`}
-                      disabled={index === draft.buttons.length - 1}
-                      onClick={() => moveButton(index, 1)}
-                    >
-                      <ArrowDown size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Remover botão ${index + 1}`}
-                      onClick={() =>
-                        update(
-                          "buttons",
-                          draft.buttons.filter((_, i) => i !== index),
-                        )
-                      }
-                    >
-                      <Trash2 size={15} />
-                    </Button>
-                  </div>
-                </div>
-                <div className="tc-columns">
-                  <label className="tc-field">
-                    Ação
+          {isAuthentication ? (
+            <AuthenticationTemplateFields
+              value={draft.authentication}
+              onChange={(value) => {
+                if (value.mode !== draft.authentication.mode) setAuthPreviewScenario("default");
+                update("authentication", value);
+              }}
+              errors={compiled.errors}
+              attempted={attempted}
+            />
+          ) : (
+            <>
+              <section className="tc-section">
+                <div className="tc-section-title">
+                  <h3>Conteúdo</h3>
+                  <label className="tc-inline-field">
+                    Variáveis
                     <select
-                      value={button.type}
-                      onChange={(event) =>
-                        patchButton(index, {
-                          type: event.target.value as TemplateButtonDraft["type"],
-                        })
-                      }
+                      value={draft.parameterFormat}
+                      onChange={(event) => update("parameterFormat", event.target.value)}
                     >
-                      {Object.entries(BUTTON_NAMES).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
+                      <option value="POSITIONAL">Numéricas · {"{{1}}"}</option>
+                      <option value="NAMED">Nomeadas · {"{{nome}}"}</option>
                     </select>
                   </label>
-                  {button.type !== "COPY_CODE" && (
-                    <label className="tc-field">
-                      <span className="tc-label">
-                        Rótulo<span className="tc-count">{countCharacters(button.text)}/25</span>
-                      </span>
-                      <input
-                        value={button.text}
-                        onChange={(event) => patchButton(index, { text: event.target.value })}
-                        aria-label={`Rótulo botão ${index + 1}`}
-                      />
-                    </label>
-                  )}
                 </div>
-                {button.type === "URL" && (
+                <label className="tc-field">
+                  Cabeçalho <span className="tc-optional">opcional</span>
+                  <select
+                    value={draft.headerFormat}
+                    onChange={(event) => update("headerFormat", event.target.value)}
+                  >
+                    <option value="NONE">Sem cabeçalho</option>
+                    <option value="TEXT">Texto</option>
+                    <option value="IMAGE">Imagem</option>
+                    <option value="VIDEO">Vídeo</option>
+                    <option value="DOCUMENT">Documento</option>
+                    <option value="LOCATION">Localização</option>
+                  </select>
+                </label>
+                {!isAuthentication && draft.headerFormat === "TEXT" && (
                   <>
-                    <label className="tc-field">
-                      URL
-                      <input
-                        value={button.url}
-                        onChange={(event) => patchButton(index, { url: event.target.value })}
-                        placeholder="https://exemplo.com/pedido/{{1}}"
-                        aria-label={`URL botão ${index + 1}`}
-                      />
-                    </label>
-                    {variableNames(button.url).length > 0 && (
+                    {textField("headerText", "Texto do cabeçalho", 60)}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => addVariable("headerText")}
+                      disabled={variableNames(draft.headerText).length > 0}
+                    >
+                      <Plus size={14} />
+                      Variável no cabeçalho
+                    </Button>
+                    {variableExamples("headerText")}
+                  </>
+                )}
+                {["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.headerFormat) && (
+                  <label className="tc-field">
+                    Handle da mídia de exemplo
+                    <input
+                      value={draft.mediaHandle}
+                      onChange={(event) => update("mediaHandle", event.target.value)}
+                      placeholder="4::…"
+                    />
+                    <span className="tc-help">
+                      Use o identificador retornado pelo upload da Meta para esta conta. A mídia
+                      será analisada junto com o template. URLs e IDs de mensagem não substituem o
+                      handle.
+                    </span>
+                    {fieldErrors("mediaHandle")}
+                    <a
+                      href="https://developers.facebook.com/docs/graph-api/guides/upload"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Como obter o handle <ExternalLink size={12} />
+                    </a>
+                  </label>
+                )}
+                {draft.headerFormat === "LOCATION" && (
+                  <p className="tc-help">
+                    O endereço e as coordenadas são informados no envio da mensagem.
+                  </p>
+                )}
+                {textField(
+                  "body",
+                  "Corpo da mensagem",
+                  1024,
+                  true,
+                  "Olá, {{1}}! Seu pedido {{2}} foi confirmado. Obrigado pela preferência.",
+                )}
+                <div className="tc-toolbar">
+                  <Button size="sm" variant="ghost" onClick={() => addVariable("body")}>
+                    <Plus size={14} />
+                    Adicionar variável
+                  </Button>
+                  <span>*negrito* · _itálico_ · ~riscado~</span>
+                </div>
+                {variableExamples("body")}
+                {textField(
+                  "footer",
+                  "Rodapé (opcional)",
+                  60,
+                  false,
+                  "Obrigado por escolher nossa empresa",
+                )}
+              </section>
+              <section className="tc-section">
+                <div className="tc-section-title">
+                  <h3>
+                    Botões <span className="tc-optional">{draft.buttons.length}/10</span>
+                  </h3>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      update("buttons", [
+                        ...draft.buttons,
+                        {
+                          id: crypto.randomUUID(),
+                          type: "QUICK_REPLY",
+                          text: "",
+                          url: "",
+                          phoneNumber: "",
+                          example: "",
+                        },
+                      ])
+                    }
+                    disabled={draft.buttons.length >= 10}
+                  >
+                    <Plus size={14} />
+                    Adicionar botão
+                  </Button>
+                </div>
+                <p className="tc-help">
+                  Até 2 links, 1 telefone e 1 código. As respostas rápidas são agrupadas ao final.
+                </p>
+                {fieldErrors("buttons")}
+                {draft.buttons.length === 0 && (
+                  <div className="tc-empty">
+                    Inclua uma resposta rápida, um link, telefone ou código.
+                  </div>
+                )}
+                {draft.buttons.map((button, index) => (
+                  <div className="tc-button-editor" key={button.id}>
+                    <div className="tc-button-heading">
+                      <strong>Botão {index + 1}</strong>
+                      <div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Mover botão ${index + 1} para cima`}
+                          disabled={index === 0}
+                          onClick={() => moveButton(index, -1)}
+                        >
+                          <ArrowUp size={14} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Mover botão ${index + 1} para baixo`}
+                          disabled={index === draft.buttons.length - 1}
+                          onClick={() => moveButton(index, 1)}
+                        >
+                          <ArrowDown size={14} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remover botão ${index + 1}`}
+                          onClick={() =>
+                            update(
+                              "buttons",
+                              draft.buttons.filter((_, i) => i !== index),
+                            )
+                          }
+                        >
+                          <Trash2 size={15} />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="tc-columns">
                       <label className="tc-field">
-                        Sufixo de exemplo
+                        Ação
+                        <select
+                          value={button.type}
+                          onChange={(event) =>
+                            patchButton(index, {
+                              type: event.target.value as TemplateButtonDraft["type"],
+                            })
+                          }
+                        >
+                          {Object.entries(BUTTON_NAMES).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {button.type !== "COPY_CODE" && (
+                        <label className="tc-field">
+                          <span className="tc-label">
+                            Rótulo
+                            <span className="tc-count">{countCharacters(button.text)}/25</span>
+                          </span>
+                          <input
+                            value={button.text}
+                            onChange={(event) => patchButton(index, { text: event.target.value })}
+                            aria-label={`Rótulo botão ${index + 1}`}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    {button.type === "URL" && (
+                      <>
+                        <label className="tc-field">
+                          URL
+                          <input
+                            value={button.url}
+                            onChange={(event) => patchButton(index, { url: event.target.value })}
+                            placeholder="https://exemplo.com/pedido/{{1}}"
+                            aria-label={`URL botão ${index + 1}`}
+                          />
+                        </label>
+                        {variableNames(button.url).length > 0 && (
+                          <label className="tc-field">
+                            Sufixo de exemplo
+                            <input
+                              value={button.example}
+                              onChange={(event) =>
+                                patchButton(index, { example: event.target.value })
+                              }
+                              placeholder="pedido-12345"
+                            />
+                          </label>
+                        )}
+                      </>
+                    )}
+                    {button.type === "PHONE_NUMBER" && (
+                      <label className="tc-field">
+                        Telefone com DDI
                         <input
-                          value={button.example}
-                          onChange={(event) => patchButton(index, { example: event.target.value })}
-                          placeholder="pedido-12345"
+                          value={button.phoneNumber}
+                          onChange={(event) =>
+                            patchButton(index, { phoneNumber: event.target.value })
+                          }
+                          placeholder="5511999990000"
                         />
                       </label>
                     )}
-                  </>
-                )}
-                {button.type === "PHONE_NUMBER" && (
-                  <label className="tc-field">
-                    Telefone com DDI
-                    <input
-                      value={button.phoneNumber}
-                      onChange={(event) => patchButton(index, { phoneNumber: event.target.value })}
-                      placeholder="5511999990000"
-                    />
-                  </label>
-                )}
-                {button.type === "COPY_CODE" && (
-                  <label className="tc-field">
-                    Código de exemplo (até 20 caracteres)
-                    <input
-                      value={button.example}
-                      onChange={(event) => patchButton(index, { example: event.target.value })}
-                    />
-                  </label>
-                )}
-                {fieldErrors(`button:${index}`)}
-              </div>
-            ))}
-          </section>
+                    {button.type === "COPY_CODE" && (
+                      <label className="tc-field">
+                        Código de exemplo (até 20 caracteres)
+                        <input
+                          value={button.example}
+                          onChange={(event) => patchButton(index, { example: event.target.value })}
+                        />
+                      </label>
+                    )}
+                    {fieldErrors(`button:${index}`)}
+                  </div>
+                ))}
+              </section>
+            </>
+          )}
         </fieldset>
         <aside className="tc-preview-column" aria-label="Prévia do template">
           <div className="tc-preview-sticky">
@@ -586,6 +624,21 @@ export function TemplateCreationTab({
                 Usar exemplos
               </label>
             </div>
+            {isAuthentication && draft.authentication.mode !== "COPY_CODE" && (
+              <label className="tc-field">
+                Cenário da prévia OTP
+                <select
+                  value={authPreviewScenario}
+                  onChange={(event) => setAuthPreviewScenario(event.target.value)}
+                >
+                  <option value="default">Recebimento padrão no Android</option>
+                  {draft.authentication.mode === "ZERO_TAP" && (
+                    <option value="one">Alternativa: preencher com um toque</option>
+                  )}
+                  <option value="copy">Alternativa: copiar código</option>
+                </select>
+              </label>
+            )}
             <div className="tc-chat">
               <div className="tc-chat-brand">
                 <MessageSquareText size={20} />
@@ -595,27 +648,36 @@ export function TemplateCreationTab({
                 </div>
               </div>
               <div className="tc-bubble">
-                {draft.headerFormat === "TEXT" && (
+                {!isAuthentication && draft.headerFormat === "TEXT" && (
                   <div className="tc-bubble-header">
                     {renderExample(draft.headerText, "headerText") || "Cabeçalho"}
                   </div>
                 )}
-                {["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(draft.headerFormat) && (
-                  <div className="tc-media">
-                    {headerIcon}
-                    <span>
-                      {draft.headerFormat === "LOCATION"
-                        ? "Localização enviada com a mensagem"
-                        : `Exemplo de ${draft.headerFormat === "IMAGE" ? "imagem" : draft.headerFormat === "VIDEO" ? "vídeo" : "documento"}`}
-                    </span>
+                {!isAuthentication &&
+                  ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(draft.headerFormat) && (
+                    <div className="tc-media">
+                      {headerIcon}
+                      <span>
+                        {draft.headerFormat === "LOCATION"
+                          ? "Localização enviada com a mensagem"
+                          : `Exemplo de ${draft.headerFormat === "IMAGE" ? "imagem" : draft.headerFormat === "VIDEO" ? "vídeo" : "documento"}`}
+                      </span>
+                    </div>
+                  )}
+                <div
+                  className={`tc-bubble-body ${!isAuthentication && !draft.body ? "tc-placeholder" : ""}`}
+                >
+                  {isAuthentication
+                    ? formattedText(otpPreview.body)
+                    : draft.body
+                      ? formattedText(renderExample(draft.body, "body"))
+                      : "O corpo da sua mensagem aparece aqui. Comece a escrever no editor."}
+                </div>
+                {(isAuthentication ? otpPreview.footer : draft.footer) && (
+                  <div className="tc-bubble-footer">
+                    {isAuthentication ? otpPreview.footer : draft.footer}
                   </div>
                 )}
-                <div className={`tc-bubble-body ${!draft.body ? "tc-placeholder" : ""}`}>
-                  {draft.body
-                    ? formattedText(renderExample(draft.body, "body"))
-                    : "O corpo da sua mensagem aparece aqui. Comece a escrever no editor."}
-                </div>
-                {draft.footer && <div className="tc-bubble-footer">{draft.footer}</div>}
                 <div className="tc-bubble-time">
                   12:00 <span>✓✓</span>
                 </div>
@@ -645,8 +707,9 @@ export function TemplateCreationTab({
               </div>
             </div>
             <p className="tc-preview-caption">
-              Representação visual. A aparência e os textos nativos podem variar conforme o WhatsApp
-              e o idioma. A mídia é ilustrativa.
+              {isAuthentication
+                ? otpPreview.caption
+                : "Representação visual. A aparência e os textos nativos podem variar conforme o WhatsApp e o idioma. A mídia é ilustrativa."}
             </p>
             <div className="tc-guidance">
               <strong>Antes de enviar</strong>

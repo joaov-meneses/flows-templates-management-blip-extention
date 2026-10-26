@@ -85,7 +85,7 @@ for (const [label, overrides, match] of [
   ],
   ["header markdown", { headerFormat: "TEXT", headerText: "*Pedido confirmado*" }, /Markdown/],
   ["footer variables", { footer: "Pedido {{1}}" }, /rodapé/],
-  ["invalid category", { category: "AUTHENTICATION" }, /Marketing/],
+  ["invalid category", { category: "INVALID" }, /Marketing/],
   ["invalid locale", { language: "pt-BR" }, /idioma/],
   ["invalid name", { name: "Confirmação pedido" }, /minúsculas/],
   ["name too long", { name: "a".repeat(513) }, /512/],

@@ -1,3 +1,4 @@
+import { compileAuthenticationDraft, newAuthenticationDraft } from "./authenticationTemplates.mjs";
 // Meta template components / fundamentals / review, consulted 2026-10-26.
 export const TEMPLATE_LANGUAGES = Object.freeze([
   ["pt_BR", "Português (Brasil)"],
@@ -26,6 +27,7 @@ export function newTemplateDraft() {
     footer: "",
     examples: {},
     buttons: [],
+    authentication: newAuthenticationDraft(),
   };
 }
 
@@ -48,8 +50,16 @@ export function compileTemplateDraft(draft) {
     fail("name", "Use de 1 a 512 letras minúsculas sem acentos, números ou _.");
   if (!TEMPLATE_LANGUAGES.some(([code]) => code === language))
     fail("language", "Selecione um idioma aceito pela Meta.");
-  if (!["UTILITY", "MARKETING"].includes(category))
-    fail("category", "Selecione Utilidade ou Marketing.");
+  if (!["UTILITY", "MARKETING", "AUTHENTICATION"].includes(category))
+    fail("category", "Selecione Utilidade, Marketing ou Autenticação.");
+  if (category === "AUTHENTICATION") {
+    const auth = compileAuthenticationDraft(draft?.authentication, { name, language });
+    return {
+      errors: [...errors, ...auth.errors],
+      warnings: auth.warnings,
+      template: auth.template,
+    };
+  }
   if (!["POSITIONAL", "NAMED"].includes(parameterFormat))
     fail("parameterFormat", "Selecione o formato das variáveis.");
   if (!["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(headerFormat))
