@@ -339,3 +339,19 @@ test("malformed carousel edits fail compilation without leaving invalid preview 
     assert.deepEqual(result.template.components, []);
   }
 });
+
+test("malformed named samples keep variable placeholders without crashing the preview", () => {
+  assert.equal(
+    renderComponentText(
+      {
+        type: "BODY",
+        text: "Olá, {{nome}}!",
+        example: {
+          body_text_named_params: [null, { param_name: "nome", example: { invalid: true } }],
+        },
+      },
+      true,
+    ),
+    "Olá, {{nome}}!",
+  );
+});

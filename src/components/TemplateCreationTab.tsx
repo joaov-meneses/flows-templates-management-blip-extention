@@ -145,7 +145,7 @@ export function TemplateCreationTab({
   }, [duplicateRequest, sourceScope]);
   const nameExists =
     Boolean(draft.name.trim()) && knownNames.has(normalizeTemplateName(draft.name));
-  const advanced = draft.advancedComponents;
+  const advanced = !isAuthentication && draft.advancedComponents;
   const compiled = useMemo(() => compileTemplateDraft(draft), [draft]);
   const fingerprint = `${sourceScope}:${JSON.stringify(compiled.template)}`;
   const sent = sentFingerprint === fingerprint;

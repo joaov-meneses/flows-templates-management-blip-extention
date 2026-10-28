@@ -30,7 +30,12 @@ export function publicMediaUrl(value) {
 export function componentSamples(component, field) {
   const prefix = field === "body" ? "body_text" : "header_text";
   const named = component?.example?.[`${prefix}_named_params`];
-  if (Array.isArray(named)) return Object.fromEntries(named.map((p) => [p.param_name, p.example]));
+  if (Array.isArray(named))
+    return Object.fromEntries(
+      named
+        .filter((p) => p && typeof p.param_name === "string" && typeof p.example === "string")
+        .map((p) => [p.param_name, p.example]),
+    );
   const values = component?.example?.[prefix];
   const row = field === "body" ? values?.[0] : values;
   return Object.fromEntries(
