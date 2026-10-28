@@ -12,7 +12,7 @@
   overflow: auto;
 }
 .tl-layout .ember-table {
-  min-width: 610px;
+  min-width: 380px;
   width: 100%;
   font-size: 12px;
 }
@@ -218,4 +218,12 @@
   white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;
+}
+
+.tl-row-meta {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--blip-content-soft);
 }

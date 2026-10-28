@@ -33,8 +33,6 @@ export function TemplateTable({
               <span className="sr-only">Selecionar</span>
             </th>
             <th scope="col">Nome</th>
-            <th scope="col">Idioma</th>
-            <th scope="col">Categoria</th>
             <th scope="col">Status</th>
             <th scope="col">
               <span className="sr-only">Ações</span>
@@ -44,7 +42,7 @@ export function TemplateTable({
         <tbody>
           {loading || !templates.length ? (
             <tr>
-              <td colSpan={6} className="empty-cell">
+              <td colSpan={4} className="empty-cell">
                 <EmptyState
                   loading={loading}
                   title={
@@ -89,9 +87,10 @@ export function TemplateTable({
                     >
                       {template.name}
                     </button>
+                    <span className="tl-row-meta">
+                      {template.language} · {template.category}
+                    </span>
                   </td>
-                  <td data-label="Idioma">{template.language}</td>
-                  <td data-label="Categoria">{template.category}</td>
                   <td data-label="Status">
                     <StatusBadge status={template.status} />
                   </td>
