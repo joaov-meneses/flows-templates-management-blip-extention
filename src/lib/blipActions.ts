@@ -1,5 +1,6 @@
 export const BLIP_ACTIONS = {
   GET_ACCOUNT: "getAccount",
+  SHOW_ALERT: "showAlert",
   GET_APPLICATION: "getApplication",
   SEND_COMMAND: "sendCommand",
   HEIGHT_CHANGE: "heightChange",

@@ -9,7 +9,7 @@
     "dev": "concurrently -k -n api,web -c cyan,magenta npm:dev:api npm:dev:web",
     "dev:api": "node index.cjs",
     "dev:web": "vite dev",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-portal-compat.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "start": "node index.cjs",

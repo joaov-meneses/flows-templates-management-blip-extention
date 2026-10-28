@@ -1,4 +1,4 @@
-import { BLIP_ACTIONS } from "./blipActions";
+import { BLIP_ACTIONS } from "./blipActions.ts";
 import { finishActivity, startActivity } from "./activityLog.ts";
 
 type IframeMessageProxyModule = typeof import("iframe-message-proxy");
@@ -197,14 +197,14 @@ export async function showBlipAlert(params: BlipAlertParams) {
     return window.confirm(`${params.title}\n\n${params.body}`);
   }
 
-  const { blip } = await import("blip-iframe");
-  const response = await blip.showAlert(params);
-
-  if (!response.success) {
-    throw new Error(response.error?.message || "Erro ao exibir alerta do Portal BLiP.");
+  // The proxy was loaded when the extension opened. Do not fetch another release chunk on submit.
+  const response = await sendPortalMessage(BLIP_ACTIONS.SHOW_ALERT, params);
+  if (typeof response !== "boolean") {
+    throw new Error(
+      "Resposta inválida da confirmação do Portal Blip. Nenhuma ação foi confirmada.",
+    );
   }
-
-  return Boolean(response.data);
+  return response;
 }
 
 export function sendBlipCommand(command: unknown, options: BlipCommandOptions = {}) {

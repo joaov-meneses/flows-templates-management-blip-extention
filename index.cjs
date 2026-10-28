@@ -62,6 +62,7 @@ const { exportBuilderFlow } = require("./server/builderExportService.cjs");
 
 const { createTemplate } = require("./server/templateCreationService.cjs");
 const { templateCatalog } = require("./server/templateCatalogService.cjs");
+const { installWebDelivery, setWebResponseCache } = require("./server/webDelivery.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -455,6 +456,7 @@ async function sendWebResponse(webResponse, res) {
     }
   });
 
+  setWebResponseCache(webResponse, res);
   const body = Buffer.from(await webResponse.arrayBuffer());
   res.send(body);
 }
@@ -475,6 +477,7 @@ const serverEntryPath = path.join(__dirname, "dist", "server", "server.js");
 const legacyIndexPath = path.join(__dirname, "dist", "index.html");
 
 if (fs.existsSync(clientDistPath)) {
+  installWebDelivery(app, clientDistPath);
   app.use(express.static(clientDistPath, { index: false }));
 
   if (fs.existsSync(serverEntryPath)) {
@@ -498,6 +501,7 @@ if (fs.existsSync(clientDistPath)) {
       return;
     }
 
+    res.set("Cache-Control", "no-cache");
     res.sendFile(path.join(distPath, "index.html"));
   });
 }
