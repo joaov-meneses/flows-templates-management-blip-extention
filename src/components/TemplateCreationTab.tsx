@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -26,6 +26,8 @@ import {
 import { postJson } from "../lib/api";
 import { showBlipAlert } from "../lib/blipProxy";
 import { authenticationPreview } from "../../shared/authenticationTemplates.mjs";
+import { TemplateMessagePreview } from "./TemplateMessagePreview";
+import { normalizeTemplateName, type CatalogTemplate } from "../../shared/templateLibrary.mjs";
 import { AuthenticationTemplateFields } from "./AuthenticationTemplateFields";
 import { Button } from "./ui/Button";
 import "../styles/template-creation.css";
@@ -45,6 +47,19 @@ type Props = {
   hasSource: boolean;
   ensureSourceKey: () => Promise<string>;
   onSelectSource: () => void;
+  knownNames: Set<string>;
+  namesLoaded: boolean;
+  namesLoading: boolean;
+  namesError: string;
+  onRefreshNames: () => Promise<void>;
+  duplicateRequest: {
+    id: string;
+    scope: string;
+    draft: TemplateDraft;
+    originalName: string;
+  } | null;
+  onBusyChange: (busy: boolean) => void;
+  onCreated: (scope: string, template: CatalogTemplate) => void;
 };
 type CreationResult = {
   template: {
@@ -79,6 +94,14 @@ export function TemplateCreationTab({
   hasSource,
   ensureSourceKey,
   onSelectSource,
+  knownNames,
+  namesLoaded,
+  namesLoading,
+  namesError,
+  onRefreshNames,
+  duplicateRequest,
+  onBusyChange,
+  onCreated,
 }: Props) {
   const [draft, setDraft] = useState<TemplateDraft>(newTemplateDraft);
   const [attempted, setAttempted] = useState(false);
@@ -99,6 +122,30 @@ export function TemplateCreationTab({
   const locked = useRef(false);
   const currentSource = useRef(sourceScope);
   currentSource.current = sourceScope;
+  const consumedDuplicate = useRef("");
+  const [duplicateOrigin, setDuplicateOrigin] = useState("");
+  useEffect(() => {
+    if (
+      !duplicateRequest ||
+      consumedDuplicate.current === duplicateRequest.id ||
+      duplicateRequest.scope !== sourceScope ||
+      locked.current
+    )
+      return;
+    consumedDuplicate.current = duplicateRequest.id;
+    setDraft(structuredClone(duplicateRequest.draft));
+    setDuplicateOrigin(duplicateRequest.originalName);
+    setAttempted(false);
+    setError("");
+    setResult(null);
+    setSentFingerprint("");
+    submission.current = { fingerprint: "", id: "" };
+    setAuthPreviewScenario("default");
+    requestAnimationFrame(() => document.getElementById("tc-name")?.focus());
+  }, [duplicateRequest, sourceScope]);
+  const nameExists =
+    Boolean(draft.name.trim()) && knownNames.has(normalizeTemplateName(draft.name));
+  const advanced = draft.advancedComponents;
   const compiled = useMemo(() => compileTemplateDraft(draft), [draft]);
   const fingerprint = `${sourceScope}:${JSON.stringify(compiled.template)}`;
   const sent = sentFingerprint === fingerprint;
@@ -108,6 +155,11 @@ export function TemplateCreationTab({
   };
   function fieldErrors(field: string) {
     const messages = attempted ? compiled.errors.filter((item) => item.field === field) : [];
+    if (field === "name" && nameExists && !sent)
+      messages.push({
+        field,
+        message: "Já existe um template com este nome neste router. Escolha outro nome.",
+      });
     return messages.length ? (
       <span id={`tc-error-${field}`} className="tc-field-error">
         {messages.map((item) => item.message).join(" ")}
@@ -122,7 +174,9 @@ export function TemplateCreationTab({
     placeholder = "",
   ) {
     const count = countCharacters(draft[key]);
-    const bad = attempted && compiled.errors.some((item) => item.field === key);
+    const bad =
+      (attempted && compiled.errors.some((item) => item.field === key)) ||
+      (key === "name" && nameExists && !sent);
     return (
       <label className="tc-field" htmlFor={`tc-${key}`}>
         <span className="tc-label">
@@ -210,7 +264,7 @@ export function TemplateCreationTab({
     if (locked.current || sent) return;
     setAttempted(true);
     setError("");
-    if (compiled.errors.length) {
+    if (compiled.errors.length || nameExists) {
       requestAnimationFrame(() =>
         document.querySelector<HTMLElement>('.template-creator [aria-invalid="true"]')?.focus(),
       );
@@ -220,9 +274,14 @@ export function TemplateCreationTab({
       onSelectSource();
       return;
     }
+    if (!namesLoaded || namesLoading || namesError) {
+      setError("Atualize o catálogo de nomes deste router antes de criar o template.");
+      return;
+    }
     const requestedSource = sourceScope;
     locked.current = true;
     setBusy(true);
+    onBusyChange(true);
     try {
       const approved = await showBlipAlert({
         variant: "warning",
@@ -242,6 +301,12 @@ export function TemplateCreationTab({
         draft,
         requestId: submission.current.id,
       });
+      onCreated(requestedSource, {
+        ...compiled.template,
+        ...data.template,
+        status: data.template.status || "PENDING",
+        id: data.template.id || undefined,
+      });
       setResult({ ...data, source: `${sourceName} (${sourceId})` });
       setSentFingerprint(fingerprint);
     } catch (cause) {
@@ -253,6 +318,7 @@ export function TemplateCreationTab({
     } finally {
       locked.current = false;
       setBusy(false);
+      onBusyChange(false);
     }
   }
   const renderExample = (value: string, field: string) =>
@@ -288,6 +354,22 @@ export function TemplateCreationTab({
           <span className="tc-eyebrow">NOVO TEMPLATE</span>
           <h2>Monte sua mensagem</h2>
           <p>Crie o conteúdo e veja como ele aparece no WhatsApp.</p>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              setDraft(newTemplateDraft());
+              setDuplicateOrigin("");
+              setAttempted(false);
+              setError("");
+              setResult(null);
+              setSentFingerprint("");
+              submission.current = { fingerprint: "", id: "" };
+            }}
+          >
+            Novo em branco
+          </Button>
         </div>
         <a
           href={`${DOCS}${isAuthentication ? "authentication-templates/authentication-templates" : "utility-templates/utility-templates"}`}
@@ -310,11 +392,35 @@ export function TemplateCreationTab({
           {hasSource ? "Trocar router" : "Selecionar router"}
         </Button>
       </div>
+      {duplicateRequest && consumedDuplicate.current === duplicateRequest.id && (
+        <div className="tc-copy-notice">
+          Cópia de <strong>{duplicateRequest.originalName}</strong>. Revise o nome e o conteúdo
+          antes de criar.
+        </div>
+      )}
       <div className="tc-layout">
         <fieldset className="tc-editor" disabled={busy}>
           <section className="tc-section">
             <h3>Identificação</h3>
             {textField("name", "Nome do template", 512, false, "confirmacao_pedido")}
+            <div className="tc-section-title">
+              <p className="tc-catalog-status" role="status">
+                {namesLoading
+                  ? "Carregando todos os nomes deste router…"
+                  : namesError
+                    ? namesError
+                    : namesLoaded
+                      ? `${knownNames.size} nomes em memória neste router.`
+                      : "Selecione um router para verificar os nomes existentes."}
+              </p>
+              <Button
+                size="sm"
+                disabled={!hasSource || busy || namesLoading}
+                onClick={() => void onRefreshNames().catch(() => {})}
+              >
+                Atualizar nomes
+              </Button>
+            </div>
             <div className="tc-columns">
               <label className="tc-field">
                 Categoria
@@ -357,6 +463,28 @@ export function TemplateCreationTab({
               errors={compiled.errors}
               attempted={attempted}
             />
+          ) : advanced ? (
+            <section className="tc-section">
+              <h3>Componentes do template</h3>
+              <p className="tc-help">
+                Este template usa um formato avançado. Todos os cartões, mídias, exemplos e botões
+                foram preservados e podem ser editados no JSON abaixo. A prévia acompanha as
+                alterações; a Meta valida as regras deste formato no envio.
+              </p>
+              <label className="tc-field">
+                Componentes editáveis
+                <textarea
+                  className="tc-advanced-json"
+                  value={draft.componentsJson}
+                  onChange={(e) => update("componentsJson", e.target.value)}
+                  aria-invalid={
+                    (attempted && compiled.errors.some((e) => e.field === "componentsJson")) ||
+                    undefined
+                  }
+                />
+                {fieldErrors("componentsJson")}
+              </label>
+            </section>
           ) : (
             <>
               <section className="tc-section">
@@ -403,27 +531,48 @@ export function TemplateCreationTab({
                   </>
                 )}
                 {["IMAGE", "VIDEO", "DOCUMENT"].includes(draft.headerFormat) && (
-                  <label className="tc-field">
-                    Handle da mídia de exemplo
-                    <input
-                      value={draft.mediaHandle}
-                      onChange={(event) => update("mediaHandle", event.target.value)}
-                      placeholder="4::…"
-                    />
-                    <span className="tc-help">
-                      Use o identificador retornado pelo upload da Meta para esta conta. A mídia
-                      será analisada junto com o template. URLs e IDs de mensagem não substituem o
-                      handle.
-                    </span>
-                    {fieldErrors("mediaHandle")}
-                    <a
-                      href="https://developers.facebook.com/docs/graph-api/guides/upload"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Como obter o handle <ExternalLink size={12} />
-                    </a>
-                  </label>
+                  <div className="tc-examples">
+                    <label className="tc-field">
+                      URL da mídia de exemplo
+                      <input
+                        value={draft.mediaUrl}
+                        onChange={(e) => {
+                          update("mediaUrl", e.target.value);
+                          update("mediaHandle", "");
+                        }}
+                        placeholder="https://…"
+                      />
+                      <span className="tc-help">
+                        Ao criar, a Blip envia esta mídia para análise da Meta. Links temporários
+                        precisam continuar válidos.
+                      </span>
+                      {fieldErrors("mediaUrl")}
+                    </label>
+                    <label className="tc-field">
+                      Ou handle da mídia de exemplo
+                      <input
+                        value={draft.mediaHandle}
+                        onChange={(event) => {
+                          update("mediaHandle", event.target.value);
+                          update("mediaUrl", "");
+                        }}
+                        placeholder="4::…"
+                      />
+                      <span className="tc-help">
+                        Use o identificador retornado pelo upload da Meta para esta conta. A mídia
+                        será analisada junto com o template. URLs e IDs de mensagem não substituem o
+                        handle.
+                      </span>
+                      {fieldErrors("mediaHandle")}
+                      <a
+                        href="https://developers.facebook.com/docs/graph-api/guides/upload"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Como obter o handle <ExternalLink size={12} />
+                      </a>
+                    </label>
+                  </div>
                 )}
                 {draft.headerFormat === "LOCATION" && (
                   <p className="tc-help">
@@ -610,6 +759,16 @@ export function TemplateCreationTab({
               </section>
             </>
           )}
+          {!isAuthentication && draft.messageSendTtl !== "" && (
+            <label className="tc-field">
+              Prazo de entrega (segundos)
+              <input
+                value={draft.messageSendTtl}
+                onChange={(e) => update("messageSendTtl", e.target.value)}
+              />
+              {fieldErrors("messageSendTtl")}
+            </label>
+          )}
         </fieldset>
         <aside className="tc-preview-column" aria-label="Prévia do template">
           <div className="tc-preview-sticky">
@@ -639,77 +798,96 @@ export function TemplateCreationTab({
                 </select>
               </label>
             )}
-            <div className="tc-chat">
-              <div className="tc-chat-brand">
-                <MessageSquareText size={20} />
-                <div>
-                  <strong>{sourceName || "Sua empresa"}</strong>
-                  <span>Conta comercial</span>
-                </div>
-              </div>
-              <div className="tc-bubble">
-                {!isAuthentication && draft.headerFormat === "TEXT" && (
-                  <div className="tc-bubble-header">
-                    {renderExample(draft.headerText, "headerText") || "Cabeçalho"}
+            {advanced ? (
+              <TemplateMessagePreview
+                components={compiled.template.components}
+                sourceName={sourceName}
+                useExamples={showExamples}
+              />
+            ) : (
+              <div className="tc-chat">
+                <div className="tc-chat-brand">
+                  <MessageSquareText size={20} />
+                  <div>
+                    <strong>{sourceName || "Sua empresa"}</strong>
+                    <span>Conta comercial</span>
                   </div>
-                )}
-                {!isAuthentication &&
-                  ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(draft.headerFormat) && (
-                    <div className="tc-media">
-                      {headerIcon}
-                      <span>
-                        {draft.headerFormat === "LOCATION"
-                          ? "Localização enviada com a mensagem"
-                          : `Exemplo de ${draft.headerFormat === "IMAGE" ? "imagem" : draft.headerFormat === "VIDEO" ? "vídeo" : "documento"}`}
-                      </span>
+                </div>
+                <div className="tc-bubble">
+                  {!isAuthentication && draft.headerFormat === "TEXT" && (
+                    <div className="tc-bubble-header">
+                      {renderExample(draft.headerText, "headerText") || "Cabeçalho"}
                     </div>
                   )}
-                <div
-                  className={`tc-bubble-body ${!isAuthentication && !draft.body ? "tc-placeholder" : ""}`}
-                >
-                  {isAuthentication
-                    ? formattedText(otpPreview.body)
-                    : draft.body
-                      ? formattedText(renderExample(draft.body, "body"))
-                      : "O corpo da sua mensagem aparece aqui. Comece a escrever no editor."}
-                </div>
-                {(isAuthentication ? otpPreview.footer : draft.footer) && (
-                  <div className="tc-bubble-footer">
-                    {isAuthentication ? otpPreview.footer : draft.footer}
-                  </div>
-                )}
-                <div className="tc-bubble-time">
-                  12:00 <span>✓✓</span>
-                </div>
-                {visibleButtons.map((button: { type: string; text?: string }, index: number) => (
-                  <div className="tc-preview-button" key={index}>
-                    {button.type === "URL" ? (
-                      <ExternalLink size={15} />
-                    ) : button.type === "PHONE_NUMBER" ? (
-                      <Phone size={15} />
-                    ) : (
-                      <MessageSquareText size={15} />
+                  {!isAuthentication &&
+                    ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(draft.headerFormat) && (
+                      <div className="tc-media">
+                        {draft.headerFormat === "IMAGE" && draft.mediaUrl ? (
+                          <img
+                            className="tl-image"
+                            src={draft.mediaUrl}
+                            alt="Imagem do template"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          headerIcon
+                        )}
+                        <span>
+                          {draft.headerFormat === "LOCATION"
+                            ? "Localização enviada com a mensagem"
+                            : `Exemplo de ${draft.headerFormat === "IMAGE" ? "imagem" : draft.headerFormat === "VIDEO" ? "vídeo" : "documento"}`}
+                        </span>
+                      </div>
                     )}
-                    {button.type === "COPY_CODE"
-                      ? "Copiar código"
-                      : button.text || "Rótulo do botão"}
-                  </div>
-                ))}
-                {previewButtons.length > 3 && (
-                  <button
-                    type="button"
-                    className="tc-preview-button"
-                    onClick={() => setExpandedButtons((value) => !value)}
+                  <div
+                    className={`tc-bubble-body ${!isAuthentication && !draft.body ? "tc-placeholder" : ""}`}
                   >
-                    {expandedButtons ? "Recolher opções" : "Ver todas as opções"}
-                  </button>
-                )}
+                    {isAuthentication
+                      ? formattedText(otpPreview.body)
+                      : draft.body
+                        ? formattedText(renderExample(draft.body, "body"))
+                        : "O corpo da sua mensagem aparece aqui. Comece a escrever no editor."}
+                  </div>
+                  {(isAuthentication ? otpPreview.footer : draft.footer) && (
+                    <div className="tc-bubble-footer">
+                      {isAuthentication ? otpPreview.footer : draft.footer}
+                    </div>
+                  )}
+                  <div className="tc-bubble-time">
+                    12:00 <span>✓✓</span>
+                  </div>
+                  {visibleButtons.map((button: { type: string; text?: string }, index: number) => (
+                    <div className="tc-preview-button" key={index}>
+                      {button.type === "URL" ? (
+                        <ExternalLink size={15} />
+                      ) : button.type === "PHONE_NUMBER" ? (
+                        <Phone size={15} />
+                      ) : (
+                        <MessageSquareText size={15} />
+                      )}
+                      {button.type === "COPY_CODE"
+                        ? "Copiar código"
+                        : button.text || "Rótulo do botão"}
+                    </div>
+                  ))}
+                  {previewButtons.length > 3 && (
+                    <button
+                      type="button"
+                      className="tc-preview-button"
+                      onClick={() => setExpandedButtons((value) => !value)}
+                    >
+                      {expandedButtons ? "Recolher opções" : "Ver todas as opções"}
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
             <p className="tc-preview-caption">
               {isAuthentication
                 ? otpPreview.caption
-                : "Representação visual. A aparência e os textos nativos podem variar conforme o WhatsApp e o idioma. A mídia é ilustrativa."}
+                : advanced || draft.mediaUrl
+                  ? "Prévia com os dados do rascunho. Mídias temporárias podem expirar e a aparência pode variar no WhatsApp."
+                  : "Representação visual. A aparência e os textos nativos podem variar conforme o WhatsApp e o idioma. A mídia é ilustrativa."}
             </p>
             <div className="tc-guidance">
               <strong>Antes de enviar</strong>
@@ -765,7 +943,12 @@ export function TemplateCreationTab({
             ? "Este conteúdo já foi enviado neste router."
             : "Revise a mensagem e o router antes de enviar para análise."}
         </p>
-        <Button type="submit" variant="primary" loading={busy} disabled={sent}>
+        <Button
+          type="submit"
+          variant="primary"
+          loading={busy}
+          disabled={sent || nameExists || !namesLoaded || namesLoading || Boolean(namesError)}
+        >
           <Send size={17} />
           {sent ? "Template enviado" : "Criar template"}
         </Button>

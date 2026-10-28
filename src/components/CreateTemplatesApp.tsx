@@ -64,6 +64,10 @@ import { StatusBadge } from "./ui/StatusBadge";
 import { SelectionBar } from "./ui/SelectionBar";
 import { TemplateCreationTab } from "./TemplateCreationTab";
 import { TemplateTable } from "./TemplateTable";
+import { RegisteredTemplatePreview } from "./RegisteredTemplatePreview";
+import { useTemplateCatalog } from "../hooks/useTemplateCatalog";
+import { duplicateTemplate } from "../../shared/templateLibrary.mjs";
+import type { TemplateDraft } from "../../shared/templateCreation.mjs";
 import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
 import { BulkPublicationTab } from "./BulkPublicationTab";
@@ -920,6 +924,28 @@ export default function CreateTemplatesApp() {
   const pendingSourceReads = useRef({ templates: "", flows: "" });
   const [sourceTabVisit, setSourceTabVisit] = useState(0);
   const [templateTab, setTemplateTab] = useState<"list" | "create">("list");
+  const catalog = useTemplateCatalog(selectedReadSource);
+  const [templatePreviewKey, setTemplatePreviewKey] = useState("");
+  const [creatorBusy, setCreatorBusy] = useState(false);
+  const [duplicateRequest, setDuplicateRequest] = useState<{
+    id: string;
+    scope: string;
+    draft: TemplateDraft;
+    originalName: string;
+  } | null>(null);
+  const previewTemplate =
+    templateSearchResult.templates.find((t) => templateKey(t) === templatePreviewKey) ||
+    templateSearchResult.templates[0];
+  function openTemplateDuplicate(template: Template) {
+    if (creatorBusy) return;
+    setDuplicateRequest({
+      id: crypto.randomUUID(),
+      scope: selectedReadSource,
+      draft: duplicateTemplate(template),
+      originalName: template.name,
+    });
+    setTemplateTab("create");
+  }
   const isManagerView = ["routers", "bots", "inactivity", "downloads"].includes(visibleActiveView);
   const visibleActivityEntries = activityEntries.filter(
     (entry) => activityFilter === "all" || entry.view === activityFilter,
@@ -987,11 +1013,17 @@ export default function CreateTemplatesApp() {
     pendingSourceReads.current = { templates: "", flows: "" };
     setIsSearchingTemplates(false);
     setIsLoadingFlows(false);
+    setTemplateSearchResult(emptyTemplateSearch);
+    setTemplatesLoaded(false);
+    setSelectedTemplateKeys(new Set());
+    setTemplatePreviewKey("");
   }, [selectedReadSource]);
 
   useEffect(() => {
     if (!selectedReadSource) return;
     if (visibleActiveView === "templates" && templateTab === "list") void handleSearchTemplates();
+    if (visibleActiveView === "templates" && templateTab === "create")
+      void catalog.load(selectedReadSource, ensureSourceRouterKey).catch(() => {});
     if (visibleActiveView === "flows") void handleLoadFlows();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Entering a tab or changing its source starts one read; typing filters does not.
   }, [visibleActiveView, selectedReadSource, sourceTabVisit, templateTab]);
@@ -1958,11 +1990,18 @@ export default function CreateTemplatesApp() {
     try {
       const sourceKey = await ensureSourceRouterKey();
       if (!current()) return;
-      const data = await postJson<SearchResponse>("/api/templates/search", {
-        sourceRouterKey: sourceKey,
-        templateName: templateName.trim(),
-        onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved,
-      });
+      const allTemplates = await catalog.load(scope, async () => sourceKey, true);
+      const query = templateName.trim();
+      const templates = allTemplates.filter(
+        (template) =>
+          (!query || template.name.toLowerCase().includes(query.toLowerCase())) &&
+          (!DEFAULT_TEMPLATE_OPTIONS.onlyApproved || template.status === "APPROVED"),
+      );
+      const data: SearchResponse = {
+        search: { templateName: query, onlyApproved: DEFAULT_TEMPLATE_OPTIONS.onlyApproved },
+        total: templates.length,
+        templates,
+      };
       if (!current()) return;
       setTemplateSearchResult(data);
       setTemplatesLoaded(true);
@@ -4784,6 +4823,16 @@ export default function CreateTemplatesApp() {
               hasSource={hasSourceRouterSelection()}
               ensureSourceKey={ensureSourceRouterKey}
               onSelectSource={openSourceModal}
+              knownNames={catalog.entry.names}
+              namesLoaded={catalog.entry.loaded}
+              namesLoading={Boolean(catalog.entry.pending)}
+              namesError={catalog.entry.error}
+              onRefreshNames={() =>
+                catalog.load(selectedReadSource, ensureSourceRouterKey, true).then(() => {})
+              }
+              duplicateRequest={duplicateRequest}
+              onBusyChange={setCreatorBusy}
+              onCreated={(scope, template) => catalog.register(scope, template)}
             />
           </div>
           <div
@@ -4885,13 +4934,26 @@ export default function CreateTemplatesApp() {
                 label="templates processados"
               />
             )}
-            <TemplateTable
-              templates={templateSearchResult.templates}
-              selected={selectedTemplateKeys}
-              loading={isSearchingTemplates}
-              loaded={templatesLoaded}
-              onToggle={toggleTemplate}
-            />
+            <div className="tl-layout">
+              <TemplateTable
+                templates={templateSearchResult.templates}
+                selected={selectedTemplateKeys}
+                loading={isSearchingTemplates}
+                loaded={templatesLoaded}
+                onToggle={toggleTemplate}
+                focusedKey={previewTemplate ? templateKey(previewTemplate) : ""}
+                onPreview={setTemplatePreviewKey}
+                onDuplicate={openTemplateDuplicate}
+                duplicateDisabled={creatorBusy || isSearchingTemplates}
+              />
+              <RegisteredTemplatePreview
+                template={previewTemplate}
+                sourceName={sourceRouterDisplayName}
+                onDuplicate={openTemplateDuplicate}
+                disabled={creatorBusy}
+                loading={isSearchingTemplates}
+              />
+            </div>
           </div>
         </section>
 

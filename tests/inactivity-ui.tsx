@@ -32,7 +32,11 @@ function initialDraft(): InactivityAnalysis {
 window.fetch = async (input, options) => {
   const path = String(input);
   let readSource = "";
-  if (path === "/api/templates/search" || path === "/api/flows/search") {
+  if (
+    path === "/api/templates/search" ||
+    path === "/api/templates/catalog" ||
+    path === "/api/flows/search"
+  ) {
     const request = JSON.parse(String(options?.body || "{}"));
     readSource = atob(request.sourceRouterKey.slice(4)).split(":")[0];
     const kind = path.includes("templates") ? "templates" : "flows";
@@ -68,19 +72,132 @@ window.fetch = async (input, options) => {
       },
     });
   }
-  if (path === "/api/templates/search") {
+  if (path === "/api/templates/search" || path === "/api/templates/catalog") {
+    const base = { language: "pt_BR", category: "MARKETING", status: "APPROVED" };
+    const image = {
+      type: "HEADER",
+      format: "IMAGE",
+      example: { header_handle: [`${location.origin}/fixture-template.svg`] },
+    };
+    const templates = [
+      {
+        ...base,
+        name: `template_${readSource}`,
+        components: [
+          image,
+          {
+            type: "BODY",
+            text: "Olá, {{1}}! Conheça nossa *oferta especial* de internet. Aproveite!",
+            example: { body_text: [["Ana"]] },
+          },
+          { type: "FOOTER", text: "Condições no site." },
+          {
+            type: "BUTTONS",
+            buttons: [
+              {
+                type: "URL",
+                text: "Quero contratar",
+                url: "https://example.com/oferta?origem=whatsapp&plano=20",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...base,
+        name: `template_${readSource}_copy`,
+        components: [{ type: "BODY", text: "Uma cópia já cadastrada neste router." }],
+      },
+      {
+        ...base,
+        name: `autenticacao_${readSource}`,
+        category: "AUTHENTICATION",
+        components: [
+          {
+            type: "BODY",
+            text: "Seu código de verificação é *{{1}}*. Não compartilhe.",
+            add_security_recommendation: true,
+            example: { body_text: [["123456"]] },
+          },
+          {
+            type: "BUTTONS",
+            buttons: [
+              {
+                type: "URL",
+                text: "Copiar código",
+                url: "https://www.whatsapp.com/otp/code/?otp_type=COPY_CODE&code=otp{{1}}",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...base,
+        name: `carrossel_${readSource}`,
+        components: [
+          { type: "BODY", text: "Compare as ofertas e escolha seu plano." },
+          {
+            type: "CAROUSEL",
+            cards: ["600 Mega", "700 Mega", "1 Giga"].map((text) => ({
+              components: [
+                image,
+                { type: "BODY", text: `Plano *${text}* para sua casa.` },
+                { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: `Quero ${text}` }] },
+              ],
+            })),
+          },
+        ],
+      },
+      {
+        ...base,
+        name: `nomeado_${readSource}`,
+        category: "UTILITY",
+        parameter_format: "NAMED",
+        components: [
+          {
+            type: "HEADER",
+            format: "TEXT",
+            text: "Pedido {{numero_pedido}}",
+            example: {
+              header_text_named_params: [{ param_name: "numero_pedido", example: "123" }],
+            },
+          },
+          {
+            type: "BODY",
+            text: "Olá, {{nome_cliente}}! Seu pedido foi confirmado.",
+            example: { body_text_named_params: [{ param_name: "nome_cliente", example: "João" }] },
+          },
+          {
+            type: "BUTTONS",
+            buttons: [
+              {
+                type: "URL",
+                text: "Acompanhar",
+                url: "https://example.com/pedido/{{id_pedido}}",
+                example: ["https://example.com/pedido/123"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...base,
+        name: `documento_${readSource}`,
+        components: [
+          {
+            type: "HEADER",
+            format: "DOCUMENT",
+            example: { header_handle: ["https://example.com/comprovante.pdf"] },
+          },
+          { type: "BODY", text: "Aqui está o documento solicitado." },
+        ],
+      },
+    ];
     return Response.json({
-      search: { templateName: "", onlyApproved: true },
-      total: 1,
-      templates: [
-        {
-          name: `template_${readSource}`,
-          language: "pt_BR",
-          category: "MARKETING",
-          status: "APPROVED",
-          components: [],
-        },
-      ],
+      search: { templateName: "", onlyApproved: false },
+      total: templates.length,
+      templates,
+      complete: true,
     });
   }
   if (path === "/api/routers/whatsapp-number")

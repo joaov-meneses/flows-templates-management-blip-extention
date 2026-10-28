@@ -84,6 +84,7 @@ async function postJsonInternal<TResponse>(
     );
   const collection = {
     "/api/templates/search": "templates",
+    "/api/templates/catalog": "templates",
     "/api/flows/search": "flows",
     "/api/plugins/search": "plugins",
   }[path];

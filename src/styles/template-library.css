@@ -1,0 +1,221 @@
+.tl-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 350px;
+  gap: 22px;
+  align-items: start;
+  margin-top: 18px;
+}
+.tl-layout > .ember-table-wrap {
+  min-width: 0;
+  margin-top: 0;
+  max-height: 760px;
+  overflow: auto;
+}
+.tl-layout .ember-table {
+  min-width: 610px;
+  width: 100%;
+  font-size: 12px;
+}
+.tl-layout .ember-table th,
+.tl-layout .ember-table td {
+  padding: 12px 9px;
+}
+.tl-layout .template-name {
+  overflow-wrap: anywhere;
+  max-width: 310px;
+  min-width: 150px;
+}
+.tl-name-button {
+  color: var(--blip-primary);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.tl-name-button:hover {
+  text-decoration: underline;
+}
+.tl-name-button:focus-visible {
+  outline: 2px solid var(--blip-primary);
+  outline-offset: 4px;
+}
+.ember-table tr.tl-focused {
+  box-shadow: inset 3px 0 var(--blip-primary);
+  background: var(--blip-surface-1);
+}
+.tl-row-duplicate {
+  border: 1px solid var(--blip-border);
+  background: var(--blip-surface-0);
+  color: var(--blip-content-soft);
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  display: inline-flex;
+}
+.tl-row-duplicate:hover {
+  color: var(--blip-primary);
+  border-color: var(--blip-primary);
+}
+.tl-row-duplicate:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.tl-preview {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--blip-border);
+  border-radius: 12px;
+  color: var(--blip-content);
+  background: var(--blip-surface-0);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+.tl-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+.tl-preview-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+.tl-identification {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+.tl-identification > strong {
+  width: 100%;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.tl-identification > span {
+  color: var(--blip-content-soft);
+}
+.tl-empty {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--blip-content-soft);
+  padding: 28px 8px;
+}
+.tl-example-toggle {
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.tl-chat {
+  padding-bottom: 18px;
+  overflow: hidden;
+}
+.tl-chat .tc-bubble {
+  min-width: 0;
+}
+.tl-chat .tc-bubble-body {
+  overflow-wrap: anywhere;
+}
+.tl-chat .tc-preview-button > span {
+  overflow-wrap: anywhere;
+}
+.tl-image {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--blip-surface-1);
+  margin-bottom: 10px;
+}
+.tl-chat .tc-media a {
+  color: var(--blip-primary);
+  font-size: 11px;
+}
+.tl-carousel {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 12px 1px 8px;
+}
+.tl-carousel-card {
+  min-width: 0;
+  flex: 0 0 94%;
+  scroll-snap-align: start;
+}
+.tl-carousel-card .tc-bubble {
+  margin: 0;
+  width: auto;
+}
+.tl-card-index {
+  display: block;
+  font-size: 10px;
+  margin: 0 0 5px;
+  color: var(--blip-content-soft);
+}
+.tl-button-details {
+  font-size: 12px;
+  margin-top: 16px;
+}
+.tl-button-details summary {
+  cursor: pointer;
+  color: var(--blip-primary);
+}
+.tl-button-details > div {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+}
+.tl-button-details code {
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--blip-content-soft);
+}
+.tl-unavailable {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--blip-content-soft);
+}
+.tc-advanced-json {
+  font-family: ui-monospace, monospace !important;
+  min-height: 440px !important;
+  font-size: 12px !important;
+}
+.tc-catalog-status {
+  font-size: 12px;
+  color: var(--blip-content-soft);
+  margin: 0;
+}
+.tc-copy-notice {
+  padding: 12px 14px;
+  border: 1px solid var(--blip-border);
+  border-radius: 8px;
+  background: var(--blip-surface-1);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+@media (min-width: 1500px) {
+  .tl-layout {
+    grid-template-columns: minmax(0, 1fr) 390px;
+  }
+}
+
+.tl-layout .ember-status,
+.tl-layout .ember-table th,
+.tl-layout .ember-table td[data-label="Categoria"] {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}

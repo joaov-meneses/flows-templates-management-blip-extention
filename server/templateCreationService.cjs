@@ -55,7 +55,7 @@ async function createTemplate(params = {}) {
       throw new InputError("Este identificador já foi usado com outro conteúdo.");
     return previous.promise;
   }
-  const nameKey = `${routerHash}:${template.name}:${template.language}`;
+  const nameKey = `${routerHash}:${template.name}`;
   if (pendingNames.has(nameKey))
     throw new InputError(
       "Já existe uma criação em andamento para este nome e idioma. Aguarde e consulte a lista.",
@@ -73,19 +73,17 @@ async function createTemplate(params = {}) {
       });
       if (!Array.isArray(existing?.resource?.data))
         throw new Error("Não foi possível validar nomes existentes. Nenhuma criação foi enviada.");
-      if (
-        existing.resource.data.some(
-          (item) => item.name === template.name && item.language === template.language,
-        )
-      )
-        throw new InputError("Já existe um template com este nome e idioma neste router.");
+      if (existing.resource.data.some((item) => item.name === template.name))
+        throw new InputError("Já existe um template com este nome neste router.");
+      const resource = structuredClone(template);
+      await prepareMedia(params.sourceRouterKey, resource.components);
       const response = await command(params.sourceRouterKey, {
         id: params.requestId,
         method: "set",
         type: "application/json",
         to: "postmaster@wa.gw.msging.net",
         uri: "/message-templates",
-        resource: template,
+        resource,
       });
       return {
         template: {
@@ -105,4 +103,35 @@ async function createTemplate(params = {}) {
   requests.set(cacheKey, { fingerprint, promise, expires: Date.now() + TTL });
   return promise;
 }
-module.exports = { createTemplate };
+async function prepareMedia(routerKey, components, uploaded = new Map()) {
+  for (const component of components || []) {
+    if (component.type === "CAROUSEL") {
+      for (const card of component.cards || [])
+        await prepareMedia(routerKey, card.components, uploaded);
+    }
+    if (component.type !== "HEADER" || !["IMAGE", "VIDEO", "DOCUMENT"].includes(component.format))
+      continue;
+    const values = component.example?.header_handle;
+    if (!Array.isArray(values)) continue;
+    for (let index = 0; index < values.length; index++) {
+      const media = values[index];
+      if (typeof media !== "string" || !/^https?:\/\//i.test(media)) continue;
+      if (!uploaded.has(media)) {
+        const response = await command(routerKey, {
+          id: randomUUID(),
+          method: "set",
+          to: "postmaster@wa.gw.msging.net",
+          uri: "/message-templates-attachment",
+          type: "application/vnd.lime.media-link+json",
+          resource: { uri: media },
+        });
+        const handle = response.resource?.fileHandle;
+        if (typeof handle !== "string" || !handle || /^https?:\/\//i.test(handle))
+          throw new Error("A Blip não confirmou o upload da mídia. Nenhum template foi criado.");
+        uploaded.set(media, handle);
+      }
+      values[index] = uploaded.get(media);
+    }
+  }
+}
+module.exports = { createTemplate, sendTemplateCommand: command };

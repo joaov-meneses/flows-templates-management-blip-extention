@@ -15,6 +15,10 @@ export interface TemplateDraft {
   headerFormat: string;
   headerText: string;
   mediaHandle: string;
+  mediaUrl: string;
+  componentsJson: string;
+  advancedComponents: boolean;
+  messageSendTtl: string;
   body: string;
   footer: string;
   examples: Record<string, string>;

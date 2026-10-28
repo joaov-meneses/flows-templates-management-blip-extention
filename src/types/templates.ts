@@ -17,6 +17,9 @@ export type Template = {
   category: string;
   status?: string;
   components: unknown;
+  id?: string;
+  parameter_format?: string;
+  message_send_ttl_seconds?: number;
 };
 
 export type SearchResponse = {

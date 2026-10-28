@@ -23,6 +23,10 @@ export function newTemplateDraft() {
     headerFormat: "NONE",
     headerText: "",
     mediaHandle: "",
+    mediaUrl: "",
+    componentsJson: "",
+    advancedComponents: false,
+    messageSendTtl: "",
     body: "",
     footer: "",
     examples: {},
@@ -62,6 +66,73 @@ export function compileTemplateDraft(draft) {
   }
   if (!["POSITIONAL", "NAMED"].includes(parameterFormat))
     fail("parameterFormat", "Selecione o formato das variáveis.");
+  const extraMetadata = {};
+  if (text("messageSendTtl")) {
+    const ttl = Number(text("messageSendTtl"));
+    if (!/^-?\d+$/.test(text("messageSendTtl")) || !Number.isSafeInteger(ttl))
+      fail("messageSendTtl", "Informe um prazo de entrega inteiro em segundos.");
+    else extraMetadata.message_send_ttl_seconds = ttl;
+  }
+  if (draft?.advancedComponents === true) {
+    let advanced = [];
+    try {
+      advanced = JSON.parse(text("componentsJson"));
+      function validComponents(parts, depth = 0) {
+        return (
+          Array.isArray(parts) &&
+          parts.length > 0 &&
+          parts.every((c) => {
+            if (!c || typeof c !== "object" || typeof c.type !== "string") return false;
+            if (c.text != null && typeof c.text !== "string") return false;
+            if (c.format != null && typeof c.format !== "string") return false;
+            if (
+              c.type === "BUTTONS" &&
+              (!Array.isArray(c.buttons) ||
+                c.buttons.some(
+                  (b) =>
+                    !b ||
+                    typeof b.type !== "string" ||
+                    (b.text != null && typeof b.text !== "string") ||
+                    (b.url != null && typeof b.url !== "string"),
+                ))
+            )
+              return false;
+            if (
+              c.type === "CAROUSEL" &&
+              (depth > 0 ||
+                !Array.isArray(c.cards) ||
+                c.cards.length < 1 ||
+                c.cards.length > 10 ||
+                c.cards.some((card) => !validComponents(card?.components, depth + 1)))
+            )
+              return false;
+            return true;
+          })
+        );
+      }
+      if (!validComponents(advanced)) throw new Error();
+      if (JSON.stringify(advanced).length > 200000) throw new Error();
+      if (!advanced.some((c) => c.type === "BODY"))
+        fail("componentsJson", "Mantenha o componente BODY do template.");
+    } catch {
+      advanced = [];
+      fail("componentsJson", "Informe um array JSON válido de componentes (até 200 KB).");
+    }
+    return {
+      errors,
+      warnings: [
+        "Este formato preserva os componentes do template original. Revise cartões, exemplos, links e limites do formato; a Meta valida o conteúdo no envio.",
+      ],
+      template: {
+        name,
+        language,
+        category,
+        parameter_format: parameterFormat,
+        ...extraMetadata,
+        components: advanced,
+      },
+    };
+  }
   if (!["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(headerFormat))
     fail("headerFormat", "Tipo de cabeçalho inválido.");
 
@@ -136,9 +207,28 @@ export function compileTemplateDraft(draft) {
     });
   } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat)) {
     const handle = text("mediaHandle").trim();
-    if (!handle || /^https?:\/\//i.test(handle) || /\s/.test(handle))
+    const mediaUrl = text("mediaUrl").trim();
+    if (mediaUrl) {
+      try {
+        const parsed = new URL(mediaUrl);
+        if (
+          !["https:", "http:"].includes(parsed.protocol) ||
+          parsed.username ||
+          parsed.password ||
+          /\s/.test(mediaUrl)
+        )
+          throw new Error();
+      } catch {
+        fail("mediaUrl", "Informe uma URL de mídia válida começando com https:// ou http://.");
+      }
+      if (handle) fail("mediaHandle", "Use uma URL ou um handle de mídia, apenas um deles.");
+    } else if (!handle || /^https?:\/\//i.test(handle) || /\s/.test(handle))
       fail("mediaHandle", "Informe o handle da mídia já enviada à Meta. Uma URL não é um handle.");
-    components.push({ type: "HEADER", format: headerFormat, example: { header_handle: [handle] } });
+    components.push({
+      type: "HEADER",
+      format: headerFormat,
+      example: { header_handle: [mediaUrl || handle] },
+    });
   } else if (headerFormat === "LOCATION") components.push({ type: "HEADER", format: "LOCATION" });
 
   if (!body.trim() || countCharacters(body) > 1024)
@@ -274,6 +364,13 @@ export function compileTemplateDraft(draft) {
   return {
     errors,
     warnings,
-    template: { name, language, category, parameter_format: parameterFormat, components },
+    template: {
+      name,
+      language,
+      category,
+      parameter_format: parameterFormat,
+      ...extraMetadata,
+      components,
+    },
   };
 }

@@ -61,6 +61,7 @@ const { publishBuilderDraft } = require("./server/builderPublicationService.cjs"
 const { exportBuilderFlow } = require("./server/builderExportService.cjs");
 
 const { createTemplate } = require("./server/templateCreationService.cjs");
+const { templateCatalog } = require("./server/templateCatalogService.cjs");
 
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
@@ -120,6 +121,15 @@ app.post("/api/templates/create", async (req, res, next) => {
   res.set("Cache-Control", "no-store");
   try {
     res.json(await createTemplate(req.body || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/templates/catalog", async (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await templateCatalog(req.body || {}));
   } catch (error) {
     next(error);
   }
