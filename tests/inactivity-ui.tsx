@@ -17,7 +17,7 @@ const deskQueues = new Map<
     priorityRuleCount: number;
   }>
 >();
-function deskFixture(path: string, body: Record<string, string>) {
+function deskFixture(path: string, body: Record<string, string> & { forceFinalization?: boolean }) {
   const builderShortName = body.builderShortName;
   if (builderShortName === "builder_falha")
     return Response.json(
@@ -63,8 +63,21 @@ function deskFixture(path: string, body: Record<string, string>) {
         { error: { message: "Já existe uma fila com esse nome." } },
         { status: 409 },
       );
+    const activeTicketCount = body.action === "rename" && queue.id === "fixture-sales" ? 3 : 0;
+    if (activeTicketCount && !body.forceFinalization)
+      return Response.json(
+        {
+          error: {
+            message:
+              "Esta fila tem atendimentos ativos. Finalize-os antes de renomear ou ative Forçar finalização.",
+          },
+        },
+        { status: 409 },
+      );
     return Response.json({
       builderShortName,
+      forceFinalization: body.forceFinalization === true,
+      activeTicketCount,
       queue,
       action: body.action,
       name: body.name,
@@ -92,7 +105,14 @@ function deskFixture(path: string, body: Record<string, string>) {
     result.uniqueId = result.id;
     queues.push(result);
   } else Object.assign(queue, result);
-  return Response.json({ builderShortName, status: "success", action: body.action, queue: result });
+  return Response.json({
+    builderShortName,
+    status: "success",
+    action: body.action,
+    queue: result,
+    finalizedTickets: body.forceFinalization && queue.id === "fixture-sales" ? 3 : 0,
+    finalizationUncertain: false,
+  });
 }
 
 const drafts = new Map<string, InactivityAnalysis>();

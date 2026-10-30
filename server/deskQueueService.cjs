@@ -7,6 +7,7 @@ const QUEUE = "application/vnd.iris.desk.attendancequeue+json";
 const ATTENDANT = "application/vnd.iris.desk.attendant+json";
 const RULE = "application/vnd.iris.desk.rule+json";
 const PRIORITY = "application/vnd.iris.desk.priority-rules+json";
+const TICKET = "application/vnd.iris.ticket+json";
 const TAG = "application/vnd.iris.desk.attendancequeuetag+json";
 const locks = new Set();
 const completed = new Map();
@@ -205,7 +206,12 @@ function requestDetails(params, state) {
       "O novo nome ainda possui vínculos antigos no Desk. Escolha outro nome para não incorporá-los.",
       409,
     );
-  return { queue, name, action: params.action };
+  if (params.forceFinalization != null && typeof params.forceFinalization !== "boolean")
+    throw new DeskInputError("A opção de finalização deve estar ativada ou desativada.");
+  const forceFinalization = params.forceFinalization === true;
+  if (forceFinalization && params.action !== "rename")
+    throw new DeskInputError("Forçar finalização está disponível somente ao renomear.");
+  return { queue, name, action: params.action, forceFinalization };
 }
 
 function stable(value) {
@@ -236,6 +242,103 @@ function ordered(state) {
 const configUri = (name) => `/owner-team-configurations/${encodeURIComponent(name)}`;
 const tagsUri = (queue) => `/attendance-queues/${encodeURIComponent(queue.uniqueId)}/tags`;
 
+function checkTicket(ctx, ticket, id) {
+  if (
+    !ticket ||
+    typeof ticket.id !== "string" ||
+    (id && ticket.id !== id) ||
+    ticket.ownerIdentity !== ctx.identity ||
+    typeof ticket.team !== "string" ||
+    typeof ticket.closed !== "boolean"
+  )
+    throw new Error("Não foi possível confirmar a identidade e a fila do atendimento.");
+  return ticket;
+}
+
+async function activeTicketsInQueue(ctx, queue) {
+  const filter = encodeURIComponent(
+    `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`,
+  );
+  const tickets = await all(ctx, `/tickets?$filter=${filter}`);
+  for (const ticket of tickets) {
+    checkTicket(ctx, ticket);
+    if (ticket.team !== queue.name || ticket.closed)
+      throw new Error(
+        "A consulta retornou atendimentos fora da fila selecionada. Atualize a prévia.",
+      );
+  }
+  return tickets;
+}
+
+async function requireEmptyQueue(ctx, queue) {
+  if ((await activeTicketsInQueue(ctx, queue)).length)
+    throw new Error(
+      "A fila recebeu atendimentos ativos. A renomeação foi interrompida; revise novamente.",
+    );
+}
+
+// Closures are irreversible. They are tracked separately from configuration recovery.
+async function finalizeReviewedTickets(ctx, plan, progress) {
+  let finalizedTickets = 0;
+  let finalizationUncertain = false;
+  try {
+    for (const [index, reviewed] of plan.activeTickets.entries()) {
+      progress?.(`Finalizando atendimento ${index + 1} de ${plan.activeTickets.length}…`);
+      const uri = `/ticket/${encodeURIComponent(reviewed.id)}`;
+      const current = checkTicket(ctx, await command(ctx, "get", uri), reviewed.id);
+      if (current.team !== plan.queue.name)
+        throw new Error(
+          "Um atendimento mudou de fila. A finalização foi interrompida; revise novamente.",
+        );
+      if (current.closed) continue;
+      let writeError;
+      finalizationUncertain = true;
+      try {
+        await command(ctx, "set", "/tickets/change-status", TICKET, {
+          id: reviewed.id,
+          status: "ClosedAttendant",
+        });
+      } catch (error) {
+        writeError = error;
+      }
+      // Even after a timeout, reconcile once by ID; never resend a close command.
+      const after = checkTicket(ctx, await command(ctx, "get", uri), reviewed.id);
+      if (after.closed && after.status === "ClosedAttendant") {
+        finalizedTickets++;
+        finalizationUncertain = false;
+      } else {
+        finalizationUncertain = false;
+        throw writeError || new Error("O Desk não confirmou o encerramento do atendimento.");
+      }
+    }
+    await requireEmptyQueue(ctx, plan.queue);
+    const [latest, tags, settings, targetSettings] = await Promise.all([
+      base(ctx),
+      all(ctx, tagsUri(plan.queue)),
+      command(ctx, "get", configUri(plan.queue.name)),
+      command(ctx, "get", configUri(plan.name)),
+    ]);
+    if (
+      !isDeepStrictEqual(ordered(latest), ordered(plan.state)) ||
+      !isDeepStrictEqual(tags, plan.backup.tags) ||
+      !isDeepStrictEqual(settings, plan.backup.settings) ||
+      !isDeepStrictEqual(targetSettings, plan.targetSettings)
+    )
+      throw new Error("As configurações mudaram durante a finalização. Revise novamente.");
+    return { finalizedTickets, finalizationUncertain };
+  } catch (error) {
+    return {
+      status: "attention",
+      builderShortName: ctx.bot,
+      action: plan.action,
+      message: `${error.message} A renomeação não foi iniciada.`,
+      configurationUnchanged: true,
+      finalizedTickets,
+      finalizationUncertain,
+    };
+  }
+}
+
 async function inspect(ctx, params) {
   const state = await base(ctx);
   const detail = requestDetails(params, state);
@@ -254,19 +357,12 @@ async function inspect(ctx, params) {
       "O novo nome já possui configurações antigas no Desk. Escolha outro nome para não substituí-las.",
       409,
     );
-  if (detail.action === "rename") {
-    const filter = encodeURIComponent(
-      `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`,
+  const activeTickets = detail.action === "rename" ? await activeTicketsInQueue(ctx, queue) : [];
+  if (activeTickets.length && !detail.forceFinalization)
+    throw new DeskInputError(
+      "Esta fila tem atendimentos ativos. Finalize-os antes de renomear ou ative Forçar finalização.",
+      409,
     );
-    const active = await command(ctx, "get", `/tickets?$take=1&$filter=${filter}`);
-    if (!Array.isArray(active?.items))
-      throw new Error("Não foi possível conferir os atendimentos ativos desta fila.");
-    if (active.items.length)
-      throw new DeskInputError(
-        "Esta fila tem atendimentos ativos. Finalize-os antes de renomear.",
-        409,
-      );
-  }
   const backup = {
     queue: clone(queue),
     attendants: state.attendants.filter((a) => a.teams.includes(queue.name)),
@@ -280,7 +376,15 @@ async function inspect(ctx, params) {
     ...detail,
     backup,
     targetSettings,
-    revision: revision({ state: ordered(state), tags, settings, targetSettings }),
+    activeTickets,
+    revision: revision({
+      state: ordered(state),
+      tags,
+      settings,
+      targetSettings,
+      forceFinalization: detail.forceFinalization,
+      activeTickets: activeTickets.map((t) => t.id).sort(),
+    }),
   };
 }
 
@@ -289,6 +393,8 @@ function previewResult(ctx, plan) {
     builderShortName: ctx.bot,
     action: plan.action,
     name: plan.name,
+    forceFinalization: plan.forceFinalization,
+    activeTicketCount: plan.activeTickets.length,
     revision: plan.revision,
     queue: summary(plan.state, plan.queue),
     counts: {
@@ -447,6 +553,7 @@ async function applyPlan(ctx, plan, progress) {
           );
         await setQueue(ctx, backup.queue);
       });
+      await requireEmptyQueue(ctx, backup.queue);
       target = await setQueue(ctx, { ...backup.queue, name });
     } else {
       step("Criando a cópia da fila…");
@@ -671,6 +778,7 @@ async function applyDeskQueue(params, onProgress) {
     action: params.action,
     name: params.name,
     revision: params.revision,
+    forceFinalization: params.forceFinalization === true,
   });
   const previous = completed.get(job);
   if (previous) {
@@ -691,7 +799,11 @@ async function applyDeskQueue(params, onProgress) {
         "As configurações mudaram desde a prévia. Atualize e revise novamente.",
         409,
       );
-    const result = await applyPlan(ctx, plan, onProgress);
+    let finalization = { finalizedTickets: 0, finalizationUncertain: false };
+    if (plan.forceFinalization) finalization = await finalizeReviewedTickets(ctx, plan, onProgress);
+    const result = finalization.status
+      ? finalization
+      : { ...(await applyPlan(ctx, plan, onProgress)), ...finalization };
     completed.set(job, { fingerprint, result });
     if (completed.size > 200) completed.delete(completed.keys().next().value);
     return result;

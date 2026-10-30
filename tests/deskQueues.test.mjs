@@ -57,6 +57,17 @@ const agent = {
 function fake(t, options = {}) {
   const state = structuredClone({
     queues: [queue, other],
+    tickets: options.active
+      ? [
+          {
+            id: "ticket-a",
+            ownerIdentity: queue.ownerIdentity,
+            team: queue.name,
+            closed: false,
+            status: "Open",
+          },
+        ]
+      : [],
     rules: [rule, { ...rule, id: "rule-b", queueId: other.id, team: other.name, priority: 2 }],
     priorities: [priorityRule],
     attendants: [agent],
@@ -84,7 +95,16 @@ function fake(t, options = {}) {
     const qs = new URLSearchParams(query);
     let resource;
     if (c.method === "get") {
-      if (pathname === "/tickets") resource = { items: options.active ? [{ id: "ticket-a" }] : [] };
+      if (pathname === "/tickets") {
+        assert.equal(qs.get("$filter"), `team eq 'Fila A' and closed eq false`);
+        const list = state.tickets.filter((ticket) => ticket.team === queue.name && !ticket.closed);
+        const skip = Number(qs.get("$skip") || 0);
+        const take = Number(qs.get("$take") || 100);
+        resource = { total: list.length, items: list.slice(skip, skip + take) };
+      } else if (pathname.startsWith("/ticket/"))
+        resource = state.tickets.find(
+          (ticket) => ticket.id === decodeURIComponent(pathname.split("/").at(-1)),
+        );
       else if (pathname.startsWith("/owner-team-configurations/"))
         resource = state.settings[decodeURIComponent(pathname.split("/").at(-1))] || {};
       else {
@@ -103,7 +123,13 @@ function fake(t, options = {}) {
       if (name === "queues") delete state.tags[id];
     } else if (c.method === "set") {
       const tagId = pathname.match(/^\/attendance-queues\/([^/]+)\/tags$/)?.[1];
-      if (tagId)
+      if (pathname === "/tickets/change-status") {
+        assert.equal(c.type, "application/vnd.iris.ticket+json");
+        assert.equal(c.resource.status, "ClosedAttendant");
+        const ticket = state.tickets.find((ticket) => ticket.id === c.resource.id);
+        assert.equal(ticket.team, queue.name);
+        Object.assign(ticket, { closed: true, status: c.resource.status });
+      } else if (tagId)
         state.tags[tagId] = c.resource.items.map((item) => ({ id: randomUUID(), ...item }));
       else if (pathname.startsWith("/owner-team-configurations/"))
         state.settings[decodeURIComponent(pathname.split("/").at(-1))] = structuredClone(
@@ -413,4 +439,215 @@ test("uma regra alterada por outra sessão não é apagada nem sobrescrita na re
   assert.equal(result.status, "attention");
   assert.equal(f.state.rules.find((r) => r.id === rule.id).title, "Alteração externa");
   assert(result.recoveryErrors.some((m) => m.includes("outra sessão")));
+});
+
+async function prepareForced() {
+  const input = { ...details(), forceFinalization: true };
+  const preview = await service.previewDeskQueue(input);
+  return { ...input, revision: preview.revision, operationId: randomUUID() };
+}
+const ticket = (id, overrides = {}) => ({
+  id,
+  ownerIdentity: queue.ownerIdentity,
+  team: queue.name,
+  status: "Open",
+  closed: false,
+  ...overrides,
+});
+const closeCalls = (f) => f.calls.filter((c) => c.uri === "/tickets/change-status");
+const denied = (c) =>
+  Response.json({
+    id: c.id,
+    to: queue.ownerIdentity,
+    status: "failure",
+    reason: { description: "Sem permissão para encerrar" },
+  });
+
+test("finalização exige booleano explícito e não está disponível na duplicação", async (t) => {
+  const f = fake(t, { active: true });
+  await assert.rejects(
+    service.previewDeskQueue({ ...details(), forceFinalization: false }),
+    /atendimentos ativos/,
+  );
+  await assert.rejects(
+    service.previewDeskQueue({ ...details(), forceFinalization: "true" }),
+    /ativada ou desativada/,
+  );
+  await assert.rejects(
+    service.previewDeskQueue({ ...details("duplicate"), forceFinalization: true }),
+    /somente ao renomear/,
+  );
+  const preview = await service.previewDeskQueue({ ...details(), forceFinalization: true });
+  assert.equal(preview.forceFinalization, true);
+  assert.equal(preview.activeTicketCount, 1);
+  assert.equal(f.writes().length, 0, "prévia não encerra atendimentos");
+});
+
+test("finaliza todas as páginas revisadas antes de desvincular e preserva outras filas", async (t) => {
+  const f = fake(t);
+  f.state.tickets = Array.from({ length: 105 }, (_, i) => ticket(`ticket-${i}`));
+  f.state.tickets.push(
+    ticket("other-ticket", { team: other.name }),
+    ticket("already-closed", { closed: true, status: "ClosedClient" }),
+  );
+  const input = await prepareForced();
+  assert.equal(f.writes().length, 0);
+  const result = await service.applyDeskQueue(input);
+  assert.equal(result.status, "success");
+  assert.equal(result.finalizedTickets, 105);
+  assert.equal(closeCalls(f).length, 105);
+  const firstConfigWrite = f.writes().findIndex((c) => c.uri !== "/tickets/change-status");
+  assert.equal(firstConfigWrite, 105);
+  assert.equal(f.state.tickets.find((t) => t.id === "other-ticket").closed, false);
+  assert.equal(f.state.tickets.find((t) => t.id === "already-closed").status, "ClosedClient");
+  assert.equal(f.state.queues[0].id, queue.id);
+  const writes = f.writes().length;
+  assert.deepEqual(await service.applyDeskQueue(input), result);
+  assert.equal(f.writes().length, writes);
+});
+
+test("mudança dos atendimentos ou do consentimento invalida a revisão sem encerrar", async (t) => {
+  const f = fake(t, { active: true });
+  const input = await prepareForced();
+  await assert.rejects(
+    service.applyDeskQueue({ ...input, forceFinalization: false }),
+    /atendimentos ativos/,
+  );
+  f.state.tickets.push(ticket("new-ticket"));
+  await assert.rejects(service.applyDeskQueue(input), /mudaram desde a prévia/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("resposta perdida do encerramento é reconciliada por ID sem reenviar", async (t) => {
+  const f = fake(t, {
+    active: true,
+    after(c) {
+      if (c.uri === "/tickets/change-status") throw new Error("timeout");
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "success");
+  assert.equal(result.finalizedTickets, 1);
+  assert.equal(closeCalls(f).length, 1);
+});
+
+test("ticket transferido antes do encerramento não é alterado", async (t) => {
+  const f = fake(t, {
+    active: true,
+    before(c, state) {
+      if (c.uri === "/ticket/ticket-a") state.tickets[0].team = other.name;
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "attention");
+  assert.match(result.message, /mudou de fila/);
+  assert.equal(result.finalizedTickets, 0);
+  assert.equal(result.configurationUnchanged, true);
+  assert.equal(f.writes().length, 0);
+});
+
+test("falha parcial mantém encerramentos anteriores e não inicia renomeação nem repete", async (t) => {
+  const f = fake(t, {
+    before(c) {
+      if (c.resource?.id === "second" && c.uri === "/tickets/change-status") return denied(c);
+    },
+  });
+  f.state.tickets = [ticket("first"), ticket("second")];
+  const input = await prepareForced();
+  const result = await service.applyDeskQueue(input);
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizedTickets, 1);
+  assert.equal(result.finalizationUncertain, false);
+  assert.equal(result.configurationUnchanged, true);
+  assert.deepEqual(f.state.queues, f.before.queues);
+  assert.equal(f.state.tickets[0].closed, true);
+  assert.equal(f.state.tickets[1].closed, false);
+  assert(f.writes().every((c) => c.uri === "/tickets/change-status"));
+  await service.applyDeskQueue(input);
+  assert.equal(closeCalls(f).length, 2);
+});
+
+test("sem leitura após encerramento informa incerteza e não renomeia nem reenvia", async (t) => {
+  let sent = false;
+  const f = fake(t, {
+    active: true,
+    before(c) {
+      if (sent && c.uri === "/ticket/ticket-a") throw new Error("Leitura indisponível");
+    },
+    after(c) {
+      if (c.uri === "/tickets/change-status") sent = true;
+    },
+  });
+  const input = await prepareForced();
+  const result = await service.applyDeskQueue(input);
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizationUncertain, true);
+  assert.equal(result.finalizedTickets, 0);
+  assert.equal(f.state.tickets[0].closed, true);
+  assert.deepEqual(f.state.queues, f.before.queues);
+  await service.applyDeskQueue(input);
+  assert.equal(closeCalls(f).length, 1);
+});
+
+test("novos atendimentos durante a finalização exigem revisão e não são encerrados", async (t) => {
+  const f = fake(t, {
+    active: true,
+    after(c, state) {
+      if (c.uri === "/tickets/change-status") state.tickets.push(ticket("arrival"));
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizedTickets, 1);
+  assert.match(result.message, /recebeu atendimentos/);
+  assert.equal(f.state.tickets.find((t) => t.id === "arrival").closed, false);
+  assert(f.writes().every((c) => c.uri === "/tickets/change-status"));
+});
+
+test("alteração externa durante o encerramento impede a configuração", async (t) => {
+  const f = fake(t, {
+    active: true,
+    after(c, state) {
+      if (c.uri === "/tickets/change-status") state.rules[0].title = "Alteração externa";
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizedTickets, 1);
+  assert.equal(result.configurationUnchanged, true);
+  assert.equal(f.state.rules[0].title, "Alteração externa");
+  assert(f.writes().every((c) => c.uri === "/tickets/change-status"));
+});
+
+test("recuperação da renomeação não reabre tickets já finalizados", async (t) => {
+  const f = fake(t, {
+    active: true,
+    before(c) {
+      if (c.method === "set" && c.uri === "/rules" && c.resource.id !== "rule-a") return denied(c);
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "recovered");
+  assert.equal(result.finalizedTickets, 1);
+  assert.equal(f.state.tickets[0].closed, true);
+  assert.deepEqual(f.state.queues, f.before.queues);
+  assert(closeCalls(f).every((c) => c.resource.status === "ClosedAttendant"));
+});
+
+test("chegada durante a retirada de vínculos impede renomear e recupera configuração", async (t) => {
+  let arrived = false;
+  const f = fake(t, {
+    after(c, state) {
+      if (!arrived && c.method === "delete" && c.uri === "/rules/rule-a") {
+        arrived = true;
+        state.tickets.push(ticket("late"));
+      }
+    },
+  });
+  const result = await service.applyDeskQueue(await prepare());
+  assert.equal(result.status, "recovered");
+  assert.equal(result.finalizedTickets, 0);
+  assert.deepEqual(f.state.queues, f.before.queues);
+  assert.equal(closeCalls(f).length, 0);
+  assert.equal(f.state.tickets[0].closed, false);
 });

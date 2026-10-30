@@ -13,6 +13,8 @@ export type DeskPreview = {
   action: DeskAction;
   name: string;
   revision: string;
+  forceFinalization: boolean;
+  activeTicketCount: number;
   queue: DeskQueue;
   counts: { attendants: number; rules: number; priorityRules: number; tags: number };
   backup: Record<string, unknown>;
@@ -25,4 +27,7 @@ export type DeskResult = {
   message?: string;
   restored?: boolean;
   recoveryErrors?: string[];
+  finalizedTickets: number;
+  finalizationUncertain: boolean;
+  configurationUnchanged?: boolean;
 };

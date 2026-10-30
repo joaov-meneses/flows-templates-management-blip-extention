@@ -46,6 +46,7 @@ export function DeskQueuesTab({
   const [preview, setPreview] = useState<DeskPreview | null>(null);
   const [operationId, setOperationId] = useState("");
   const [attempted, setAttempted] = useState(false);
+  const [forceFinalization, setForceFinalization] = useState(false);
   const lock = useRef(false);
   const sequence = useRef(0);
   const selectedId = useRef(builderId);
@@ -140,6 +141,7 @@ export function DeskQueuesTab({
     setNotice("");
     setPreview(null);
     setAttempted(false);
+    setForceFinalization(false);
     setDraft({
       queue,
       action,
@@ -154,13 +156,17 @@ export function DeskQueuesTab({
         queueId: draft.queue.id,
         action: draft.action,
         name: draft.name,
+        forceFinalization,
       });
       if (
         result.builderShortName !== builderId ||
         result.queue.id !== draft.queue.id ||
         result.action !== draft.action ||
         !result.revision ||
-        !result.backup
+        !result.backup ||
+        result.forceFinalization !== forceFinalization ||
+        !Number.isInteger(result.activeTicketCount) ||
+        result.activeTicketCount < 0
       )
         throw new Error("A prévia não confirmou a fila solicitada.");
       setPreview(result);
@@ -182,15 +188,25 @@ export function DeskQueuesTab({
   async function apply() {
     if (!preview || !builder || attempted || !start("Aguardando confirmação…")) return;
     let reload = false;
+    let successMessage = "";
     try {
       const approved = await showBlipAlert({
         variant: "warning",
         icon: "warning",
-        title: preview.action === "rename" ? "Renomear esta fila?" : "Duplicar esta fila?",
-        body: `Builder: ${builder.name} (${builderId})\nFila: ${preview.queue.name}\nNovo nome: ${preview.name}\n\n${preview.action === "rename" ? "A fila ficará temporariamente sem vínculos enquanto seus atendentes e regras são restaurados." : "Os mesmos atendentes e condições de atendimento serão associados à nova fila."}`,
+        title:
+          preview.action === "rename"
+            ? preview.activeTicketCount
+              ? "Finalizar atendimentos e renomear?"
+              : "Renomear esta fila?"
+            : "Duplicar esta fila?",
+        body: `Builder: ${builder.name} (${builderId})\nFila: ${preview.queue.name}\nNovo nome: ${preview.name}\n\n${preview.activeTicketCount ? `${preview.activeTicketCount} atendimento(s) ativo(s) desta fila serão finalizados antes de renomear. Isso não pode ser desfeito, mesmo se a renomeação falhar.\n\n` : ""}${preview.action === "rename" ? "A fila ficará temporariamente sem vínculos enquanto seus atendentes e regras são restaurados." : "Os mesmos atendentes e condições de atendimento serão associados à nova fila."}`,
         buttons: {
           cancel: "Cancelar",
-          confirm: preview.action === "rename" ? "Renomear fila" : "Duplicar fila",
+          confirm: preview.activeTicketCount
+            ? "Finalizar e renomear"
+            : preview.action === "rename"
+              ? "Renomear fila"
+              : "Duplicar fila",
         },
       });
       if (!approved) return;
@@ -209,6 +225,7 @@ export function DeskQueuesTab({
         action: preview.action,
         queueId: preview.queue.id,
         name: preview.name,
+        forceFinalization: preview.forceFinalization,
         revision: preview.revision,
         operationId,
       });
@@ -218,13 +235,12 @@ export function DeskQueuesTab({
         );
       if (result.status !== "success") {
         setError(
-          `${result.message || "Não foi possível concluir a alteração."} ${result.status === "recovered" ? "A configuração anterior foi restaurada e conferida." : "A recuperação não foi concluída. Confira o Desk e use a cópia de segurança antes de fazer outra alteração."}`,
+          `${result.finalizedTickets ? `${result.finalizedTickets} atendimento(s) finalizado(s); esses encerramentos não serão desfeitos. ` : ""}${result.finalizationUncertain ? "Não foi possível confirmar o último encerramento. Confira os atendimentos no Desk antes de repetir. " : ""}${result.message || "Não foi possível concluir a alteração."} ${result.configurationUnchanged ? "A configuração da fila não foi alterada." : result.status === "recovered" ? "A configuração anterior foi restaurada e conferida." : "A recuperação não foi concluída. Confira o Desk e use a cópia de segurança antes de fazer outra alteração."}`,
         );
         return;
       }
-      setNotice(
-        `Fila ${result.action === "rename" ? "renomeada" : "duplicada"}: ${result.queue?.name || preview.name}. Atendentes, regras, tags e configurações conferidos.`,
-      );
+      successMessage = `Fila ${result.action === "rename" ? "renomeada" : "duplicada"}: ${result.queue?.name || preview.name}. Atendentes, regras, tags e configurações conferidos.${result.finalizedTickets ? ` ${result.finalizedTickets} atendimento(s) finalizado(s).` : ""}`;
+      setNotice(successMessage);
       setQueues([]);
       setLoadedId("");
       setDraft(null);
@@ -240,9 +256,8 @@ export function DeskQueuesTab({
       finish();
     }
     if (reload) {
-      const message = `Fila ${preview.action === "rename" ? "renomeada" : "duplicada"}: ${preview.name}. Atendentes, regras, tags e configurações conferidos.`;
       await load(builderId);
-      setNotice(message);
+      setNotice(successMessage);
     }
   }
 
@@ -445,6 +460,35 @@ export function DeskQueuesTab({
                   ? "A fila mantém sua identidade. Os vínculos são retirados e restaurados automaticamente; as regras são recriadas com as mesmas configurações."
                   : "Uma nova fila será criada neste Builder, com os mesmos atendentes, condições de atendimento, tags e configurações. As novas regras serão acrescentadas após as existentes."}
               </p>
+              {draft.action === "rename" && (
+                <label className="desk-finalization-switch blip-switch-option">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={forceFinalization}
+                    disabled={busy || attempted}
+                    onChange={(event) => {
+                      setForceFinalization(event.target.checked);
+                      setPreview(null);
+                      setError("");
+                    }}
+                  />
+                  <span className="flow-switch-track" aria-hidden="true">
+                    <span className="flow-switch-thumb" />
+                  </span>
+                  <span className="blip-switch-label">
+                    Forçar finalização
+                    <small>Finaliza os atendimentos ativos desta fila antes de renomear.</small>
+                  </span>
+                </label>
+              )}
+              {preview?.forceFinalization && (
+                <Feedback tone="warning">
+                  {preview.activeTicketCount > 0
+                    ? `${preview.activeTicketCount} atendimento(s) ativo(s) serão finalizados ao confirmar. O encerramento não pode ser desfeito, mesmo se a renomeação falhar.`
+                    : "Nenhum atendimento ativo nesta fila. Não há atendimentos para finalizar."}
+                </Feedback>
+              )}
               {preview && (
                 <>
                   <div className="desk-queue-counts">
@@ -485,7 +529,11 @@ export function DeskQueuesTab({
                 </Button>
               ) : (
                 <Button disabled={busy || attempted} onClick={() => void apply()}>
-                  {draft.action === "rename" ? "Renomear fila" : "Duplicar fila"}
+                  {preview.activeTicketCount
+                    ? "Finalizar e renomear"
+                    : draft.action === "rename"
+                      ? "Renomear fila"
+                      : "Duplicar fila"}
                 </Button>
               )}
             </div>
