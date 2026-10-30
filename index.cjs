@@ -64,6 +64,12 @@ const { createTemplate } = require("./server/templateCreationService.cjs");
 const { templateCatalog } = require("./server/templateCatalogService.cjs");
 const { installWebDelivery, setWebResponseCache } = require("./server/webDelivery.cjs");
 
+const {
+  searchDeskQueues,
+  previewDeskQueue,
+  applyDeskQueue,
+} = require("./server/deskQueueService.cjs");
+
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
 let ssrServerPromise;
@@ -77,6 +83,21 @@ app.get("/api/health", (_req, res) => {
     service: "create-templates-api",
   });
 });
+
+for (const [route, handler] of [
+  ["search", searchDeskQueues],
+  ["preview", previewDeskQueue],
+  ["apply", applyDeskQueue],
+]) {
+  app.post(`/api/desk/queues/${route}`, async (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      res.json(await handler(req.body || {}));
+    } catch (error) {
+      next(error);
+    }
+  });
+}
 
 app.post("/api/builders/publish", async (req, res, next) => {
   try {

@@ -72,6 +72,7 @@ import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
 import { BulkPublicationTab } from "./BulkPublicationTab";
 import { BuilderDownloadsTab } from "./BuilderDownloadsTab";
+import { DeskQueuesTab } from "./DeskQueuesTab";
 import { BotDetailsModal } from "./BotDetailsModal";
 import "../styles/bot-manager.css";
 import { OperationProgress } from "./ui/OperationProgress";
@@ -176,6 +177,7 @@ const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
   downloads: "Baixar Fluxos",
   templates: "Templates",
   flows: "Flows",
+  desk: "Filas de atendimento",
   bots: "Clone Bots",
   plugins: "Plugins Manager",
   inactivity: "Inatividade",
@@ -1433,12 +1435,17 @@ export default function CreateTemplatesApp() {
             title: "Flows",
             description: "Consulta, visualização e cópia de flows entre routers BLiP",
           }
-        : visibleActiveView === "plugins"
+        : visibleActiveView === "desk"
           ? {
-              title: "Plugins Manager",
-              description: "Gerenciamento e cópia de plugins entre routers BLiP",
+              title: "Filas de atendimento",
+              description: "Duplicação e renomeação de filas do Desk por Builder",
             }
-          : { title: "Logs", description: "Requisições e resultados desta sessão da extensão" };
+          : visibleActiveView === "plugins"
+            ? {
+                title: "Plugins Manager",
+                description: "Gerenciamento e cópia de plugins entre routers BLiP",
+              }
+            : { title: "Logs", description: "Requisições e resultados desta sessão da extensão" };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -4616,6 +4623,20 @@ export default function CreateTemplatesApp() {
           </button>
 
           <button
+            className={visibleActiveView === "desk" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setActiveView("desk");
+              setError("");
+              if (!botApplications.length) void loadBotApplications();
+            }}
+            disabled={isPublishingBuilders}
+            aria-current={visibleActiveView === "desk" ? "page" : undefined}
+          >
+            <Headset size={18} aria-hidden="true" />
+            Filas de atendimento
+          </button>
+          <button
             className={visibleActiveView === "plugins" ? "active" : ""}
             type="button"
             onClick={() => setActiveView("plugins")}
@@ -4650,7 +4671,7 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            {!isManagerView && visibleActiveView !== "logs" && (
+            {!isManagerView && visibleActiveView !== "logs" && visibleActiveView !== "desk" && (
               <div className="router-summary">
                 <span className="router-summary-label">Router de origem</span>
                 <div className="router-summary-main">
@@ -4997,6 +5018,17 @@ export default function CreateTemplatesApp() {
             ))}
           </div>
         )}
+        <div hidden={visibleActiveView !== "desk"}>
+          <DeskQueuesTab
+            applications={botApplications}
+            resolveKey={loadRouterKey}
+            embedded={isEmbedded}
+            loading={isLoadingBotApplications}
+            loadError={botApplicationsError}
+            onRefresh={() => void loadBotApplications()}
+            onBusyChange={setIsPublishingBuilders}
+          />
+        </div>
         <div
           id="manager-panel-downloads"
           role="tabpanel"
@@ -5037,7 +5069,8 @@ export default function CreateTemplatesApp() {
             }}
           />
         </div>
-        {visibleActiveView === "inactivity" ||
+        {visibleActiveView === "desk" ||
+        visibleActiveView === "inactivity" ||
         visibleActiveView === "downloads" ? null : visibleActiveView === "routers" ? (
           <section
             id="manager-panel-summary"
@@ -6574,6 +6607,7 @@ export default function CreateTemplatesApp() {
                     <option value="routers">Bots</option>
                     <option value="templates">Templates</option>
                     <option value="flows">Flows</option>
+                    <option value="desk">Filas de atendimento</option>
                     <option value="bots">Clone Bots</option>
                     <option value="plugins">Plugins Manager</option>
                   </select>

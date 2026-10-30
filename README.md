@@ -287,3 +287,17 @@ Também é possível replicar por nomes, deixando a API buscar os templates ante
   "batchSize": 15
 }
 ```
+
+## Filas de atendimento
+
+A aba **Filas de atendimento**, abaixo de **Flows**, permite selecionar um Builder acessível no contrato, consultar suas filas e **Duplicar** ou **Renomear** uma fila. A seleção é independente do router de origem de Templates/Flows. Filas reservadas do Desk continuam sendo gerenciadas no Portal.
+
+As duas ações preparam uma prévia com atendentes, regras de atendimento, regras de priorização e tags. Após a confirmação nativa do Portal, uma cópia de segurança em JSON é enviada para download, sem credencial. As configurações são relidas antes de executar; mudanças desde a prévia impedem o início da alteração. Cada etapa é conferida por nova leitura, e os requests/resultados aparecem em Logs, com credenciais ocultadas.
+
+- **Duplicar** cria uma fila com novos `id` e `uniqueId` e novas regras. Preserva o cadastro e a capacidade dos atendentes, acrescentando somente a associação à cópia; copia condições, estado das regras, urgência, tags, propriedades do documento da fila e configurações de encerramento por equipe. As regras copiadas são acrescentadas após as existentes, sem reordenar as originais.
+- **Renomear** preserva `id` e `uniqueId` da fila, como foi confirmado em ensaio pela UI nativa. Retira temporariamente suas associações de atendentes e suas regras, altera o nome e restaura os vínculos. As regras de atendimento e de priorização recebem novos IDs; suas configurações e prioridades são conservadas. A identidade e as demais filas de cada atendente são preservadas. Tags continuam ligadas à identidade da fila; configurações por nome são copiadas ao novo nome. Comparações de valores nas condições e referências externas do Builder não são reescritas.
+- Renomeação é bloqueada quando há tickets ativos. O processo não é atômico: a fila fica temporariamente sem vínculos. Não alterar simultaneamente a mesma fila no Portal. Uma falha inicia recuperação com leitura independente; se a recuperação não puder ser comprovada, a interface pede conferência no Desk e uso do backup. Resposta perdida de criação não é repetida automaticamente nem autoriza excluir uma fila de autoria incerta.
+
+API: `POST /api/desk/queues/search`, `/preview` e `/apply`, com acesso do próprio Builder. As respostas usam `Cache-Control: no-store`. Prévia e backup incluem somente documentos necessários da fila; a credencial não integra as respostas nem o arquivo de segurança. Proteção de confirmação repetida e exclusão mútua são mantidas na memória da instância; não constituem armazenamento durável de operações ou recuperação após reinício do servidor.
+
+Validação em 30/10/2026: UI nativa preservou os IDs da fila após renomear. O serviço real duplicou e renomeou exclusivamente filas temporárias no bot autorizado, preservando um atendente, regra de atendimento, priorização e tag; a limpeza restituiu integralmente 11 filas, 10 regras de atendimento, 6 regras de priorização e 11 atendentes. Configurações de encerramento não vazias e cenários de falha/concorrência foram validados com respostas simuladas; não houve teste com tickets ativos. A fixture completa `tests/inactivity-ui.html` também cobre a nova aba, com respostas fictícias de Desk.

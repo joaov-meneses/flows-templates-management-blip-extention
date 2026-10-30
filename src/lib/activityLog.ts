@@ -2,6 +2,7 @@ export type ActivityView =
   | "routers"
   | "templates"
   | "flows"
+  | "desk"
   | "bots"
   | "plugins"
   | "downloads"

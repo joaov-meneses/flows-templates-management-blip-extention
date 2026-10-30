@@ -5,6 +5,96 @@ import type { InactivityAnalysis } from "../src/types/inactivity";
 import { themeBootstrap } from "../src/lib/theme";
 import "../src/styles.css";
 
+const deskQueues = new Map<
+  string,
+  Array<{
+    id: string;
+    uniqueId: string;
+    name: string;
+    isActive: boolean;
+    attendantCount: number;
+    ruleCount: number;
+    priorityRuleCount: number;
+  }>
+>();
+function deskFixture(path: string, body: Record<string, string>) {
+  const builderShortName = body.builderShortName;
+  if (builderShortName === "builder_falha")
+    return Response.json(
+      { error: { message: "Falha simulada ao consultar o Desk." } },
+      { status: 403 },
+    );
+  const queues = deskQueues.get(builderShortName) || [
+    {
+      id: "fixture-default",
+      uniqueId: "fixture-default",
+      name: "Default",
+      isActive: true,
+      attendantCount: 4,
+      ruleCount: 0,
+      priorityRuleCount: 1,
+    },
+    {
+      id: "fixture-sales",
+      uniqueId: "fixture-sales",
+      name: "Comercial",
+      isActive: true,
+      attendantCount: 8,
+      ruleCount: 3,
+      priorityRuleCount: 2,
+    },
+    {
+      id: "fixture-support",
+      uniqueId: "fixture-support",
+      name: "Suporte Especializado",
+      isActive: false,
+      attendantCount: 5,
+      ruleCount: 2,
+      priorityRuleCount: 0,
+    },
+  ];
+  deskQueues.set(builderShortName, queues);
+  if (path.endsWith("search"))
+    return Response.json({ builderShortName, queues, total: queues.length });
+  const queue = queues.find((q) => q.id === body.queueId)!;
+  if (path.endsWith("preview")) {
+    if (queues.some((q) => q.name.toLowerCase() === body.name.toLowerCase()))
+      return Response.json(
+        { error: { message: "Já existe uma fila com esse nome." } },
+        { status: 409 },
+      );
+    return Response.json({
+      builderShortName,
+      queue,
+      action: body.action,
+      name: body.name,
+      revision: "a".repeat(64),
+      counts: {
+        attendants: queue.attendantCount,
+        rules: queue.ruleCount,
+        priorityRules: queue.priorityRuleCount,
+        tags: 2,
+      },
+      backup: {
+        version: 1,
+        queue,
+        attendants: [],
+        rules: [],
+        priorities: [],
+        tags: [],
+        settings: {},
+      },
+    });
+  }
+  const result = { ...queue, name: body.name };
+  if (body.action === "duplicate") {
+    result.id = crypto.randomUUID();
+    result.uniqueId = result.id;
+    queues.push(result);
+  } else Object.assign(queue, result);
+  return Response.json({ builderShortName, status: "success", action: body.action, queue: result });
+}
+
 const drafts = new Map<string, InactivityAnalysis>();
 let version = 1;
 let keyChecks = 0;
@@ -31,6 +121,8 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path.startsWith("/api/desk/queues/"))
+    return deskFixture(path, JSON.parse(String(options?.body || "{}")));
   let readSource = "";
   if (
     path === "/api/templates/search" ||

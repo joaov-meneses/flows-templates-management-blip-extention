@@ -2,6 +2,7 @@ export type ActiveView =
   | "routers"
   | "templates"
   | "flows"
+  | "desk"
   | "bots"
   | "plugins"
   | "downloads"
