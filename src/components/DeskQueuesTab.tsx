@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { CopyPlus, Download, Headset, LoaderCircle, Pencil, RefreshCw, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, CopyPlus, Download, Headset, LoaderCircle, Pencil, RefreshCw, X } from "lucide-react";
 import { useModalFocus } from "../hooks/useModalFocus";
 import { postJson } from "../lib/api";
 import { saveDownload } from "../lib/builderDownload";
@@ -12,6 +12,8 @@ import { EmptyState, Feedback } from "./ui/Feedback";
 import "../styles/desk-queues.css";
 
 export function DeskQueuesTab({
+  application,
+  onSelectBuilder,
   applications,
   resolveKey,
   embedded,
@@ -20,6 +22,8 @@ export function DeskQueuesTab({
   onRefresh,
   onBusyChange,
 }: {
+  application: PortalApplicationAccount | null;
+  onSelectBuilder: () => void;
   applications: PortalApplicationAccount[];
   resolveKey: (id: string) => Promise<ResolvedRouterKey>;
   embedded: boolean;
@@ -28,8 +32,7 @@ export function DeskQueuesTab({
   onRefresh: () => void;
   onBusyChange: (busy: boolean) => void;
 }) {
-  const [builderId, setBuilderId] = useState("");
-  const [builderQuery, setBuilderQuery] = useState("");
+  const builderId = application?.shortName || "";
   const [queueQuery, setQueueQuery] = useState("");
   const [queues, setQueues] = useState<DeskQueue[]>([]);
   const [loadedId, setLoadedId] = useState("");
@@ -58,13 +61,6 @@ export function DeskQueuesTab({
     scope: "all",
     routerBuilderIds: null,
   });
-  const choices = builders.filter(
-    (app) =>
-      app.shortName === builderId ||
-      `${app.name} ${app.shortName}`
-        .toLocaleLowerCase("pt-BR")
-        .includes(builderQuery.toLocaleLowerCase("pt-BR")),
-  );
   const builder = builders.find((app) => app.shortName === builderId);
   const visible =
     loadedId === builderId && builder
@@ -131,6 +127,13 @@ export function DeskQueuesTab({
       finish();
     }
   }
+  const loadSelection = useRef(load);
+  loadSelection.current = load;
+  useEffect(() => {
+    setQueueQuery("");
+    void loadSelection.current(builderId);
+  }, [builderId]);
+
   function open(queue: DeskQueue, action: DeskAction) {
     if (lock.current) return;
     setError("");
@@ -250,15 +253,17 @@ export function DeskQueuesTab({
           <h2>Filas de atendimento</h2>
           <p>Duplique ou renomeie filas preservando atendentes, regras e configurações.</p>
         </div>
-        <Button
-          disabled={!embedded || busy || loading}
-          onClick={() => {
-            onRefresh();
-            if (builderId) void load(builderId);
-          }}
-        >
-          <RefreshCw size={18} /> Atualizar
-        </Button>
+        {embedded && builder && (
+          <Button
+            disabled={busy || loading}
+            onClick={() => {
+              onRefresh();
+              void load(builderId);
+            }}
+          >
+            <RefreshCw size={18} /> Atualizar filas
+          </Button>
+        )}
       </div>
       {!embedded ? (
         <Feedback tone="info">
@@ -266,46 +271,39 @@ export function DeskQueuesTab({
         </Feedback>
       ) : (
         <>
-          <div className="desk-queue-filters">
-            <label className="blip-native-field">
-              Buscar Builder
-              <input
-                value={builderQuery}
-                onChange={(e) => setBuilderQuery(e.target.value)}
-                disabled={busy}
-                placeholder="Nome ou ID do Builder"
-              />
-            </label>
-            <label className="blip-native-field">
-              Builder
-              <select
-                value={builderId}
-                disabled={busy || loading}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  selectedId.current = id;
-                  setBuilderId(id);
-                  void load(id);
-                }}
-              >
-                <option value="">Selecione um Builder</option>
-                {choices.map((app) => (
-                  <option key={app.shortName} value={app.shortName}>
-                    {app.name} · {app.shortName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="blip-native-field">
-              Buscar fila
-              <input
-                value={queueQuery}
-                onChange={(e) => setQueueQuery(e.target.value)}
-                disabled={busy}
-                placeholder="Nome da fila"
-              />
-            </label>
+          <div className="desk-builder-selection">
+            <span className="bot-clone-field-label">Builder</span>
+            <div className="bot-clone-selector">
+              <span className="router-summary-main">
+                <span className="router-summary-avatar" aria-hidden="true">
+                  {builder?.imageUri ? <img src={builder.imageUri} alt="" /> : <Bot size={18} />}
+                </span>
+                <span className="router-summary-copy">
+                  <strong>{builder?.name || "Nenhum Builder selecionado"}</strong>
+                  <span>
+                    {builder?.shortName || "Selecione o Builder para consultar suas filas"}
+                  </span>
+                </span>
+              </span>
+              <Button variant="secondary" size="sm" onClick={onSelectBuilder} disabled={busy}>
+                <Pencil size={16} aria-hidden="true" />
+                {builder ? "Alterar Builder" : "Selecionar Builder"}
+              </Button>
+            </div>
           </div>
+          {builder && (
+            <div className="desk-queue-filters">
+              <label className="blip-native-field">
+                Buscar fila
+                <input
+                  value={queueQuery}
+                  onChange={(e) => setQueueQuery(e.target.value)}
+                  disabled={busy}
+                  placeholder="Nome da fila"
+                />
+              </label>
+            </div>
+          )}
           {loadError && (
             <Feedback title="Não foi possível listar os Builders">{loadError}</Feedback>
           )}

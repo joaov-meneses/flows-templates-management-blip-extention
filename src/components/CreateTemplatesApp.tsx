@@ -853,6 +853,7 @@ export default function CreateTemplatesApp() {
   const [isLoadingBotApplications, setIsLoadingBotApplications] = useState(false);
   const [botApplicationsError, setBotApplicationsError] = useState("");
   const [botSourceShortName, setBotSourceShortName] = useState("");
+  const [deskApplication, setDeskApplication] = useState<PortalApplicationAccount | null>(null);
   const [builderCloneTargets, setBuilderCloneTargets] = useState<RouterCloneTarget[]>([]);
   const [builderTargetPickerSelection, setBuilderTargetPickerSelection] = useState<Set<string>>(
     new Set(),
@@ -860,7 +861,7 @@ export default function CreateTemplatesApp() {
   const [botSourceSearch, setBotSourceSearch] = useState("");
   const [botTargetSearch, setBotTargetSearch] = useState("");
   const [botPicker, setBotPicker] = useState<
-    "source" | "target" | "inactivity" | "publication" | null
+    "source" | "target" | "inactivity" | "publication" | "desk" | null
   >(null);
   const [publicationApplications, setPublicationApplications] = useState<
     PortalApplicationAccount[]
@@ -1350,7 +1351,11 @@ export default function CreateTemplatesApp() {
   const sourceRouterDisplayId = sourceRouterShortName || maskRouterKey(sourceRouterKey);
 
   const pickerIsBuilder =
-    botPicker === "inactivity" || botPicker === "publication" || cloneMode === "builder";
+    botPicker === "desk" ||
+    botPicker === "inactivity" ||
+    botPicker === "publication" ||
+    cloneMode === "builder";
+  const pickerIsSingle = botPicker === "source" || botPicker === "desk";
   const pickerRouterShortName = sourceRouterShortName || currentApplicationRouter?.shortName || "";
   const routerBuilderScope = useRouterBuilderScope(
     pickerRouterShortName,
@@ -1367,7 +1372,7 @@ export default function CreateTemplatesApp() {
     ? filterBuilderPickerApplications(botApplications, {
         scope: builderPickerScope,
         routerBuilderIds: routerBuilderScope.ids,
-        query: botPicker === "source" ? botSourceSearch : botTargetSearch,
+        query: pickerIsSingle ? botSourceSearch : botTargetSearch,
         excludedShortName: botPicker === "target" ? botSourceShortName : "",
       })
     : botPicker === "source"
@@ -1393,7 +1398,7 @@ export default function CreateTemplatesApp() {
   const hiddenPickerSelections = [...pickerSelection].filter(
     (shortName) => !pickerApplications.some((application) => application.shortName === shortName),
   ).length;
-  function openBotPicker(purpose: "source" | "target" | "inactivity" | "publication") {
+  function openBotPicker(purpose: "source" | "target" | "inactivity" | "publication" | "desk") {
     setBuilderPickerScope("router");
     setBotPicker(purpose);
   }
@@ -5020,6 +5025,13 @@ export default function CreateTemplatesApp() {
         )}
         <div hidden={visibleActiveView !== "desk"}>
           <DeskQueuesTab
+            application={deskApplication}
+            onSelectBuilder={() => {
+              setError("");
+              setBotSourceSearch("");
+              openBotPicker("desk");
+              if (!botApplications.length) void loadBotApplications();
+            }}
             applications={botApplications}
             resolveKey={loadRouterKey}
             embedded={isEmbedded}
@@ -8099,6 +8111,8 @@ export default function CreateTemplatesApp() {
                       "Selecionar Builders para publicação"
                     ) : botPicker === "inactivity" ? (
                       "Selecionar Builders para inatividade"
+                    ) : botPicker === "desk" ? (
+                      "Selecionar Builder"
                     ) : (
                       <>
                         {pickerIsBuilder ? "Builder" : "Router"} de{" "}
@@ -8111,9 +8125,11 @@ export default function CreateTemplatesApp() {
                       ? "Selecione um ou mais Builders do roteador ou todos com acesso no contrato."
                       : botPicker === "inactivity"
                         ? "Selecione os Builders do contrato. Os rascunhos serão analisados após confirmar."
-                        : botPicker !== "source"
-                          ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
-                          : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
+                        : botPicker === "desk"
+                          ? "Escolha o Builder para consultar e gerenciar suas filas de atendimento."
+                          : !pickerIsSingle
+                            ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
+                            : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
                   </p>
                 </div>
                 <Button
@@ -8147,7 +8163,7 @@ export default function CreateTemplatesApp() {
                         <option value="all">Todos os Builders com acesso</option>
                       </select>
                     </label>
-                    {botPicker !== "source" && (
+                    {!pickerIsSingle && (
                       <Button
                         onClick={() =>
                           setPickerSelection((current) =>
@@ -8173,9 +8189,9 @@ export default function CreateTemplatesApp() {
                     <input
                       id="builderPickerSearch"
                       autoFocus
-                      value={botPicker === "source" ? botSourceSearch : botTargetSearch}
+                      value={pickerIsSingle ? botSourceSearch : botTargetSearch}
                       onChange={(event) =>
-                        botPicker === "source"
+                        pickerIsSingle
                           ? setBotSourceSearch(event.target.value)
                           : setBotTargetSearch(event.target.value)
                       }
@@ -8193,8 +8209,8 @@ export default function CreateTemplatesApp() {
                 </div>
                 <div className="router-picker-meta builder-picker-meta">
                   {pickerApplications.length} {pickerIsBuilder ? "builders" : "routers"} disponíveis
-                  {botPicker !== "source" ? ` · ${pickerSelection.size} selecionado(s)` : ""}
-                  {pickerIsBuilder && botPicker !== "source" && (
+                  {!pickerIsSingle ? ` · ${pickerSelection.size} selecionado(s)` : ""}
+                  {pickerIsBuilder && !pickerIsSingle && (
                     <>
                       {!pickerLoading && !pickerError && hiddenPickerSelections > 0 && (
                         <span>{hiddenPickerSelections} selecionado(s) fora do filtro</span>
@@ -8233,7 +8249,7 @@ export default function CreateTemplatesApp() {
                     </div>
                   ) : (
                     pickerApplications.map((application) => {
-                      const isMultiTarget = botPicker !== "source";
+                      const isMultiTarget = !pickerIsSingle;
                       const selected = pickerSelection.has(application.shortName);
                       const content = (
                         <>
@@ -8274,7 +8290,14 @@ export default function CreateTemplatesApp() {
                           key={application.shortName}
                           type="button"
                           className="router-application-option bot-clone-picker-option"
-                          onClick={() => void handleSelectBotSourceApplication(application)}
+                          onClick={() => {
+                            if (botPicker === "desk") {
+                              setDeskApplication(application);
+                              setBotPicker(null);
+                            } else {
+                              void handleSelectBotSourceApplication(application);
+                            }
+                          }}
                           disabled={isResolvingBotSourceKey || isResolvingBotTargetKey}
                         >
                           {content}
@@ -8292,7 +8315,7 @@ export default function CreateTemplatesApp() {
                 >
                   Cancelar
                 </Button>
-                {botPicker !== "source" && (
+                {!pickerIsSingle && (
                   <Button
                     variant="primary"
                     onClick={() =>

@@ -290,7 +290,7 @@ Também é possível replicar por nomes, deixando a API buscar os templates ante
 
 ## Filas de atendimento
 
-A aba **Filas de atendimento**, abaixo de **Flows**, permite selecionar um Builder acessível no contrato, consultar suas filas e **Duplicar** ou **Renomear** uma fila. A seleção é independente do router de origem de Templates/Flows. Filas reservadas do Desk continuam sendo gerenciadas no Portal.
+A aba **Filas de atendimento**, abaixo de **Flows**, permite selecionar um Builder acessível no contrato, consultar suas filas e **Duplicar** ou **Renomear** uma fila. A seleção é independente do router de origem de Templates/Flows e usa o mesmo modal de origem, com busca, avatares e filtros de Builders. A busca de filas aparece somente depois da escolha; Alterar Builder reabre o modal e limpa a busca ao trocar de bot. Filas reservadas do Desk continuam sendo gerenciadas no Portal.
 
 As duas ações preparam uma prévia com atendentes, regras de atendimento, regras de priorização e tags. Após a confirmação nativa do Portal, uma cópia de segurança em JSON é enviada para download, sem credencial. As configurações são relidas antes de executar; mudanças desde a prévia impedem o início da alteração. Cada etapa é conferida por nova leitura, e os requests/resultados aparecem em Logs, com credenciais ocultadas.
 

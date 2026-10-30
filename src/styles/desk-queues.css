@@ -1,11 +1,20 @@
 .desk-queue-filters {
   display: grid;
-  grid-template-columns: 1fr 1.5fr 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin: 20px 0;
 }
-.desk-queue-filters select {
+.desk-builder-selection {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+.desk-builder-selection .bot-clone-selector {
   width: 100%;
+  gap: 16px;
+}
+.desk-builder-selection .router-summary-main {
+  min-width: 0;
 }
 .desk-queue-name,
 .desk-queue-actions,
