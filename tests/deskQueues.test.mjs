@@ -825,3 +825,41 @@ test("catálogo de tags é paginado por nome sem depender de ID ou dos contadore
   assert(f.calls.some((c) => c.uri.startsWith("/tags/active?") && c.uri.includes("$skip=100")));
   assert.equal(f.writes().length, 0);
 });
+
+test("regressão do retorno real: tags ativas como textos são aceitas na prévia e aplicação", async (t) => {
+  const f = fake(t, { requireTag: true });
+  f.state.activeTags = ["Encerramento administrativo", "Outra tag"];
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  const preview = await service.previewDeskQueue({ ...details(), forceFinalization: true });
+  assert.deepEqual(preview.finalizationTags, ["Encerramento administrativo", "Outra tag", "vip"]);
+  assert.equal(f.writes().length, 0);
+  const result = await service.applyDeskQueue(await prepareWithTag());
+  assert.equal(result.status, "success");
+  assert.deepEqual(closeCalls(f)[0].resource.tags, ["Encerramento administrativo"]);
+});
+
+test("catálogo misto de textos e objetos continua paginado e normalizado", async (t) => {
+  const f = fake(t);
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  f.state.activeTags = Array.from({ length: 105 }, (_, i) =>
+    i % 2 ? { name: `Tag ${i}` } : `Tag ${i}`,
+  );
+  const preview = await service.previewDeskQueue({ ...details(), forceFinalization: true });
+  assert.equal(preview.finalizationTags.length, 106);
+  assert(preview.finalizationTags.includes("Tag 104"));
+  assert(f.calls.some((c) => c.uri.startsWith("/tags/active?") && c.uri.includes("$skip=100")));
+  assert.equal(f.writes().length, 0);
+});
+
+test("tags inválidas, duplicação de página e contagem incompleta continuam rejeitadas", async (t) => {
+  const f = fake(t);
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  const input = { ...details(), forceFinalization: true };
+  for (const invalid of [null, 42, {}, { tag: "Formato desconhecido" }, "", "  "]) {
+    f.state.activeTags = [invalid];
+    await assert.rejects(service.previewDeskQueue(input), /tag ativa inválida/);
+  }
+  f.state.activeTags = ["Repetida", { name: "Repetida" }];
+  await assert.rejects(service.previewDeskQueue(input), /incompleta ou repetida/);
+  assert.equal(f.writes().length, 0);
+});

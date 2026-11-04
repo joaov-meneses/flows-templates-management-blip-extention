@@ -272,6 +272,14 @@ function ticketTags(ticket) {
   return [...new Set(ticket.tags)];
 }
 
+// Desk may return strings instead of the documented objects with name.
+function activeTagName(tag) {
+  const name = typeof tag === "string" ? tag : tag?.name;
+  if (typeof name !== "string" || !name.trim())
+    throw new Error("O Desk retornou uma tag ativa inválida. Confira o cadastro de tags.");
+  return name;
+}
+
 async function activeTicketsInQueue(ctx, queue) {
   const filter = encodeURIComponent(
     `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`,
@@ -403,11 +411,9 @@ async function inspect(ctx, params) {
   const untaggedTicketCount = activeTickets.filter((ticket) => !ticketTags(ticket).length).length;
   let finalizationTags = [];
   if (detail.forceFinalization && (untaggedTicketCount || detail.finalizationTag)) {
-    const activeTags = await all(ctx, "/tags/active", (tag) => tag.name);
-    if (activeTags.some((tag) => typeof tag.name !== "string" || !tag.name.trim()))
-      throw new Error("Não foi possível conferir as tags ativas do Desk.");
+    const activeTags = await all(ctx, "/tags/active", activeTagName);
     finalizationTags = [
-      ...new Set([...activeTags.map((tag) => tag.name), ...tags.map((tag) => tag.tag)]),
+      ...new Set([...activeTags.map(activeTagName), ...tags.map((tag) => tag.tag)]),
     ].sort();
     if (detail.finalizationTag && !finalizationTags.includes(detail.finalizationTag))
       throw new DeskInputError(
