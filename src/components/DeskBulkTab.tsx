@@ -704,13 +704,16 @@ export function DeskBulkTab({
               {!running && (
                 <Feedback
                   tone={
-                    job.result.failed || job.result.uncertain || job.result.remaining
+                    job.result.interrupted ||
+                    job.result.failed ||
+                    job.result.uncertain ||
+                    job.result.remaining
                       ? "warning"
                       : "success"
                   }
                 >
-                  {job.result.remaining
-                    ? "O lote parou antes de processar todos os tickets. Confira os detalhes antes de preparar outra prévia."
+                  {job.result.interrupted || job.result.remaining
+                    ? "O lote foi interrompido. Confira os detalhes antes de preparar outra prévia."
                     : "Processamento concluído. Atendimentos ignorados não foram encerrados por esta operação."}{" "}
                   Os encerramentos confirmados permanecem válidos.
                 </Feedback>

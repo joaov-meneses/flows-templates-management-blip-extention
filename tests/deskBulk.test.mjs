@@ -416,3 +416,18 @@ test("prévia expirada não autoriza uma nova finalização", async (t) => {
   );
   assert.equal(f.state.writes.length, 0);
 });
+
+test("encerramento confirmado com falha de tags não é apresentado como sucesso integral", async (t) => {
+  const f = fake(t, {
+    after(c, state) {
+      if (c.method === "set") state.tickets[0].tags = [];
+    },
+  });
+  const result = await finalize(await preview());
+  assert.equal(result.result.finalized, 1);
+  assert.equal(result.result.interrupted, true);
+  assert.equal(result.result.remaining, 0);
+  assert.match(result.result.items[0].message, /tags não foram confirmadas/);
+  assert.match(result.progress.stage, /interrompido/);
+  assert.equal(f.state.writes.length, 1);
+});

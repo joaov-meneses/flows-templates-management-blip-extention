@@ -47,6 +47,7 @@ export type BulkJob = {
     filters?: BulkFilters;
     snapshotAt?: string;
     finalizationTag?: string;
+    interrupted?: boolean;
     finalized: number;
     skipped: number;
     failed: number;

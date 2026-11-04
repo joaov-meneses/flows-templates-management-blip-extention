@@ -373,6 +373,7 @@ function startBulkFinalize(params) {
     filters: plan.filters,
     snapshotAt: iso(plan.at),
     finalizationTag: tag,
+    interrupted: false,
     finalized: 0,
     skipped: 0,
     failed: 0,
@@ -446,12 +447,16 @@ function startBulkFinalize(params) {
         job.result.items.push(item);
         job.progress.checked++;
         job.result.remaining = plan.selected.length - job.progress.checked;
-        if (stop) break;
+        if (stop) {
+          job.result.interrupted = true;
+          break;
+        }
       }
       job.status = "completed";
-      job.progress.stage = job.result.remaining
-        ? "Lote interrompido após falha. Confira o relatório antes de repetir."
-        : "Lote concluído. Confira o resultado.";
+      job.progress.stage =
+        job.result.interrupted || job.result.remaining
+          ? "Lote interrompido após falha. Confira o relatório antes de repetir."
+          : "Lote concluído. Confira o resultado.";
     } catch (error) {
       job.status = error.cancelled ? "cancelled" : "failed";
       job.error = error.message;
