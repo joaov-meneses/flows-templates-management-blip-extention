@@ -15,6 +15,9 @@ export type DeskPreview = {
   revision: string;
   forceFinalization: boolean;
   activeTicketCount: number;
+  untaggedTicketCount: number;
+  finalizationTags: string[];
+  finalizationTag: string;
   queue: DeskQueue;
   counts: { attendants: number; rules: number; priorityRules: number; tags: number };
   backup: Record<string, unknown>;

@@ -68,7 +68,7 @@ async function command(ctx, method, uri, type, resource) {
 }
 
 // Do not assume that a short page is complete when a larger total was declared.
-async function all(ctx, uri) {
+async function all(ctx, uri, identity = (item) => item.id || item.identity || item.tag) {
   const items = [];
   const seen = new Set();
   let total;
@@ -90,7 +90,7 @@ async function all(ctx, uri) {
       total = resource.total;
     }
     for (const item of resource.items) {
-      const id = item.id || item.identity || item.tag;
+      const id = identity(item);
       if (!id || seen.has(id)) throw new Error(`A leitura de ${uri} está incompleta ou repetida.`);
       seen.add(id);
       items.push(item);
@@ -211,7 +211,12 @@ function requestDetails(params, state) {
   const forceFinalization = params.forceFinalization === true;
   if (forceFinalization && params.action !== "rename")
     throw new DeskInputError("Forçar finalização está disponível somente ao renomear.");
-  return { queue, name, action: params.action, forceFinalization };
+  const finalizationTag = params.finalizationTag ?? "";
+  if (typeof finalizationTag !== "string" || (finalizationTag && !finalizationTag.trim()))
+    throw new DeskInputError("Selecione uma tag de finalização válida.");
+  if (finalizationTag && !forceFinalization)
+    throw new DeskInputError("A tag de finalização exige a opção Forçar finalização.");
+  return { queue, name, action: params.action, forceFinalization, finalizationTag };
 }
 
 function stable(value) {
@@ -255,6 +260,18 @@ function checkTicket(ctx, ticket, id) {
   return ticket;
 }
 
+function ticketTags(ticket) {
+  if (ticket.tags == null) return [];
+  if (
+    !Array.isArray(ticket.tags) ||
+    ticket.tags.some((tag) => typeof tag !== "string" || !tag.trim())
+  )
+    throw new Error(
+      "O Desk retornou tags inválidas no atendimento. Confira o ticket antes de finalizar.",
+    );
+  return [...new Set(ticket.tags)];
+}
+
 async function activeTicketsInQueue(ctx, queue) {
   const filter = encodeURIComponent(
     `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`,
@@ -262,6 +279,7 @@ async function activeTicketsInQueue(ctx, queue) {
   const tickets = await all(ctx, `/tickets?$filter=${filter}`);
   for (const ticket of tickets) {
     checkTicket(ctx, ticket);
+    ticketTags(ticket);
     if (ticket.team !== queue.name || ticket.closed)
       throw new Error(
         "A consulta retornou atendimentos fora da fila selecionada. Atualize a prévia.",
@@ -291,21 +309,40 @@ async function finalizeReviewedTickets(ctx, plan, progress) {
           "Um atendimento mudou de fila. A finalização foi interrompida; revise novamente.",
         );
       if (current.closed) continue;
+      const existingTags = ticketTags(current);
+      const tags = existingTags.length
+        ? existingTags
+        : plan.finalizationTag
+          ? [plan.finalizationTag]
+          : [];
+      if (!tags.length)
+        throw new Error(
+          "Este atendimento está sem tag. Selecione uma tag de finalização e revise novamente.",
+        );
       let writeError;
       finalizationUncertain = true;
       try {
         await command(ctx, "set", "/tickets/change-status", TICKET, {
           id: reviewed.id,
           status: "ClosedAttendant",
+          tags,
         });
       } catch (error) {
-        writeError = error;
+        writeError = /tag is required/i.test(error.message)
+          ? new Error(
+              "O Desk exige uma tag válida para finalizar este atendimento. Confira as tags e revise novamente.",
+            )
+          : error;
       }
       // Even after a timeout, reconcile once by ID; never resend a close command.
       const after = checkTicket(ctx, await command(ctx, "get", uri), reviewed.id);
       if (after.closed && after.status === "ClosedAttendant") {
         finalizedTickets++;
         finalizationUncertain = false;
+        if (!tags.every((tag) => ticketTags(after).includes(tag)))
+          throw new Error(
+            "O atendimento foi finalizado, mas suas tags não foram confirmadas. Confira o Desk antes de continuar.",
+          );
       } else {
         finalizationUncertain = false;
         throw writeError || new Error("O Desk não confirmou o encerramento do atendimento.");
@@ -363,6 +400,21 @@ async function inspect(ctx, params) {
       "Esta fila tem atendimentos ativos. Finalize-os antes de renomear ou ative Forçar finalização.",
       409,
     );
+  const untaggedTicketCount = activeTickets.filter((ticket) => !ticketTags(ticket).length).length;
+  let finalizationTags = [];
+  if (detail.forceFinalization && (untaggedTicketCount || detail.finalizationTag)) {
+    const activeTags = await all(ctx, "/tags/active", (tag) => tag.name);
+    if (activeTags.some((tag) => typeof tag.name !== "string" || !tag.name.trim()))
+      throw new Error("Não foi possível conferir as tags ativas do Desk.");
+    finalizationTags = [
+      ...new Set([...activeTags.map((tag) => tag.name), ...tags.map((tag) => tag.tag)]),
+    ].sort();
+    if (detail.finalizationTag && !finalizationTags.includes(detail.finalizationTag))
+      throw new DeskInputError(
+        "A tag escolhida não está mais disponível nesta fila. Selecione outra tag e revise novamente.",
+        409,
+      );
+  }
   const backup = {
     queue: clone(queue),
     attendants: state.attendants.filter((a) => a.teams.includes(queue.name)),
@@ -377,13 +429,19 @@ async function inspect(ctx, params) {
     backup,
     targetSettings,
     activeTickets,
+    untaggedTicketCount,
+    finalizationTags,
     revision: revision({
       state: ordered(state),
       tags,
       settings,
       targetSettings,
       forceFinalization: detail.forceFinalization,
-      activeTickets: activeTickets.map((t) => t.id).sort(),
+      finalizationTag: detail.finalizationTag,
+      finalizationTags,
+      activeTickets: activeTickets
+        .map((t) => ({ id: t.id, tags: ticketTags(t).sort() }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
     }),
   };
 }
@@ -395,6 +453,9 @@ function previewResult(ctx, plan) {
     name: plan.name,
     forceFinalization: plan.forceFinalization,
     activeTicketCount: plan.activeTickets.length,
+    untaggedTicketCount: plan.untaggedTicketCount,
+    finalizationTags: plan.finalizationTags,
+    finalizationTag: plan.finalizationTag,
     revision: plan.revision,
     queue: summary(plan.state, plan.queue),
     counts: {
@@ -779,6 +840,7 @@ async function applyDeskQueue(params, onProgress) {
     name: params.name,
     revision: params.revision,
     forceFinalization: params.forceFinalization === true,
+    finalizationTag: params.finalizationTag ?? "",
   });
   const previous = completed.get(job);
   if (previous) {
@@ -797,6 +859,11 @@ async function applyDeskQueue(params, onProgress) {
     if (plan.revision !== params.revision)
       throw new DeskInputError(
         "As configurações mudaram desde a prévia. Atualize e revise novamente.",
+        409,
+      );
+    if (plan.forceFinalization && plan.untaggedTicketCount && !plan.finalizationTag)
+      throw new DeskInputError(
+        "Selecione uma tag para os atendimentos sem tag e revise novamente. Nenhum atendimento foi finalizado.",
         409,
       );
     let finalization = { finalizedTickets: 0, finalizationUncertain: false };

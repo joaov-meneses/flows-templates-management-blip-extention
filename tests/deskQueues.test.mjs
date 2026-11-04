@@ -57,6 +57,7 @@ const agent = {
 function fake(t, options = {}) {
   const state = structuredClone({
     queues: [queue, other],
+    activeTags: [{ name: "Encerramento administrativo" }],
     tickets: options.active
       ? [
           {
@@ -65,6 +66,7 @@ function fake(t, options = {}) {
             team: queue.name,
             closed: false,
             status: "Open",
+            tags: ["vip"],
           },
         ]
       : [],
@@ -81,6 +83,7 @@ function fake(t, options = {}) {
     "/rules": "rules",
     "/priority-rules": "priorities",
     "/attendants": "attendants",
+    "/tags/active": "activeTags",
   };
   t.mock.method(globalThis, "fetch", async (url, init) => {
     assert.equal(url, "https://test-contract.http.msging.net/commands");
@@ -128,7 +131,18 @@ function fake(t, options = {}) {
         assert.equal(c.resource.status, "ClosedAttendant");
         const ticket = state.tickets.find((ticket) => ticket.id === c.resource.id);
         assert.equal(ticket.team, queue.name);
-        Object.assign(ticket, { closed: true, status: c.resource.status });
+        if (options.requireTag && !c.resource.tags?.length)
+          return Response.json({
+            id: c.id,
+            to: queue.ownerIdentity,
+            status: "failure",
+            reason: { description: "Tag is required to close this ticket by attendant" },
+          });
+        Object.assign(ticket, {
+          closed: true,
+          status: c.resource.status,
+          tags: c.resource.tags || ticket.tags,
+        });
       } else if (tagId)
         state.tags[tagId] = c.resource.items.map((item) => ({ id: randomUUID(), ...item }));
       else if (pathname.startsWith("/owner-team-configurations/"))
@@ -452,6 +466,7 @@ const ticket = (id, overrides = {}) => ({
   team: queue.name,
   status: "Open",
   closed: false,
+  tags: ["vip"],
   ...overrides,
 });
 const closeCalls = (f) => f.calls.filter((c) => c.uri === "/tickets/change-status");
@@ -650,4 +665,163 @@ test("chegada durante a retirada de vínculos impede renomear e recupera configu
   assert.deepEqual(f.state.queues, f.before.queues);
   assert.equal(closeCalls(f).length, 0);
   assert.equal(f.state.tickets[0].closed, false);
+});
+
+async function prepareWithTag(finalizationTag = "Encerramento administrativo") {
+  const input = { ...details(), forceFinalization: true, finalizationTag };
+  const preview = await service.previewDeskQueue(input);
+  return { ...input, revision: preview.revision, operationId: randomUUID() };
+}
+
+test("regressão: Desk que exige tags rejeita envelope antigo e aceita tags existentes no fechamento", async (t) => {
+  const f = fake(t, { active: true, requireTag: true });
+  const response = await fetch("https://test-contract.http.msging.net/commands", {
+    method: "POST",
+    redirect: "error",
+    headers: { Authorization: key },
+    body: JSON.stringify({
+      id: randomUUID(),
+      to: "postmaster@desk.msging.net",
+      method: "set",
+      uri: "/tickets/change-status",
+      type: "application/vnd.iris.ticket+json",
+      resource: { id: "ticket-a", status: "ClosedAttendant" },
+    }),
+  });
+  const failure = await response.json();
+  assert.equal(failure.status, "failure");
+  assert.match(failure.reason.description, /Tag is required/);
+  assert.equal(f.state.tickets[0].closed, false);
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "success");
+  assert.deepEqual(closeCalls(f).at(-1).resource.tags, ["vip"]);
+});
+
+test("prévia lista tags globais e da fila e exige escolha antes de encerrar qualquer ticket sem tag", async (t) => {
+  const f = fake(t, { requireTag: true });
+  f.state.tickets = [ticket("tagged"), ticket("untagged", { tags: [] })];
+  const input = { ...details(), forceFinalization: true };
+  const preview = await service.previewDeskQueue(input);
+  assert.equal(preview.untaggedTicketCount, 1);
+  assert.deepEqual(preview.finalizationTags, ["Encerramento administrativo", "vip"]);
+  assert.equal(preview.finalizationTag, "");
+  await assert.rejects(
+    service.applyDeskQueue({ ...input, revision: preview.revision, operationId: randomUUID() }),
+    /Selecione uma tag/,
+  );
+  assert.equal(f.writes().length, 0);
+});
+
+test("escolha classifica apenas tickets sem tag e preserva múltiplas classificações existentes", async (t) => {
+  const f = fake(t, { requireTag: true });
+  f.state.tickets = [
+    ticket("tagged", { tags: ["vip", "venda"] }),
+    ticket("untagged", { tags: [] }),
+  ];
+  const result = await service.applyDeskQueue(await prepareWithTag());
+  assert.equal(result.status, "success");
+  assert.equal(result.finalizedTickets, 2);
+  assert.deepEqual(
+    closeCalls(f).map((c) => c.resource.tags),
+    [["vip", "venda"], ["Encerramento administrativo"]],
+  );
+  assert.deepEqual(f.state.tickets[0].tags, ["vip", "venda"]);
+  assert.deepEqual(f.state.tickets[1].tags, ["Encerramento administrativo"]);
+});
+
+test("sem tags disponíveis a prévia explica ausência sem inventar classificação", async (t) => {
+  const f = fake(t);
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  f.state.activeTags = [];
+  f.state.tags[queue.id] = [];
+  const input = { ...details(), forceFinalization: true };
+  const preview = await service.previewDeskQueue(input);
+  assert.equal(preview.untaggedTicketCount, 1);
+  assert.deepEqual(preview.finalizationTags, []);
+  await assert.rejects(
+    service.applyDeskQueue({ ...input, revision: preview.revision, operationId: randomUUID() }),
+    /Selecione uma tag/,
+  );
+  assert.equal(f.writes().length, 0);
+});
+
+test("tag desativada após prévia ou consentimento alterado impede escrita", async (t) => {
+  const f = fake(t);
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  const input = await prepareWithTag();
+  await assert.rejects(
+    service.applyDeskQueue({ ...input, finalizationTag: "vip" }),
+    /mudaram desde a prévia/,
+  );
+  f.state.activeTags = [];
+  await assert.rejects(service.applyDeskQueue(input), /não está mais disponível/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("tags alteradas entre prévia e aplicação exigem nova revisão", async (t) => {
+  const f = fake(t, { active: true });
+  const input = await prepareForced();
+  f.state.tickets[0].tags = ["venda"];
+  await assert.rejects(service.applyDeskQueue(input), /mudaram desde a prévia/);
+  assert.equal(f.writes().length, 0);
+});
+
+test("classificação recebida antes da leitura individual prevalece sobre tag escolhida", async (t) => {
+  const f = fake(t, {
+    before(c, state) {
+      if (c.uri === "/ticket/untagged") state.tickets[0].tags = ["classificação recente"];
+    },
+  });
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  const result = await service.applyDeskQueue(await prepareWithTag());
+  assert.equal(result.status, "success");
+  assert.deepEqual(closeCalls(f)[0].resource.tags, ["classificação recente"]);
+});
+
+test("encerramento confirmado sem tags esperadas é informado como parcial sem renomear", async (t) => {
+  const f = fake(t, {
+    active: true,
+    after(c, state) {
+      if (c.uri === "/tickets/change-status") state.tickets[0].tags = [];
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizedTickets, 1);
+  assert.match(result.message, /tags não foram confirmadas/);
+  assert.deepEqual(f.state.queues, f.before.queues);
+});
+
+test("erro obrigatório residual é explicado em português sem retentativa automática", async (t) => {
+  const f = fake(t, {
+    active: true,
+    before(c) {
+      if (c.uri === "/tickets/change-status")
+        return Response.json({
+          id: c.id,
+          to: queue.ownerIdentity,
+          status: "failure",
+          reason: { description: "Tag is required to close this ticket by attendant" },
+        });
+    },
+  });
+  const result = await service.applyDeskQueue(await prepareForced());
+  assert.equal(result.status, "attention");
+  assert.equal(result.finalizedTickets, 0);
+  assert.match(result.message, /Desk exige uma tag válida/);
+  assert.equal(closeCalls(f).length, 1);
+});
+
+test("catálogo de tags é paginado por nome sem depender de ID ou dos contadores", async (t) => {
+  const f = fake(t);
+  f.state.tickets = [ticket("untagged", { tags: [] })];
+  f.state.activeTags = Array.from({ length: 105 }, (_, i) => ({
+    name: `Tag ${i}`,
+    closedTickets: i,
+    ticketsCount: i,
+  }));
+  const preview = await service.previewDeskQueue({ ...details(), forceFinalization: true });
+  assert.equal(preview.finalizationTags.length, 106);
+  assert(f.calls.some((c) => c.uri.startsWith("/tags/active?") && c.uri.includes("$skip=100")));
+  assert.equal(f.writes().length, 0);
 });

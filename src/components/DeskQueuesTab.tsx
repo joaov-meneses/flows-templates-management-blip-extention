@@ -47,6 +47,12 @@ export function DeskQueuesTab({
   const [operationId, setOperationId] = useState("");
   const [attempted, setAttempted] = useState(false);
   const [forceFinalization, setForceFinalization] = useState(false);
+  const [finalizationTag, setFinalizationTag] = useState("");
+  const [finalizationOptions, setFinalizationOptions] = useState<string[] | null>(null);
+  const [untaggedTicketCount, setUntaggedTicketCount] = useState(0);
+  const needsFinalizationTag = Boolean(
+    preview?.forceFinalization && preview.untaggedTicketCount && !preview.finalizationTag,
+  );
   const lock = useRef(false);
   const sequence = useRef(0);
   const selectedId = useRef(builderId);
@@ -142,6 +148,9 @@ export function DeskQueuesTab({
     setPreview(null);
     setAttempted(false);
     setForceFinalization(false);
+    setFinalizationTag("");
+    setFinalizationOptions(null);
+    setUntaggedTicketCount(0);
     setDraft({
       queue,
       action,
@@ -157,6 +166,7 @@ export function DeskQueuesTab({
         action: draft.action,
         name: draft.name,
         forceFinalization,
+        finalizationTag,
       });
       if (
         result.builderShortName !== builderId ||
@@ -166,9 +176,17 @@ export function DeskQueuesTab({
         !result.backup ||
         result.forceFinalization !== forceFinalization ||
         !Number.isInteger(result.activeTicketCount) ||
-        result.activeTicketCount < 0
+        result.activeTicketCount < 0 ||
+        !Number.isInteger(result.untaggedTicketCount) ||
+        result.untaggedTicketCount < 0 ||
+        result.untaggedTicketCount > result.activeTicketCount ||
+        result.finalizationTag !== finalizationTag ||
+        !Array.isArray(result.finalizationTags) ||
+        result.finalizationTags.some((tag) => typeof tag !== "string")
       )
         throw new Error("A prévia não confirmou a fila solicitada.");
+      setFinalizationOptions(result.finalizationTags);
+      setUntaggedTicketCount(result.untaggedTicketCount);
       setPreview(result);
       setOperationId(crypto.randomUUID());
       setAttempted(false);
@@ -186,7 +204,14 @@ export function DeskQueuesTab({
     );
   }
   async function apply() {
-    if (!preview || !builder || attempted || !start("Aguardando confirmação…")) return;
+    if (
+      !preview ||
+      !builder ||
+      attempted ||
+      needsFinalizationTag ||
+      !start("Aguardando confirmação…")
+    )
+      return;
     let reload = false;
     let successMessage = "";
     try {
@@ -199,7 +224,7 @@ export function DeskQueuesTab({
               ? "Finalizar atendimentos e renomear?"
               : "Renomear esta fila?"
             : "Duplicar esta fila?",
-        body: `Builder: ${builder.name} (${builderId})\nFila: ${preview.queue.name}\nNovo nome: ${preview.name}\n\n${preview.activeTicketCount ? `${preview.activeTicketCount} atendimento(s) ativo(s) desta fila serão finalizados antes de renomear. Isso não pode ser desfeito, mesmo se a renomeação falhar.\n\n` : ""}${preview.action === "rename" ? "A fila ficará temporariamente sem vínculos enquanto seus atendentes e regras são restaurados." : "Os mesmos atendentes e condições de atendimento serão associados à nova fila."}`,
+        body: `Builder: ${builder.name} (${builderId})\nFila: ${preview.queue.name}\nNovo nome: ${preview.name}\n\n${preview.activeTicketCount ? `${preview.activeTicketCount} atendimento(s) ativo(s) desta fila serão finalizados antes de renomear. Isso não pode ser desfeito, mesmo se a renomeação falhar.\n${preview.finalizationTag ? `Tag para atendimentos sem tag: ${preview.finalizationTag}. As tags existentes serão preservadas.\n` : "As tags existentes serão preservadas.\n"}\n` : ""}${preview.action === "rename" ? "A fila ficará temporariamente sem vínculos enquanto seus atendentes e regras são restaurados." : "Os mesmos atendentes e condições de atendimento serão associados à nova fila."}`,
         buttons: {
           cancel: "Cancelar",
           confirm: preview.activeTicketCount
@@ -226,6 +251,7 @@ export function DeskQueuesTab({
         queueId: preview.queue.id,
         name: preview.name,
         forceFinalization: preview.forceFinalization,
+        finalizationTag: preview.finalizationTag,
         revision: preview.revision,
         operationId,
       });
@@ -469,6 +495,9 @@ export function DeskQueuesTab({
                     disabled={busy || attempted}
                     onChange={(event) => {
                       setForceFinalization(event.target.checked);
+                      setFinalizationTag("");
+                      setFinalizationOptions(null);
+                      setUntaggedTicketCount(0);
                       setPreview(null);
                       setError("");
                     }}
@@ -480,6 +509,32 @@ export function DeskQueuesTab({
                     Forçar finalização
                     <small>Finaliza os atendimentos ativos desta fila antes de renomear.</small>
                   </span>
+                </label>
+              )}
+              {forceFinalization && untaggedTicketCount > 0 && finalizationOptions !== null && (
+                <label className="blip-native-field">
+                  Tag para atendimentos sem tag
+                  <select
+                    value={finalizationTag}
+                    disabled={busy || attempted}
+                    onChange={(event) => {
+                      setFinalizationTag(event.target.value);
+                      setPreview(null);
+                      setError("");
+                    }}
+                  >
+                    <option value="">Selecione uma tag</option>
+                    {finalizationOptions.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    {finalizationOptions.length
+                      ? `${untaggedTicketCount} atendimento(s) sem tag. A escolha será aplicada somente aos que continuarem sem tag; as classificações existentes serão preservadas. Depois, revise novamente.`
+                      : "Não há tags disponíveis. Cadastre uma tag no Desk e revise novamente."}
+                  </small>
                 </label>
               )}
               {preview?.forceFinalization && (
@@ -520,7 +575,7 @@ export function DeskQueuesTab({
               <Button variant="secondary" onClick={close} disabled={busy}>
                 Cancelar
               </Button>
-              {!preview ? (
+              {!preview || needsFinalizationTag ? (
                 <Button
                   disabled={busy || draft.name.trim().length < 3}
                   onClick={() => void review()}
