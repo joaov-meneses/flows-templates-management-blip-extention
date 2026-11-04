@@ -1,0 +1,125 @@
+.attendance-tabs {
+  margin-bottom: 20px;
+}
+.desk-bulk .desk-builder-selection {
+  margin-bottom: 16px;
+}
+.desk-bulk .bot-clone-selector {
+  width: 100%;
+}
+.bulk-toolbar,
+.bulk-actions {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.bulk-toolbar {
+  align-items: center;
+  margin: 16px 0;
+}
+.bulk-toolbar p,
+.bulk-help {
+  color: var(--blip-content-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.bulk-filters {
+  display: grid;
+  gap: 16px;
+  margin: 16px 0 24px;
+}
+.bulk-filters fieldset {
+  min-width: 0;
+  border: 1px solid var(--blip-border);
+  padding: 16px;
+  border-radius: 10px;
+}
+.bulk-filters legend {
+  color: var(--blip-content);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+.bulk-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.bulk-filter-grid input,
+.bulk-filter-grid select {
+  min-width: 0;
+  width: 100%;
+}
+.bulk-actions .blip-native-field {
+  min-width: 180px;
+}
+.bulk-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid var(--blip-border);
+  border-radius: 10px;
+}
+.bulk-progress small {
+  flex-basis: 100%;
+  color: var(--blip-content-soft);
+}
+.bulk-review {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+  border-top: 1px solid var(--blip-border);
+  padding-top: 20px;
+}
+.bulk-review h3,
+.bulk-review p {
+  margin: 0;
+}
+.bulk-review .table-scroll {
+  overflow: auto;
+  max-height: 500px;
+}
+.bulk-ticket-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.bulk-ticket-table th {
+  position: sticky;
+  top: 0;
+  background: var(--blip-surface-0);
+  z-index: 1;
+  font-weight: 600;
+}
+.bulk-ticket-table td,
+.bulk-ticket-table th {
+  padding: 12px;
+  border-bottom: 1px solid var(--blip-border);
+  vertical-align: top;
+}
+.bulk-ticket-table td small {
+  display: block;
+  color: var(--blip-content-soft);
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.bulk-result-counts {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .bulk-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .bulk-result-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bulk-ticket-table {
+    min-width: 720px;
+  }
+}

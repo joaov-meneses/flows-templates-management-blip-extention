@@ -280,11 +280,46 @@ function activeTagName(tag) {
   return name;
 }
 
-async function activeTicketsInQueue(ctx, queue) {
-  const filter = encodeURIComponent(
-    `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`,
+async function readActiveTickets(ctx, filter, checkCancelled = () => {}) {
+  const tickets = [];
+  const seen = new Set();
+  let declaredTotal;
+  for (let page = 0; page < 100; page++) {
+    checkCancelled();
+    const resource = await command(
+      ctx,
+      "get",
+      `/tickets?$filter=${encodeURIComponent(filter)}&$skip=${page * 100}&$take=100`,
+    );
+    if (!Array.isArray(resource?.items) || resource.items.length > 100)
+      throw new Error("A lista de atendimentos retornada pelo Desk é inválida.");
+    if (resource.total != null && (!Number.isInteger(resource.total) || resource.total < 0))
+      throw new Error("A contagem de atendimentos retornada pelo Desk é inválida.");
+    // This endpoint may report the page count as total. Continue through the next page.
+    if (resource.total > resource.items.length) declaredTotal = resource.total;
+    for (const ticket of resource.items) {
+      checkTicket(ctx, ticket);
+      if (ticket.closed || seen.has(ticket.id))
+        throw new Error("Os atendimentos mudaram durante a paginação. Atualize a consulta.");
+      seen.add(ticket.id);
+      tickets.push(ticket);
+    }
+    if (resource.items.length < 100) {
+      if (declaredTotal != null && tickets.length < declaredTotal)
+        throw new Error(
+          "A consulta de atendimentos ficou incompleta. Restrinja os filtros e tente novamente.",
+        );
+      return tickets;
+    }
+  }
+  throw new Error(
+    "A consulta excedeu 10000 atendimentos. Escolha uma fila para restringir a busca.",
   );
-  const tickets = await all(ctx, `/tickets?$filter=${filter}`);
+}
+
+async function activeTicketsInQueue(ctx, queue) {
+  const filter = `team eq '${queue.name.replaceAll("'", "''")}' and closed eq false`;
+  const tickets = await readActiveTickets(ctx, filter);
   for (const ticket of tickets) {
     checkTicket(ctx, ticket);
     ticketTags(ticket);
@@ -303,6 +338,52 @@ async function requireEmptyQueue(ctx, queue) {
     );
 }
 
+async function closeTicketChecked(ctx, ticket, finalizationTag) {
+  const existing = ticketTags(ticket);
+  const tags = existing.length ? existing : finalizationTag ? [finalizationTag] : [];
+  if (!tags.length)
+    throw new Error(
+      "Este atendimento está sem tag. Selecione uma tag de finalização e revise novamente.",
+    );
+  let writeError;
+  try {
+    await command(ctx, "set", "/tickets/change-status", TICKET, {
+      id: ticket.id,
+      status: "ClosedAttendant",
+      tags,
+    });
+  } catch (error) {
+    writeError = /tag is required/i.test(error.message)
+      ? new Error(
+          "O Desk exige uma tag válida para finalizar este atendimento. Confira as tags e revise novamente.",
+        )
+      : error;
+  }
+  let after;
+  try {
+    after = checkTicket(
+      ctx,
+      await command(ctx, "get", `/ticket/${encodeURIComponent(ticket.id)}`),
+      ticket.id,
+    );
+  } catch (error) {
+    error.uncertain = true;
+    throw error;
+  }
+  if (!after.closed || after.status !== "ClosedAttendant")
+    throw writeError || new Error("O Desk não confirmou o encerramento do atendimento.");
+  try {
+    if (!tags.every((tag) => ticketTags(after).includes(tag)))
+      throw new Error(
+        "O atendimento foi finalizado, mas suas tags não foram confirmadas. Confira o Desk antes de continuar.",
+      );
+  } catch (error) {
+    error.closedConfirmed = true;
+    throw error;
+  }
+  return after;
+}
+
 // Closures are irreversible. They are tracked separately from configuration recovery.
 async function finalizeReviewedTickets(ctx, plan, progress) {
   let finalizedTickets = 0;
@@ -317,43 +398,13 @@ async function finalizeReviewedTickets(ctx, plan, progress) {
           "Um atendimento mudou de fila. A finalização foi interrompida; revise novamente.",
         );
       if (current.closed) continue;
-      const existingTags = ticketTags(current);
-      const tags = existingTags.length
-        ? existingTags
-        : plan.finalizationTag
-          ? [plan.finalizationTag]
-          : [];
-      if (!tags.length)
-        throw new Error(
-          "Este atendimento está sem tag. Selecione uma tag de finalização e revise novamente.",
-        );
-      let writeError;
-      finalizationUncertain = true;
       try {
-        await command(ctx, "set", "/tickets/change-status", TICKET, {
-          id: reviewed.id,
-          status: "ClosedAttendant",
-          tags,
-        });
-      } catch (error) {
-        writeError = /tag is required/i.test(error.message)
-          ? new Error(
-              "O Desk exige uma tag válida para finalizar este atendimento. Confira as tags e revise novamente.",
-            )
-          : error;
-      }
-      // Even after a timeout, reconcile once by ID; never resend a close command.
-      const after = checkTicket(ctx, await command(ctx, "get", uri), reviewed.id);
-      if (after.closed && after.status === "ClosedAttendant") {
+        await closeTicketChecked(ctx, current, plan.finalizationTag);
         finalizedTickets++;
-        finalizationUncertain = false;
-        if (!tags.every((tag) => ticketTags(after).includes(tag)))
-          throw new Error(
-            "O atendimento foi finalizado, mas suas tags não foram confirmadas. Confira o Desk antes de continuar.",
-          );
-      } else {
-        finalizationUncertain = false;
-        throw writeError || new Error("O Desk não confirmou o encerramento do atendimento.");
+      } catch (error) {
+        if (error.closedConfirmed) finalizedTickets++;
+        finalizationUncertain = error.uncertain === true;
+        throw error;
       }
     }
     await requireEmptyQueue(ctx, plan.queue);
@@ -885,4 +936,21 @@ async function applyDeskQueue(params, onProgress) {
   }
 }
 
-module.exports = { DeskInputError, searchDeskQueues, previewDeskQueue, applyDeskQueue };
+module.exports = {
+  DeskInputError,
+  searchDeskQueues,
+  previewDeskQueue,
+  applyDeskQueue,
+  _desk: {
+    context,
+    command,
+    all,
+    revision,
+    locks,
+    checkTicket,
+    ticketTags,
+    activeTagName,
+    closeTicketChecked,
+    readActiveTickets,
+  },
+};

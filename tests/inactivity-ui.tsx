@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import CreateTemplatesApp from "../src/components/CreateTemplatesApp";
 import type { InactivityAnalysis } from "../src/types/inactivity";
+import type { BulkJob, BulkFilters, BulkTicket } from "../src/types/deskBulk";
 import { themeBootstrap } from "../src/lib/theme";
 import "../src/styles.css";
 
@@ -118,6 +119,195 @@ function deskFixture(path: string, body: Record<string, string> & { forceFinaliz
   });
 }
 
+const bulkJobs = new Map<string, { job: BulkJob; ready: BulkJob; polls: number }>();
+const bulkOperations = new Map<string, string>();
+const fixtureDate = (hours: number) => new Date(Date.now() - hours * 3600000).toISOString();
+function bulkFixture(path: string, body: Record<string, unknown>) {
+  const builderShortName = String(body.builderShortName);
+  if (path.endsWith("options"))
+    return Response.json({
+      builderShortName,
+      queues: [
+        { id: "fixture-sales", name: "Comercial" },
+        { id: "fixture-support", name: "Suporte Especializado" },
+        { id: "fixture-default", name: "Default" },
+      ],
+    });
+  if (path.endsWith("preview")) {
+    const f = body.filters as BulkFilters;
+    const samples: BulkTicket[] = [
+      {
+        id: "fixture-ticket-1",
+        sequentialId: 1042,
+        team: "Comercial",
+        status: "Waiting",
+        hasAttendant: false,
+        createdAt: fixtureDate(80),
+        ageHours: 80,
+        lastInputAt: fixtureDate(50),
+        lastInputChecked: true,
+        tags: [],
+      },
+      {
+        id: "fixture-ticket-2",
+        sequentialId: 1043,
+        team: "Comercial",
+        status: "Open",
+        hasAttendant: true,
+        createdAt: fixtureDate(30),
+        ageHours: 30,
+        lastInputAt: fixtureDate(2),
+        lastInputChecked: true,
+        tags: ["Venda"],
+      },
+      {
+        id: "fixture-ticket-3",
+        sequentialId: 1044,
+        team: "Suporte Especializado",
+        status: "Assigned",
+        hasAttendant: true,
+        createdAt: fixtureDate(10),
+        ageHours: 10,
+        lastInputAt: fixtureDate(1),
+        lastInputChecked: true,
+        tags: [],
+      },
+      {
+        id: "fixture-ticket-4",
+        sequentialId: 1045,
+        team: "Comercial",
+        status: "Waiting",
+        hasAttendant: false,
+        createdAt: fixtureDate(100),
+        ageHours: 100,
+        lastInputAt: fixtureDate(75),
+        lastInputChecked: true,
+        tags: [],
+      },
+    ];
+    const queue =
+      f.queueId === "fixture-sales"
+        ? "Comercial"
+        : f.queueId === "fixture-support"
+          ? "Suporte Especializado"
+          : f.queueId === "fixture-default"
+            ? "Default"
+            : null;
+    const selected = samples.filter(
+      (t) =>
+        (!queue || t.team === queue) &&
+        (f.status === "active" || t.status === f.status) &&
+        (f.assignment === "any" || t.hasAttendant === (f.assignment === "assigned")) &&
+        (!f.minimumAgeHours || t.ageHours >= f.minimumAgeHours) &&
+        (!f.createdFrom || t.createdAt >= f.createdFrom) &&
+        (!f.createdTo || t.createdAt <= f.createdTo) &&
+        (!f.lastInputFrom || t.lastInputAt! >= f.lastInputFrom) &&
+        (!f.lastInputTo || t.lastInputAt! <= f.lastInputTo) &&
+        (!f.minimumInactivityHours ||
+          Date.now() - Date.parse(t.lastInputAt!) >= f.minimumInactivityHours * 3600000),
+    );
+    const jobId = crypto.randomUUID();
+    const ready: BulkJob = {
+      jobId,
+      builderShortName,
+      kind: "preview",
+      status: "ready",
+      expiresAt: fixtureDate(-0.25),
+      progress: {
+        stage: "Prévia pronta. Nenhum atendimento foi finalizado.",
+        checked: samples.length,
+        total: samples.length,
+      },
+      preview: {
+        snapshotAt: fixtureDate(0),
+        filters: f,
+        limit: Number(body.limit),
+        candidateCount: samples.length,
+        checkedCount: samples.length,
+        excludedHistory: 0,
+        hasMore: false,
+        historyScanLimited: false,
+        finalizationTags: ["Encerramento administrativo", "Sem interesse"],
+        untaggedTicketCount: selected.filter((t) => !t.tags.length).length,
+        tickets: selected,
+      },
+    };
+    const job: BulkJob = {
+      ...ready,
+      status: "running",
+      preview: undefined,
+      progress: { stage: "Consultando atendimentos…", checked: 0, total: samples.length },
+    };
+    bulkJobs.set(jobId, { job, ready, polls: 0 });
+    return Response.json(job);
+  }
+  if (path.endsWith("finalize")) {
+    const review = bulkJobs.get(String(body.previewJobId))!.ready;
+    const tickets = review.preview!.tickets;
+    const jobId = crypto.randomUUID();
+    const ready: BulkJob = {
+      jobId,
+      builderShortName,
+      kind: "finalize",
+      status: "completed",
+      expiresAt: fixtureDate(-0.25),
+      progress: {
+        stage: "Lote concluído. Confira o resultado.",
+        checked: tickets.length,
+        total: tickets.length,
+      },
+      result: {
+        finalized: tickets.length,
+        skipped: 0,
+        failed: 0,
+        uncertain: 0,
+        remaining: 0,
+        items: tickets.map((t) => ({
+          id: t.id,
+          sequentialId: t.sequentialId,
+          team: t.team,
+          outcome: "finalized",
+        })),
+      },
+    };
+    const job: BulkJob = {
+      ...ready,
+      status: "running",
+      result: {
+        finalized: 0,
+        skipped: 0,
+        failed: 0,
+        uncertain: 0,
+        remaining: tickets.length,
+        items: [],
+      },
+      progress: { stage: "Finalizando lote fictício…", checked: 0, total: tickets.length },
+    };
+    bulkJobs.set(jobId, { job, ready, polls: 0 });
+    bulkOperations.set(String(body.operationId), jobId);
+    return Response.json(job);
+  }
+  const id = String(body.jobId || bulkOperations.get(String(body.operationId)));
+  const record = bulkJobs.get(id);
+  if (!record)
+    return Response.json(
+      { error: { message: "Operação fictícia não encontrada." } },
+      { status: 404 },
+    );
+  if (path.endsWith("cancel")) {
+    record.ready = {
+      ...record.job,
+      status: "cancelled",
+      error: "Operação interrompida pelo usuário.",
+    };
+    record.job = record.ready;
+    return Response.json(record.job);
+  }
+  record.polls++;
+  if (record.polls >= 2) record.job = record.ready;
+  return Response.json(record.job);
+}
+
 const drafts = new Map<string, InactivityAnalysis>();
 let version = 1;
 let keyChecks = 0;
@@ -144,6 +334,8 @@ function initialDraft(): InactivityAnalysis {
 }
 window.fetch = async (input, options) => {
   const path = String(input);
+  if (path.startsWith("/api/desk/tickets/"))
+    return bulkFixture(path, JSON.parse(String(options?.body || "{}")));
   if (path.startsWith("/api/desk/queues/"))
     return deskFixture(path, JSON.parse(String(options?.body || "{}")));
   let readSource = "";

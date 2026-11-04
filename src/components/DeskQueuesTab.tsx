@@ -288,10 +288,10 @@ export function DeskQueuesTab({
   }
 
   return (
-    <section className="ember-panel results-panel desk-queues" aria-label="Filas de atendimento">
+    <section className="ember-panel results-panel desk-queues" aria-label="Gerenciamento de filas">
       <div className="ember-panel-title results-title">
         <div>
-          <h2>Filas de atendimento</h2>
+          <h2>Gerenciamento de filas</h2>
           <p>Duplique ou renomeie filas preservando atendentes, regras e configurações.</p>
         </div>
         {embedded && builder && (

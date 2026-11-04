@@ -70,6 +70,14 @@ const {
   applyDeskQueue,
 } = require("./server/deskQueueService.cjs");
 
+const {
+  bulkOptions,
+  startBulkPreview,
+  startBulkFinalize,
+  bulkStatus,
+  cancelBulk,
+} = require("./server/deskBulkService.cjs");
+
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3000);
 const app = express();
 let ssrServerPromise;
@@ -90,6 +98,23 @@ for (const [route, handler] of [
   ["apply", applyDeskQueue],
 ]) {
   app.post(`/api/desk/queues/${route}`, async (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      res.json(await handler(req.body || {}));
+    } catch (error) {
+      next(error);
+    }
+  });
+}
+
+for (const [route, handler] of [
+  ["options", bulkOptions],
+  ["preview", startBulkPreview],
+  ["finalize", startBulkFinalize],
+  ["status", bulkStatus],
+  ["cancel", cancelBulk],
+]) {
+  app.post(`/api/desk/tickets/${route}`, async (req, res, next) => {
     res.set("Cache-Control", "no-store");
     try {
       res.json(await handler(req.body || {}));

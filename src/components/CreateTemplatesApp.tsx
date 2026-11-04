@@ -72,7 +72,7 @@ import { FlowTable } from "./FlowTable";
 import { InactivityTab } from "./InactivityTab";
 import { BulkPublicationTab } from "./BulkPublicationTab";
 import { BuilderDownloadsTab } from "./BuilderDownloadsTab";
-import { DeskQueuesTab } from "./DeskQueuesTab";
+import { AttendanceTab } from "./AttendanceTab";
 import { BotDetailsModal } from "./BotDetailsModal";
 import "../styles/bot-manager.css";
 import { OperationProgress } from "./ui/OperationProgress";
@@ -177,7 +177,7 @@ const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
   downloads: "Baixar Fluxos",
   templates: "Templates",
   flows: "Flows",
-  desk: "Filas de atendimento",
+  desk: "Atendimento",
   bots: "Clone Bots",
   plugins: "Plugins Manager",
   inactivity: "Inatividade",
@@ -1442,8 +1442,8 @@ export default function CreateTemplatesApp() {
           }
         : visibleActiveView === "desk"
           ? {
-              title: "Filas de atendimento",
-              description: "Duplicação e renomeação de filas do Desk por Builder",
+              title: "Atendimento",
+              description: "Filas e finalização em massa de atendimentos por Builder",
             }
           : visibleActiveView === "plugins"
             ? {
@@ -4639,7 +4639,7 @@ export default function CreateTemplatesApp() {
             aria-current={visibleActiveView === "desk" ? "page" : undefined}
           >
             <Headset size={18} aria-hidden="true" />
-            Filas de atendimento
+            Atendimento
           </button>
           <button
             className={visibleActiveView === "plugins" ? "active" : ""}
@@ -5024,7 +5024,7 @@ export default function CreateTemplatesApp() {
           </div>
         )}
         <div hidden={visibleActiveView !== "desk"}>
-          <DeskQueuesTab
+          <AttendanceTab
             application={deskApplication}
             onSelectBuilder={() => {
               setError("");
@@ -6619,7 +6619,7 @@ export default function CreateTemplatesApp() {
                     <option value="routers">Bots</option>
                     <option value="templates">Templates</option>
                     <option value="flows">Flows</option>
-                    <option value="desk">Filas de atendimento</option>
+                    <option value="desk">Atendimento</option>
                     <option value="bots">Clone Bots</option>
                     <option value="plugins">Plugins Manager</option>
                   </select>
@@ -8126,7 +8126,7 @@ export default function CreateTemplatesApp() {
                       : botPicker === "inactivity"
                         ? "Selecione os Builders do contrato. Os rascunhos serão analisados após confirmar."
                         : botPicker === "desk"
-                          ? "Escolha o Builder para consultar e gerenciar suas filas de atendimento."
+                          ? "Escolha o Builder para consultar e gerenciar o atendimento."
                           : !pickerIsSingle
                             ? `Selecione um ou mais ${pickerIsBuilder ? "builders" : "routers"} de destino do contrato atual.`
                             : `Selecione um ${pickerIsBuilder ? "builder" : "router"} do contrato atual ao qual você tem acesso.`}
