@@ -91,11 +91,11 @@ function fake(t, options = {}) {
     } else {
       assert.equal(c.method, "set");
       assert.equal(path, "/tickets/change-status");
-      assert.equal(c.resource.status, "ClosedAttendant");
+      assert.equal(c.resource.status, "ClosedClient");
       assert(c.resource.tags.length);
       state.writes.push(c);
       const current = state.tickets.find((t) => t.id === c.resource.id);
-      Object.assign(current, { closed: true, status: "ClosedAttendant", tags: c.resource.tags });
+      Object.assign(current, { closed: false, status: "ClosedClient", tags: c.resource.tags });
     }
     await options.after?.(c, state);
     return Response.json({
@@ -216,6 +216,7 @@ test("datas inválidas, intervalos invertidos, situação encerrada e lote exces
     { createdFrom: "2026-01-01" },
     { createdFrom: ago(1), createdTo: ago(2) },
     { status: "ClosedAttendant" },
+    { status: "ClosedClient" },
     { minimumAgeHours: -1 },
     { assignment: "bad" },
     { queueId: 0 },
@@ -245,6 +246,8 @@ test("novos tickets não entram no lote já revisado e tags existentes são pres
   assert.equal(result.result.finalized, 1);
   assert.equal(f.state.tickets[1].closed, false);
   assert.deepEqual(f.state.writes[0].resource.tags, ["Primeira", "Segunda"]);
+  const nextReview = await preview();
+  assert.deepEqual(nextReview.preview.tickets.map((item) => item.id), ["new"]);
 });
 test("tickets sem tag exigem escolha, usando-a somente onde necessário", async (t) => {
   const f = fake(t);

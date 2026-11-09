@@ -426,7 +426,7 @@ function startBulkFinalize(params) {
             }
             if (!item.outcome) {
               cancelled(job);
-              await closeTicketChecked(ctx, current, tag);
+              await closeTicketChecked(ctx, current, tag, "ClosedClient");
               item.outcome = "finalized";
               job.result.finalized++;
             }

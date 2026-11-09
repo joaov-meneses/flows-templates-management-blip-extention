@@ -338,7 +338,7 @@ async function requireEmptyQueue(ctx, queue) {
     );
 }
 
-async function closeTicketChecked(ctx, ticket, finalizationTag) {
+async function closeTicketChecked(ctx, ticket, finalizationTag, status = "ClosedAttendant") {
   const existing = ticketTags(ticket);
   const tags = existing.length ? existing : finalizationTag ? [finalizationTag] : [];
   if (!tags.length)
@@ -349,7 +349,7 @@ async function closeTicketChecked(ctx, ticket, finalizationTag) {
   try {
     await command(ctx, "set", "/tickets/change-status", TICKET, {
       id: ticket.id,
-      status: "ClosedAttendant",
+      status,
       tags,
     });
   } catch (error) {
@@ -370,7 +370,8 @@ async function closeTicketChecked(ctx, ticket, finalizationTag) {
     error.uncertain = true;
     throw error;
   }
-  if (!after.closed || after.status !== "ClosedAttendant")
+  // A ticket closed by the client can still appear in the attendant's list.
+  if (after.status !== status || (status === "ClosedAttendant" && !after.closed))
     throw writeError || new Error("O Desk não confirmou o encerramento do atendimento.");
   try {
     if (!tags.every((tag) => ticketTags(after).includes(tag)))
