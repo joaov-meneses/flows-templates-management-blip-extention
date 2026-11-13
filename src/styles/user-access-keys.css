@@ -1,0 +1,109 @@
+.user-keys {
+  min-width: 0;
+}
+
+.user-keys-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-keys-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.user-keys-stats > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--blip-border-soft);
+  border-radius: var(--blip-radius-sm);
+  background: var(--blip-surface-1);
+}
+
+.user-keys-stats dt {
+  color: var(--blip-content-soft);
+  font-size: 0.8rem;
+}
+
+.user-keys-stats dd {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.user-keys-filters {
+  display: grid;
+  grid-template-columns: minmax(160px, 2fr) repeat(3, minmax(125px, 1fr)) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.user-keys-filters > button {
+  min-height: 42px;
+}
+
+.user-keys .ember-table .ember-status {
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.user-key-requirer {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-keys-modal {
+  width: min(540px, 100%);
+}
+
+.user-keys-modal .ember-modal-footer {
+  justify-content: flex-end;
+}
+
+.user-keys-checkbox,
+.user-keys-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-keys-secret {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.user-keys-secret label {
+  flex: 1 1 190px;
+  min-width: 0;
+}
+
+.user-keys-secret input {
+  font-family: monospace;
+}
+
+@media (max-width: 960px) {
+  .user-keys-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+
+  .user-keys-filters > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 540px) {
+  .user-keys-filters {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .user-keys-filters > :nth-child(-n + 3) {
+    grid-column: 1 / -1;
+  }
+}

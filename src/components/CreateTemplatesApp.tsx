@@ -74,6 +74,8 @@ import { BulkPublicationTab } from "./BulkPublicationTab";
 import { BuilderDownloadsTab } from "./BuilderDownloadsTab";
 import { AttendanceTab } from "./AttendanceTab";
 import { BotDetailsModal } from "./BotDetailsModal";
+import { UserAccessKeysTab } from "./UserAccessKeysTab";
+import { copyText } from "../lib/clipboard";
 import "../styles/bot-manager.css";
 import { OperationProgress } from "./ui/OperationProgress";
 import { postJson, postJsonWithProgress, type OperationProgress as Progress } from "../lib/api";
@@ -181,6 +183,7 @@ const ACTIVITY_VIEW_LABELS: Record<ActiveView, string> = {
   bots: "Clone Bots",
   plugins: "Plugins Manager",
   inactivity: "Inatividade",
+  accessKeys: "Access Key",
   logs: "Logs",
 };
 const DEFAULT_BOT_CLONE_OPTIONS: BotCloneOptions = {
@@ -383,37 +386,6 @@ function buildRouterUrl(application: Pick<PortalApplicationAccount, "shortName" 
   if (!tenantId || !shortName || !/^[a-z0-9-]+$/.test(tenantId)) return "";
 
   return `https://${tenantId}.blip.ai/application/detail/${encodeURIComponent(shortName)}/home`;
-}
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Iframes can expose Clipboard API while blocking it by permissions policy.
-    }
-  }
-
-  const ta = document.createElement("textarea");
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
-
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.top = "0";
-  ta.style.left = "-9999px";
-  ta.style.opacity = "0";
-  ta.style.pointerEvents = "none";
-  document.body.appendChild(ta);
-  ta.focus({ preventScroll: true });
-  ta.select();
-  const copied = document.execCommand("copy");
-  document.body.removeChild(ta);
-  window.scrollTo(scrollX, scrollY);
-
-  if (!copied) {
-    throw new Error("Não foi possível copiar para a área de transferência.");
-  }
 }
 function createCommandId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -1450,7 +1422,12 @@ export default function CreateTemplatesApp() {
                 title: "Plugins Manager",
                 description: "Gerenciamento e cópia de plugins entre routers BLiP",
               }
-            : { title: "Logs", description: "Requisições e resultados desta sessão da extensão" };
+            : visibleActiveView === "accessKeys"
+              ? {
+                  title: "Access Key",
+                  description: "Gerencie as chaves de acesso da sua conta Blip",
+                }
+              : { title: "Logs", description: "Requisições e resultados desta sessão da extensão" };
 
   async function getContractApplicationList(tenantId: string) {
     let roleId: string | undefined;
@@ -4652,6 +4629,19 @@ export default function CreateTemplatesApp() {
             Plugins Manager
           </button>
           <button
+            className={visibleActiveView === "accessKeys" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setError("");
+              setActiveView("accessKeys");
+            }}
+            disabled={isPublishingBuilders}
+            aria-current={visibleActiveView === "accessKeys" ? "page" : undefined}
+          >
+            <KeyRound size={18} aria-hidden="true" />
+            Access Key
+          </button>
+          <button
             className={visibleActiveView === "logs" ? "active" : ""}
             type="button"
             onClick={() => {
@@ -4676,41 +4666,48 @@ export default function CreateTemplatesApp() {
             </div>
           </div>
           <div className="ember-header-actions">
-            {!isManagerView && visibleActiveView !== "logs" && visibleActiveView !== "desk" && (
-              <div className="router-summary">
-                <span className="router-summary-label">Router de origem</span>
-                <div className="router-summary-main">
-                  {hasSourceRouterSelection() && (
-                    <span className="router-summary-avatar" aria-hidden="true">
-                      {sourceRouterApplication?.imageUri ? (
-                        <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
-                      ) : (
-                        <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
-                      )}
+            {!isManagerView &&
+              visibleActiveView !== "logs" &&
+              visibleActiveView !== "desk" &&
+              visibleActiveView !== "accessKeys" && (
+                <div className="router-summary">
+                  <span className="router-summary-label">Router de origem</span>
+                  <div className="router-summary-main">
+                    {hasSourceRouterSelection() && (
+                      <span className="router-summary-avatar" aria-hidden="true">
+                        {sourceRouterApplication?.imageUri ? (
+                          <img src={sourceRouterApplication.imageUri} alt="" loading="lazy" />
+                        ) : (
+                          <span>{sourceRouterDisplayName.slice(0, 1).toUpperCase()}</span>
+                        )}
+                      </span>
+                    )}
+                    <span className="router-summary-copy">
+                      <strong>{sourceRouterDisplayName}</strong>
+                      <span>{sourceRouterDisplayId}</span>
                     </span>
+                  </div>
+                  {hasSourceRouterSelection() ? (
+                    <button
+                      className="router-summary-action icon-action"
+                      type="button"
+                      aria-label="Editar router de origem"
+                      title="Editar router de origem"
+                      onClick={openSourceModal}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <button
+                      className="router-summary-action"
+                      type="button"
+                      onClick={openSourceModal}
+                    >
+                      Selecionar
+                    </button>
                   )}
-                  <span className="router-summary-copy">
-                    <strong>{sourceRouterDisplayName}</strong>
-                    <span>{sourceRouterDisplayId}</span>
-                  </span>
                 </div>
-                {hasSourceRouterSelection() ? (
-                  <button
-                    className="router-summary-action icon-action"
-                    type="button"
-                    aria-label="Editar router de origem"
-                    title="Editar router de origem"
-                    onClick={openSourceModal}
-                  >
-                    <Pencil size={14} aria-hidden="true" />
-                  </button>
-                ) : (
-                  <button className="router-summary-action" type="button" onClick={openSourceModal}>
-                    Selecionar
-                  </button>
-                )}
-              </div>
-            )}
+              )}
 
             <button
               className="theme-toggle-button"
@@ -5081,7 +5078,10 @@ export default function CreateTemplatesApp() {
             }}
           />
         </div>
+        {visibleActiveView === "accessKeys" && <UserAccessKeysTab embedded={isEmbedded} />}
+
         {visibleActiveView === "desk" ||
+        visibleActiveView === "accessKeys" ||
         visibleActiveView === "inactivity" ||
         visibleActiveView === "downloads" ? null : visibleActiveView === "routers" ? (
           <section

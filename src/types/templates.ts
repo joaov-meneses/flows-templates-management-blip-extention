@@ -7,6 +7,7 @@ export type ActiveView =
   | "plugins"
   | "downloads"
   | "inactivity"
+  | "accessKeys"
   | "logs";
 export type RouterModal = "source" | "targets" | null;
 export type SortDirection = "asc" | "desc";

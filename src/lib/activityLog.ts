@@ -7,6 +7,7 @@ export type ActivityView =
   | "plugins"
   | "downloads"
   | "inactivity"
+  | "accessKeys"
   | "logs";
 
 export type ActivityEntry = {

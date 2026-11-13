@@ -220,3 +220,60 @@ export function sendBlipCommand(command: unknown, options: BlipCommandOptions = 
     { responseTimeout: options.responseTimeout ?? timeout },
   );
 }
+
+export async function sendSensitiveBlipCommand(command: unknown) {
+  if (!canUseIframeProxy()) throw new Error("Abra a extensão dentro do Portal Blip.");
+
+  const origin = window.location.ancestorOrigins?.[0] || document.referrer;
+  if (!origin) throw new Error("O navegador não informou a origem do Portal Blip.");
+  const parentUrl = new URL(origin);
+  const isBlipPortal = parentUrl.protocol === "https:" && parentUrl.hostname.endsWith(".blip.ai");
+  const isLocalPreview =
+    ["localhost", "127.0.0.1"].includes(parentUrl.hostname) &&
+    parentUrl.hostname === location.hostname;
+  if (!isBlipPortal && !isLocalPreview) throw new Error("Origem do Portal Blip inválida.");
+
+  const portalOrigin = parentUrl.origin;
+  const parent = window.parent;
+  const trackingProperties = { id: crypto.randomUUID() };
+  const timeout = 15000;
+  return new Promise<unknown>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Tempo esgotado aguardando o Portal Blip."));
+    }, timeout);
+
+    function cleanup() {
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+    }
+
+    function onMessage(event: MessageEvent) {
+      if (event.source !== parent || event.origin !== portalOrigin) return;
+      const data = event.data;
+      if (!data || data.trackingProperties?.id !== trackingProperties.id) return;
+      if (!("response" in data) && !("error" in data)) return;
+      cleanup();
+      if ("error" in data) reject(data.error);
+      else resolve(data.response);
+    }
+
+    window.addEventListener("message", onMessage);
+    try {
+      parent.postMessage(
+        {
+          trackingProperties,
+          message: {
+            action: `blipEvent:${BLIP_ACTIONS.SEND_COMMAND}`,
+            caller: window.name,
+            content: { command, destination: "BlipService", timeout },
+          },
+        },
+        portalOrigin,
+      );
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
